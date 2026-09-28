@@ -8,7 +8,7 @@ const WALL_H = 2.7, EYE = 1.55, LMS = 4;
 const LMW = MAP_W * LMS, LMH = MAP_H * LMS;
 const SRGB = THREE.SRGBColorSpace;
 
-let renderer, scene, camera, spot, viewFlash, lensMat, placeGhost;
+let renderer, scene, camera, spot, viewFlash, lensMat, placeGhost, strongRing;
 const uni = { uLM: { value: null }, uLMSize: { value: new THREE.Vector2(MAP_W, MAP_H) }, uAmb: { value: 0.012 } };
 const lmBytes = new Uint8Array(LMW * LMH * 4);
 const lmAcc = new Float32Array(LMW * LMH * 3);
@@ -1638,6 +1638,151 @@ function syncParticles() {
 }
 
 // ====================================================================
+// 武器：左手拿的武器、飛出去的彈珠和鞭炮、被敲暈的星星
+// ====================================================================
+let viewWeapon, sprayGlow;
+const weaponModels = {};
+const wmCache = new Map();
+function ownWM(c, e) {
+  let m = wmCache.get(c);
+  if (!m) {
+    const col = new THREE.Color(c);
+    m = patchLM(new THREE.MeshLambertMaterial({ color: col, emissive: col.clone().multiplyScalar(0.14) }));
+    wmCache.set(c, m);
+  }
+  return m;
+}
+function buildWeapons() {
+  viewWeapon = new THREE.Group();
+  viewWeapon.scale.setScalar(0.62);
+  camera.add(viewWeapon);
+  // 武器材質帶一點點自發光，黑暗中也看得到手上拿著什麼
+  const lm = (c, e = '#000000') => ownWM(c, e);
+  const add = (id, g) => {
+    g.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+    weaponModels[id] = g; viewWeapon.add(g);
+  };
+  const flat = (m, x, y, z) => { m.rotation.x = Math.PI / 2; m.position.set(x, y, z); return m; };
+  // 🍳 平底鍋：木頭把手＋黑色鍋子
+  let g = new THREE.Group();
+  box(g, -0.008, 0.008, -0.02, 0.1, -0.006, 0.006, lm('#6a4a30'));
+  flat(cyl(g, 0.07, 0.066, 0.012, 0, 0, 0, lm('#7a7a86'), 20), 0, 0.165, 0);
+  flat(cyl(g, 0.062, 0.062, 0.004, 0, 0, 0, lm('#3a3a44'), 20), 0, 0.165, 0.0065);
+  add('pan', g);
+  // 🎯 彈弓：Y 字形的樹枝＋紅色橡皮筋
+  g = new THREE.Group();
+  const wood = lm('#8a5a2b');
+  cyl(g, 0.009, 0.01, 0.08, 0, -0.03, 0, wood, 8);
+  for (const sd of [-1, 1]) {
+    const pr = cyl(g, 0.007, 0.008, 0.06, 0, 0, 0, wood, 8);
+    pr.position.set(sd * 0.014, 0.075, 0); pr.rotation.z = -sd * 0.5;
+  }
+  box(g, -0.03, 0.03, 0.098, 0.104, -0.003, 0.003, lm('#c0392b'));
+  box(g, -0.01, 0.01, 0.094, 0.108, 0.002, 0.012, lm('#5a3a22'));
+  add('slingshot', g);
+  // 🔫 聖水槍：藍色水槍＋透明水箱＋金色槍口
+  g = new THREE.Group();
+  box(g, -0.016, 0.016, 0.02, 0.058, -0.14, 0.02, lm('#2f8fe0'));
+  box(g, -0.013, 0.013, -0.045, 0.028, -0.005, 0.024, lm('#1f5fa8'));
+  sph(g, 0.026, 0, 0.078, -0.05, lm('#bfe6ff'), 1, 0.8, 1.3, 12);
+  flat(cyl(g, 0.007, 0.009, 0.03, 0, 0, 0, lm('#ffd166'), 8), 0, 0.04, -0.155);
+  sprayGlow = ownSprite(glowTex, 0x8fd0ff); sprayGlow.position.set(0, 0.04, -0.18); sprayGlow.scale.setScalar(0.07); g.add(sprayGlow);
+  add('watergun', g);
+  // 🧂 鹽巴罐
+  g = new THREE.Group();
+  cyl(g, 0.026, 0.028, 0.08, 0, -0.02, 0, lm('#f2f2f2'), 14);
+  cyl(g, 0.027, 0.027, 0.022, 0, 0.06, 0, lm('#aeb4bd'), 14);
+  box(g, -0.02, 0.02, 0.01, 0.035, 0.022, 0.03, lm('#3a78c2'));
+  add('salt', g);
+  // 🧨 鞭炮：三根紅色炮竹綁在一起
+  g = new THREE.Group();
+  for (const [x, z] of [[-0.013, 0], [0.013, 0], [0, -0.012]]) cyl(g, 0.011, 0.011, 0.085, x, -0.02, z, lm('#d62828'), 10);
+  cyl(g, 0.024, 0.024, 0.012, 0, 0.02, -0.004, lm('#e8b53a'), 12);
+  cyl(g, 0.002, 0.002, 0.035, 0, 0.065, -0.004, lm('#3a2a1a'), 5);
+  add('firecracker', g);
+}
+function updateViewWeapon() {
+  const it = mode !== 'title' && G.selId && ITEMS[G.selId];
+  const id = it && it.kind === 'weapon' ? G.selId : null;
+  viewWeapon.visible = !!id;
+  for (const k in weaponModels) weaponModels[k].visible = k === id;
+  if (!id) return;
+  const sw = G.swingId === id ? G.swingT : 0, ph = sw > 0 ? Math.sin((1 - sw) * Math.PI) : 0;
+  const bx = -0.25 - Math.cos(bobPh * 0.5) * 0.006 * bobAmt, by = -0.165 + Math.abs(Math.sin(bobPh * 0.5)) * 0.008 * bobAmt;
+  const m = weaponModels[id];
+  viewWeapon.position.set(bx, by, -0.36);
+  viewWeapon.rotation.set(0, 0, 0);
+  m.position.set(0, 0, 0);
+  if (id === 'pan') {
+    m.rotation.set(-0.75 - ph * 0.6, 0.3, -0.2 - ph * 1.3);
+    m.position.set(ph * 0.2, ph * 0.08, -ph * 0.12);
+  } else if (id === 'slingshot') {
+    m.rotation.set(-0.15, 0.2, 0.15);
+    m.position.set(0.02, 0.02, ph * 0.05);
+  } else if (id === 'watergun') {
+    const on = G.spray > 0;
+    m.rotation.set(0.05, -0.18, 0);
+    m.position.set(0.02 + (on ? (Math.random() - 0.5) * 0.004 : 0), 0.02, on ? 0.012 : 0);
+    sprayGlow.visible = on;
+  } else {
+    m.rotation.set(-0.2 - ph * 0.8, 0.3, 0.2 + ph * 0.5);
+    m.position.set(0.02 + ph * 0.06, 0.02 + ph * 0.1, -ph * 0.14);
+  }
+}
+const shotMap = new Map(), bombMap = new Map();
+function syncProjectiles(t) {
+  let seen = new Set();
+  for (const sh of G.shots || []) {
+    seen.add(sh);
+    let g = shotMap.get(sh);
+    if (!g) {
+      g = new THREE.Group();
+      sph(g, 0.035, 0, 0, 0, lm('#7fc8f8'), 1, 1, 1, 10).castShadow = false;
+      const gl = ownSprite(glowTex, 0x9fd8ff); gl.scale.setScalar(0.16); g.add(gl);
+      scene.add(g); shotMap.set(sh, g);
+    }
+    g.position.set(sh.x, sh.h, sh.y);
+  }
+  for (const [sh, g] of shotMap) if (!seen.has(sh)) { disposeGroup(g); shotMap.delete(sh); }
+  seen = new Set();
+  for (const b of G.bombs || []) {
+    seen.add(b);
+    let r = bombMap.get(b);
+    if (!r) {
+      const g = new THREE.Group();
+      cyl(g, 0.02, 0.02, 0.1, 0, -0.05, 0, lm('#d62828'), 10).castShadow = false;
+      const spark = ownSprite(glowTex, 0xffc060); spark.position.y = 0.065; g.add(spark);
+      scene.add(g); r = { g, spark }; bombMap.set(b, r);
+    }
+    r.g.position.set(b.x, b.h + 0.02, b.y);
+    r.g.rotation.set(0, b.spin * 0.3, Math.PI / 2 + (b.h > 0.07 ? b.spin : 0));
+    const fast = b.fuse < 0.4;
+    r.spark.scale.setScalar((fast ? 0.16 : 0.1) + Math.random() * 0.08);
+  }
+  for (const [b, r] of bombMap) if (!seen.has(b)) { disposeGroup(r.g); bombMap.delete(b); }
+}
+const stunMap = new Map();
+function syncStun(t) {
+  const seen = new Set();
+  if (mode !== 'title') for (const e of G.enemies) {
+    if (!(e.stunT > 0) || e.dead) continue;
+    seen.add(e);
+    let g = stunMap.get(e);
+    if (!g) {
+      g = new THREE.Group();
+      for (let i = 0; i < 3; i++) { const st = ownSprite(starShapeTex, 0xffe066); st.scale.setScalar(0.17); g.add(st); }
+      scene.add(g); stunMap.set(e, g);
+    }
+    g.position.set(e.x, barH(e) - 0.32, e.y);
+    g.children.forEach((st, i) => {
+      const a = t * 5 + i * Math.PI * 2 / 3;
+      st.position.set(Math.cos(a) * 0.27, Math.sin(t * 7 + i) * 0.03, Math.sin(a) * 0.27);
+    });
+  }
+  for (const [e, g] of stunMap) if (!seen.has(e)) { disposeGroup(g); stunMap.delete(e); }
+}
+
+// ====================================================================
 // 手電筒、放置預覽、鏡頭
 // ====================================================================
 function buildFlashlight() {
@@ -1659,6 +1804,8 @@ function buildFlashlight() {
   const head = cyl(viewFlash, 0.022, 0.016, 0.035, 0, -0.0175, 0, lm('#3a3a40'), 12);
   head.rotation.x = Math.PI / 2; head.position.set(0, 0, -0.055);
   head.castShadow = false;
+  strongRing = cyl(viewFlash, 0.025, 0.025, 0.014, 0, 0, 0, lm('#e0b43a'), 12);
+  strongRing.rotation.x = Math.PI / 2; strongRing.position.set(0, 0, -0.05); strongRing.castShadow = false;
   lensMat = ownBasic({ color: 0x333333 });
   const lens = new THREE.Mesh(geo('lens', () => new THREE.CircleGeometry(0.021, 14)), lensMat);
   lens.position.z = -0.0735; lens.rotation.y = Math.PI;
@@ -1693,7 +1840,10 @@ function updateCamera(dt, t) {
   const on = mode !== 'title' && flashOn();
   let k = on ? 1 : 0;
   if (on && G.p.bat < 15 && Math.random() < 0.15) k = 0.3;
-  spot.intensity = 3.2 * k;
+  const strong = mode !== 'title' && strongFlash(); // 強力手電筒：更亮、照更遠
+  spot.intensity = 3.2 * k * (strong ? 1.3 : 1);
+  spot.distance = flRange() + 1.5;
+  strongRing.visible = strong;
   lensMat.color.set(on ? 0xfff6dd : 0x333333);
 }
 function updatePlaceGhost() {
@@ -1735,6 +1885,8 @@ function render(dt) {
   syncAngels(t);
   syncExtras(t);
   syncFireballs(t);
+  syncProjectiles(t);
+  syncStun(t);
   syncHpBars();
   syncGhosts();
   syncParticles();
@@ -1742,6 +1894,7 @@ function render(dt) {
   updateLightmap(dark);
   updateAtmosphere(dark);
   updateCamera(dt, t);
+  updateViewWeapon();
   updatePlaceGhost();
   renderer.render(scene, camera);
 }
@@ -1784,6 +1937,7 @@ function init() {
   buildHouse();
   buildFurniture();
   buildFlashlight();
+  buildWeapons();
   buildExtras();
   glowPts = makePoints(0.07, THREE.AdditiveBlending);
   smokePts = makePoints(0.3, THREE.NormalBlending);

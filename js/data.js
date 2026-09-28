@@ -142,6 +142,18 @@ const ITEMS = {
   canned:   { name: '罐頭',   kind: 'food', icon: '🥫', hunger: 45, desc: '飽食 +45' },
   noodles:  { name: '泡麵',   kind: 'food', icon: '🍜', hunger: 35, san: 5, desc: '飽食 +35、理智 +5' },
   cocoa:    { name: '熱可可', kind: 'food', icon: '☕', hunger: 10, san: 30, desc: '理智 +30、飽食 +10' },
+  chocolate: { name: '巧克力', kind: 'food', icon: '🍫', hunger: 10, san: 20, desc: '理智 +20、飽食 +10' },
+  milk:     { name: '熱牛奶', kind: 'food', icon: '🥛', hunger: 20, san: 15, desc: '理智 +15、飽食 +20' },
+  // 武器
+  pan:        { name: '平底鍋', kind: 'weapon', icon: '🍳', desc: '敲前面的怪物，扣血又會把牠敲暈。' },
+  slingshot:  { name: '彈弓',   kind: 'weapon', icon: '🎯', desc: '發射彈珠打遠處的怪物（需要彈珠）。' },
+  salt:       { name: '鹽巴',   kind: 'weapon', icon: '🧂', desc: '撒一圈鹽，身邊的怪物都會扣血、被推開。' },
+  watergun:   { name: '聖水槍', kind: 'weapon', icon: '🔫', desc: '噴出聖水，前面的怪物會一直扣血（需要聖水）。' },
+  firecracker:{ name: '鞭炮',   kind: 'weapon', icon: '🧨', desc: '丟出去 1 秒後爆炸，附近的怪物都扣很多血。' },
+  marble:     { name: '彈珠',   kind: 'ammo',   icon: '🔘', desc: '彈弓的子彈。選彈弓按 Q 發射。' },
+  holywater:  { name: '聖水',   kind: 'ammo',   icon: '💧', desc: '聖水槍的水，一瓶噴一次。選聖水槍按 Q 噴。' },
+  strongflash:{ name: '強力手電筒', kind: 'upgrade', icon: '💪', desc: '撿到就自動換上：手電筒打怪物的傷害變兩倍、照得更遠。' },
+  amulet:     { name: '護身符', kind: 'charm',  icon: '📿', desc: '帶在身上就有效：被怪物抓到時只扣一半的血。' },
   bandage:  { name: '繃帶',   kind: 'food', icon: '🩹', hp: 25, desc: '生命 +25' },
   medkit:   { name: '急救箱', kind: 'food', icon: '💊', hp: 60, desc: '生命 +60' },
 };
@@ -151,18 +163,26 @@ for (let t = 1; t <= MAX_TIER; t++) {
 ITEMS.key = { name: '鑰匙', kind: 'key', icon: '🗝️', desc: '走到上鎖的寶箱前按 E 就能打開。' };
 ITEMS.coin = { name: '硬幣', kind: 'coin', icon: '🪙', desc: '可以跟神秘商人買東西，或投扭蛋機。' };
 const ITEM_ORDER = [
+  'pan', 'slingshot', 'watergun', 'firecracker', 'salt', 'marble', 'holywater', 'strongflash', 'amulet',
   'bulb' + SLIME_TIER, 'bulb' + ANGEL_TIER,
   ...Array.from({ length: NORMAL_MAX }, (_, i) => 'bulb' + (NORMAL_MAX - i)),
   'key', 'lamp_chand', 'lamp_floor', 'lamp_desk', 'battery', 'candle',
-  'cocoa', 'canned', 'noodles', 'snack', 'medkit', 'bandage',
+  'cocoa', 'chocolate', 'milk', 'canned', 'noodles', 'snack', 'medkit', 'bandage',
 ];
 
 // 物資表（權重）
 const LOOT = {
-  general:  { bulb: 4, battery: 2.5, candle: 2, snack: 2, lamp_desk: 1.2, lamp_floor: 0.5, noodles: 1, coin: 3, key: 0.25 },
-  food:     { snack: 5, canned: 3, noodles: 3, cocoa: 2, coin: 1 },
-  medicine: { bandage: 4, medkit: 1, cocoa: 1.5, battery: 1, coin: 1 },
-  tool:     { bulb: 4, battery: 3, lamp_floor: 1.2, candle: 1, lamp_desk: 1, coin: 2, key: 0.35 },
-  antique:  { bulb: 5, lamp_chand: 1, lamp_floor: 1.5, candle: 1, medkit: 0.8, coin: 3, key: 0.6 },
-  clothes:  { battery: 2, candle: 2, snack: 1, bulb: 2, bandage: 1, cocoa: 0.8, coin: 3 },
+  general:  { bulb: 4, battery: 2.5, candle: 2, snack: 2.5, lamp_desk: 1.2, lamp_floor: 0.5, noodles: 1.5, coin: 3, key: 0.25, chocolate: 2, cocoa: 1, marble: 1.5, firecracker: 0.8, slingshot: 0.4 },
+  food:     { snack: 4, canned: 3, noodles: 3, cocoa: 3, chocolate: 3, milk: 3, salt: 1.5, pan: 0.5, coin: 1 },
+  medicine: { bandage: 4, medkit: 1.2, cocoa: 2, chocolate: 1, battery: 1, holywater: 2, coin: 1 },
+  tool:     { bulb: 4, battery: 3, lamp_floor: 1.2, candle: 1, lamp_desk: 1, coin: 2, key: 0.35, firecracker: 1.5, marble: 1, strongflash: 0.25, watergun: 0.3 },
+  antique:  { bulb: 5, lamp_chand: 1, lamp_floor: 1.5, candle: 1, medkit: 0.8, coin: 3, key: 0.6, amulet: 0.5, holywater: 1, strongflash: 0.3 },
+  clothes:  { battery: 2, candle: 2, snack: 1.5, bulb: 2, bandage: 1, cocoa: 1.5, chocolate: 1.5, milk: 1, coin: 3, marble: 1.5, slingshot: 0.5, amulet: 0.2 },
+};
+
+// 難度：開始新遊戲前選
+const DIFFS = {
+  easy:   { name: '簡單', spawn: 0.5,  maxS: 0.5,  lv: -2, hp: 0.7,  dmg: 0.5,  san: 0.5,  hunger: 0.6, items: 1.8,  hazard: 0.6 },
+  normal: { name: '普通', spawn: 0.75, maxS: 0.75, lv: -1, hp: 0.85, dmg: 0.75, san: 0.75, hunger: 0.8, items: 1.35, hazard: 0.85 },
+  hard:   { name: '困難', spawn: 1,    maxS: 1,    lv: 0,  hp: 1,    dmg: 1,    san: 1,    hunger: 1,   items: 1,    hazard: 1 },
 };

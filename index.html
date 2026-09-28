@@ -79,6 +79,19 @@
     </div>
   </div>
 
+  <!-- 開始新遊戲前選難度 -->
+  <div id="diffPick" class="screen hidden">
+    <div class="panel small-panel diff-panel">
+      <h2>選擇難度</h2>
+      <div class="diffs">
+        <button class="diffbtn easy" data-d="easy"><b>😊 簡單</b><small>怪物比較少、比較弱，被抓到只扣一點血；食物和武器很多。第一次玩選這個！</small></button>
+        <button class="diffbtn normal" data-d="normal"><b>😨 普通</b><small>怪物和物資都剛剛好，有一點挑戰。</small></button>
+        <button class="diffbtn hard" data-d="hard"><b>😱 困難</b><small>怪物又多又強，東西很難找。給生存高手！</small></button>
+      </div>
+      <div class="btns"><button id="btnDiffBack" class="ghost">返回</button></div>
+    </div>
+  </div>
+
   <!-- 說明 -->
   <div id="help" class="screen hidden">
     <div class="panel">
@@ -94,7 +107,7 @@
             <tr><td><kbd>C</kbd></td><td>慢慢走（很安靜）</td></tr>
             <tr><td><kbd>F</kbd></td><td>開 / 關手電筒</td></tr>
             <tr><td><kbd>E</kbd> / 左鍵</td><td>互動（按住搜索）</td></tr>
-            <tr><td><kbd>Q</kbd> / 右鍵</td><td>使用選中的物品</td></tr>
+            <tr><td><kbd>Q</kbd> / 右鍵</td><td>使用選中的物品（拿著武器就是攻擊）</td></tr>
             <tr><td><kbd>R</kbd></td><td>拿回燈具 / 拆下燈泡</td></tr>
             <tr><td><kbd>1</kbd>–<kbd>0</kbd> / 滾輪</td><td>切換物品</td></tr>
             <tr><td><kbd>M</kbd></td><td>靜音</td></tr>
@@ -104,7 +117,7 @@
           <table class="keys">
             <tr><td>左半邊拖曳</td><td>移動（輕推慢慢走、推到底奔跑）</td></tr>
             <tr><td>右半邊滑動</td><td>轉頭看四周</td></tr>
-            <tr><td>右下按鈕</td><td>E 互動（可按住）、Q 使用、🔦、R 拿起</td></tr>
+            <tr><td>右下按鈕</td><td>E 互動（可按住）、Q 使用／攻擊（會顯示手上拿的東西）、🔦、R 拿起</td></tr>
             <tr><td>下方物品欄</td><td>點一下切換物品</td></tr>
           </table>
         </div>
@@ -117,15 +130,15 @@
             <li>⚡ <b>停電</b>時所有燈都會熄滅，拿手電筒去<b>洗衣間的電箱</b>按住 E 恢復電力。</li>
             <li>🚪 晚上有人敲門……<b>千萬不要開門</b>。</li>
             <li>🛏️ 衣櫃在晃？快去按住 E 壓住它。晚上別在床邊待太久。</li>
-            <li>⚫ <b>黑球</b>（第 3 夜起）：不會追你，專門去<b>吃燈</b>，每吃一次燈泡就降一級。燈光擋不住它，只有<b>手電筒</b>照它才能消滅它。</li>
-            <li>😢 <b>血淚女</b>（第 4 夜起）：你<b>看著她</b>她就不會動，但一直盯著她理智會快速下降。她怕燈光，會在黑暗的門口等你。聽到哭聲越來越近，就快轉頭找她！</li>
-            <li>👁️ 第 5 夜之後，高大的「它」可能會出現，非常耐打。</li>
-            <li>📖 第 6～10 夜每晚會出現一隻新怪物：火柴人、眼球花、爬行女、鳥腳女、小丑。牠們的弱點都不一樣，去<b>怪物圖鑑</b>看看怎麼對付。</li>
+            <li>⚔️ <b>武器</b>：搜索時會找到武器，在物品欄選好武器按 <b>Q</b> 攻擊。🍳<b>平底鍋</b>敲前面的怪物還會把牠敲暈（第一天廚房抽屜就有一個）；🎯<b>彈弓</b>發射彈珠打遠處；🔫<b>聖水槍</b>噴聖水，對大怪物特別有效；🧂<b>鹽巴</b>撒一圈把身邊的怪物推開；🧨<b>鞭炮</b>丟出去會爆炸（很吵！）；💪<b>強力手電筒</b>撿到就自動升級；📿<b>護身符</b>帶著就只會扣一半的血。</li>
+            <li>🍫 <b>食物</b>：冰箱和櫥櫃每天幾乎都會補滿。☕熱可可、🍫巧克力、🥛熱牛奶可以回復<b>理智</b>。</li>
+            <li>📖 <b>特殊怪物</b>：第 1 夜火柴人、第 2 夜黑球和眼球花、第 3 夜血淚女和小丑、第 4 夜爬行女和鳥腳女、第 5 夜高大的「它」。牠們的弱點都不一樣，去<b>怪物圖鑑</b>看看怎麼對付。</li>
             <li>💡 <b>會幫你打怪的燈泡</b>：🔥火焰燈泡會射火球；😇天使燈泡的小天使會飛出去打怪物（兩種停電都照樣會打）；🟢粘液燈泡不會發光，但黏液會讓怪物變很慢；✨星空燈泡照得最遠。</li>
             <li>🪙 <b>硬幣</b>：搜索、打倒怪物會拿到硬幣。白天可以去地下室找<b>神秘商人</b>買東西，或到車庫<b>轉扭蛋</b>。</li>
             <li>🔧 儲藏室的<b>工作台</b>：3 顆一樣的燈泡合成 1 顆高一級的。</li>
             <li>🎁 每天早上床邊有<b>禮物</b>（前一晚表現越好越好）；⭐ 屋子裡藏著<b>寶藏星星</b>；📦 白天有<b>送貨員</b>敲門；🗝️ 找到<b>鑰匙</b>可以打開上鎖的寶箱。</li>
             <li>👻 打倒怪物有時候會<b>掉東西</b>，走過去就能撿起來。</li>
+            <li>😊 開始新遊戲時可以選<b>難度</b>（簡單／普通／困難）。</li>
             <li>💾 每天早上自動存檔。</li>
           </ul>
         </div>
@@ -181,6 +194,7 @@
         <button id="btnQuit" class="ghost">回主選單</button>
       </div>
       <p class="small">遊戲會在每天早上自動存檔。</p>
+      <p id="pauseDiff" class="small"></p>
       <p id="buildInfoPause" class="small build"></p>
     </div>
   </div>

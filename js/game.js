@@ -8,6 +8,8 @@ const SAVE_KEY = 'home99_save_v1';
 const PLAYER_R = 0.32, ENEMY_R = 0.3;
 const FL_RANGE = 7.5, FL_HALF = 0.42;
 const NIGHT_DARK = 0.94;
+// 特殊怪物第一次登場的夜晚：前 4 夜每晚介紹 1～2 隻新的，第 5 夜全部到齊
+const INTRO = { stick: 1, blob: 2, flower: 2, woman: 3, clown: 3, tv: 4, momo: 4, tall: 5 };
 
 const $ = id => document.getElementById(id);
 // 舊版 iPad Safari 沒有 roundRect
@@ -92,12 +94,13 @@ let flow = null, flowTimer = 0;
 
 function freshState() {
   return {
-    day: 1, phase: 'day', t: 0, time: 0, power: true,
-    p: { x: 19.5, y: 23, hp: 100, san: 100, hunger: 100, bat: 100, stam: 100, flash: false, face: -Math.PI / 2, pitch: 0, inv: 0, hurt: 0, batWarned: false },
+    day: 1, phase: 'day', t: 0, time: 0, power: true, diff: 'normal',
+    p: { x: 19.5, y: 23, hp: 100, san: 100, hunger: 100, bat: 100, stam: 100, flash: false, face: -Math.PI / 2, pitch: 0, inv: 0, hurt: 0, batWarned: false, flashLv: 1 },
     inv: {}, selId: null,
     sockets: SOCKETS.map(s => ({ kind: 'socket', type: 'socket', id: s.id, x: s.x, y: s.y, room: s.room, bulb: 0, dying: 0 })),
     lamps: [], candles: [], containers: {}, flowers: [],
     coins: 0, pickups: [], chests: {}, gift: null, treasure: null, stock: [], nightStats: null, fireballs: [],
+    shots: [], bombs: [], booms: [], wcd: 0, swingT: 0, spray: 0,
     enemies: [], fx: [], ghosts: [], lights: [],
     ev: { schedule: [], blood: false, knock: 0, knockTick: 0, phone: 0, phoneTick: 0, closet: 0, closetTick: 0, closetLight: 0,
           bedTimer: 0, bedCd: 0, bedWarned: false, duskWarned: false, ghostT: 5, beatT: 0, whisperT: 10,
@@ -108,13 +111,17 @@ function freshState() {
   };
 }
 
-function newGame() {
+function newGame(diff = 'normal') {
   G = freshState();
+  G.diff = DIFFS[diff] ? diff : 'normal';
   G.sockets.find(s => s.id === 's_living').bulb = 1;
   for (const f of FURN) if (f.loot) G.containers[f.id] = { items: [] };
   refillContainers(0.6);
+  G.containers.kdrawer.items = ['pan', 'chocolate']; // 第一天廚房抽屜一定有平底鍋
   prepareDay();
-  addItem('bulb1', 2); addItem('lamp_desk', 1); addItem('snack', 2); addItem('battery', 1); addItem('candle', 1);
+  addItem('bulb1', 2); addItem('lamp_desk', 1); addItem('snack', 3); addItem('chocolate', 1); addItem('cocoa', 1);
+  addItem('battery', 1); addItem('candle', 1);
+  if (G.diff === 'easy') { addItem('bandage', 2); addItem('firecracker', 2); }
   G.selId = 'bulb1';
   saveGame();
   startPlay();
@@ -125,7 +132,7 @@ function startPlay() {
   mode = 'play';
   flow = null;
   invDirty = true;
-  for (const id of ['title', 'help', 'pause', 'gameover', 'book', 'transfer']) $(id).classList.add('hidden');
+  for (const id of ['title', 'help', 'pause', 'gameover', 'book', 'transfer', 'diffPick']) $(id).classList.add('hidden');
   $('hud').classList.remove('hidden');
   lockPointer();
 }
@@ -135,8 +142,8 @@ function startPlay() {
 // ====================================================================
 function saveGame() {
   const s = {
-    v: 1, day: G.day,
-    p: { x: G.p.x, y: G.p.y, hp: G.p.hp, san: G.p.san, hunger: G.p.hunger, bat: G.p.bat },
+    v: 1, day: G.day, diff: G.diff,
+    p: { x: G.p.x, y: G.p.y, hp: G.p.hp, san: G.p.san, hunger: G.p.hunger, bat: G.p.bat, flashLv: G.p.flashLv },
     inv: G.inv, selId: G.selId,
     sockets: G.sockets.map(s => s.bulb),
     lamps: G.lamps.map(l => ({ type: l.type, x: l.x, y: l.y, bulb: l.bulb })),
@@ -154,6 +161,7 @@ function loadGame() {
   const s = readSave();
   if (!s) return false;
   G = freshState();
+  G.diff = DIFFS[s.diff] ? s.diff : 'normal'; // 舊存檔沒有難度，當成普通
   G.day = Math.min(s.day, LAST_NIGHT);
   Object.assign(G.p, s.p);
   G.inv = s.inv || {};
@@ -185,11 +193,13 @@ function rollItem(table, level, day) {
   return k === 'bulb' ? 'bulb' + rollTier(level, day) : k;
 }
 function refillContainers(chance = 0.35) {
+  const k = D().items;
   for (const f of FURN) {
     if (!f.loot) continue;
     const c = G.containers[f.id];
-    if (c.items.length || Math.random() > chance) continue;
-    const n = Math.random() < 0.2 ? 2 : 1;
+    const food = f.loot === 'food'; // 冰箱、櫥櫃幾乎每天都會補滿食物
+    if (c.items.length || Math.random() > Math.min(0.95, (food ? 0.8 : chance) * k)) continue;
+    const n = food ? 1 + (Math.random() < 0.6) + (Math.random() < 0.3) : 1 + (Math.random() < 0.2 * k);
     for (let i = 0; i < n; i++) c.items.push(rollItem(f.loot, f.room.level, G.day));
   }
 }
@@ -214,6 +224,40 @@ function removeItem(id, n = 1) {
   invDirty = true;
 }
 const invList = () => ITEM_ORDER.filter(id => G.inv[id] > 0);
+// 找到東西時一次拿到的數量（彈珠一包 5 顆……）
+const LOOT_QTY = { marble: 5, holywater: 2, salt: 2, firecracker: 2 };
+// 武器只需要一把：已經有了就換成別的東西；第一次拿到彈弓、聖水槍會附送子彈
+const UNIQUE_CONV = { pan: ['coin', 2], slingshot: ['marble', 5], watergun: ['holywater', 2], amulet: ['coin', 3] };
+const WEAPON_BUNDLE = { slingshot: ['marble', 5], watergun: ['holywater', 2] };
+const WEAPON_TIP = {
+  pan: '🍳 拿到平底鍋了！在物品欄選它，按 Q 就能敲怪物，還會把牠敲暈。',
+  slingshot: '🎯 拿到彈弓了！選它按 Q 發射彈珠，可以打遠處的怪物。',
+  watergun: '🔫 拿到聖水槍了！選它按 Q 噴聖水，對大怪物特別有效。',
+  salt: '🧂 拿到鹽巴了！怪物靠近時選它按 Q，撒一圈鹽把牠們推開。',
+  firecracker: '🧨 拿到鞭炮了！選它按 Q 丟出去，1 秒後爆炸。',
+  amulet: '📿 拿到護身符了！帶在身上，被怪物抓到只會扣一半的血。',
+};
+// 把拿到的東西放進背包，回傳實際拿到的 [[id, 數量], ...]
+function gainItem(id, n = 1) {
+  if (id === 'coin') { addCoins(n); return [['coin', n]]; }
+  if (id === 'strongflash') {
+    if ((G.p.flashLv || 1) >= 2) return gainItem('battery', 1);
+    G.p.flashLv = 2;
+    toast('💪 手電筒升級成強力手電筒！打怪物的傷害變兩倍、照得更遠。', 'good');
+    return [['strongflash', 1]];
+  }
+  if (UNIQUE_CONV[id] && G.inv[id]) return gainItem(...UNIQUE_CONV[id]);
+  addItem(id, n);
+  const got = [[id, n]];
+  if (WEAPON_BUNDLE[id]) { addItem(...WEAPON_BUNDLE[id]); got.push(WEAPON_BUNDLE[id]); }
+  if (WEAPON_TIP[id] && !G.ev['wtip_' + id]) { G.ev['wtip_' + id] = 1; toast(WEAPON_TIP[id], 'good'); }
+  return got;
+}
+function gainAll(list) {
+  const got = [];
+  for (const [id, n] of list) got.push(...gainItem(id, n));
+  return got;
+}
 const lampItemId = type => ({ desk: 'lamp_desk', floor: 'lamp_floor', chand: 'lamp_chand' })[type];
 
 function search(f) {
@@ -221,10 +265,7 @@ function search(f) {
   makeNoise(4);
   if (!c.items.length) { toast(`${f.name}裡什麼都沒有。`); Sound.play('empty'); return; }
   const counts = {};
-  for (const id of c.items) {
-    if (id === 'coin') { const n = 1; addCoins(n); counts.coin = (counts.coin || 0) + n; }
-    else { addItem(id); counts[id] = (counts[id] || 0) + 1; }
-  }
+  for (const id of c.items) for (const [gid, gn] of gainItem(id, LOOT_QTY[id] || 1)) counts[gid] = (counts[gid] || 0) + gn;
   const best = Math.max(0, ...c.items.map(id => ITEMS[id].tier || 0));
   c.items = [];
   G.stats.searched++;
@@ -256,6 +297,7 @@ function buildLights() {
   G.lamps.forEach(l => add(l, LAMP_TYPES[l.type].mult));
   if (G.stock && merchantHere()) L.push({ x: MERCHANT_POS.x + 0.3, y: MERCHANT_POS.y, r: 3.2, tier: 0, room: roomGrid[29][11], f: 0.85 + Math.random() * 0.08, color: [255, 190, 110] });
   if (G.ev && G.ev.tvOn) L.push({ x: 15, y: 15.9, r: 2.6, tier: 0, room: roomGrid[16][15], f: 0.55 + Math.random() * 0.35, color: [140, 170, 255], tv: true });
+  for (const b of G.booms || []) L.push({ x: b.x, y: b.y, r: 4.5, tier: 0, room: b.room, f: b.life / 0.35 * 1.3, color: [255, 190, 110] });
   for (const c of G.candles) {
     const k = c.life < 10 ? c.life / 10 : 1;
     L.push({ x: c.x, y: c.y, r: 2.6 * (0.6 + 0.4 * k), tier: 0, room: c.room, f: (0.85 + 0.12 * Math.random()) * k, candle: true });
@@ -280,6 +322,8 @@ function lightAt(x, y, minTier = 0) {
   return best * scale;
 }
 const flashOn = () => G.p.flash && G.p.bat > 0;
+const strongFlash = () => (G.p.flashLv || 1) >= 2;
+const flRange = () => FL_RANGE + (strongFlash() ? 1.5 : 0);
 function castRay(x, y, a, maxD) {
   const dx = Math.cos(a), dy = Math.sin(a);
   for (let d = 0.08; d < maxD; d += 0.08)
@@ -289,7 +333,7 @@ function castRay(x, y, a, maxD) {
 function inBeam(e) {
   if (!flashOn()) return false;
   const p = G.p, dx = e.x - p.x, dy = e.y - p.y, d = Math.hypot(dx, dy);
-  if (d > FL_RANGE) return false;
+  if (d > flRange()) return false;
   const a = Math.atan2(dy, dx);
   let da = a - p.face;
   while (da > Math.PI) da -= Math.PI * 2;
@@ -392,13 +436,13 @@ const MONSTER_NAME = { shadow: '黑影', fast: '衣櫃怪', blob: '黑球', stic
 const BOSSES = ['woman', 'momo', 'crawler', 'clown', 'tall'];
 const kindOf = t => t.kind || 'flower';
 function rollLevel() {
-  let lv = 1 + Math.floor((G.day - 1) / 2) + (Math.random() < 0.35 ? 1 : 0);
+  let lv = 1 + Math.floor((G.day - 1) / 2) + (Math.random() < 0.35 ? 1 : 0) + D().lv;
   if (G.ev && G.ev.blood) lv++;
   return clamp(lv, 1, 8);
 }
 function setLevel(m, kind, lv) {
   m.lv = lv;
-  m.maxHp = BASE_HP[kind] * (1 + 0.4 * (lv - 1));
+  m.maxHp = BASE_HP[kind] * (1 + 0.4 * (lv - 1)) * D().hp;
   m.hp = m.maxHp;
   return m;
 }
@@ -411,7 +455,7 @@ function hurtMonster(t, dmg) {
 }
 // 手電筒照著怪物時每一幀呼叫
 function flashHurt(t, dt) {
-  hurtMonster(t, FL_DPS * dt);
+  hurtMonster(t, FL_DPS * (strongFlash() ? 2 : 1) * dt);
   if (Math.random() < dt * 12) G.fx.push({ type: 'spark', x: t.x + rand(-0.2, 0.2), y: t.y + rand(-0.2, 0.2), h: targetH(t) + rand(-0.3, 0.3), vx: rand(-0.4, 0.4), vy: rand(-0.4, 0.4), vh: rand(0, 0.8), life: 0.4, max: 0.4, color: [255, 240, 200] });
 }
 function defeatMonster(t) {
@@ -461,6 +505,11 @@ function updateEnemies(dt) {
   for (const e of G.enemies) {
     e.wob += dt;
     if (e.spawn > 0) e.spawn = Math.max(0, e.spawn - dt);
+    if (e.stunT > 0) { // 被武器敲暈了：站著不動，也不會抓人
+      e.stunT -= dt;
+      if (inBeam(e)) flashHurt(e, dt);
+      continue;
+    }
     const edt = dt * slimeFactor(e.x, e.y); // 在黏液裡動作變慢
     if (SPECIAL_AI[e.kind]) { SPECIAL_AI[e.kind](e, edt); continue; }
     const beam = inBeam(e);
@@ -491,7 +540,8 @@ function hurtPlayer(e) {
 }
 function damage(hp, san) {
   const p = G.p;
-  p.hp -= hp; p.san -= san;
+  p.hp -= hp * D().dmg * (G.inv.amulet ? 0.5 : 1); // 護身符：只扣一半的血
+  p.san -= san * D().san;
   p.hurt = 1; G.shake = 0.4;
   if (G.nightStats && G.phase === 'night') G.nightStats.caught++;
   Sound.play('hurt');
@@ -519,7 +569,7 @@ function updateWoman(e, dt) {
   e.seen = e.spawn <= 0 && lookedAt(e);
   if (e.seen) {
     const k = clamp(1.2 - d / 10, 0.3, 1);
-    p.san -= (3 + n * 0.04) * k * dt;
+    p.san -= (3 + n * 0.04) * k * D().san * dt;
     G.stare = Math.min(1, G.stare + dt * 3);
     e.giggleT -= dt;
     if (e.giggleT <= 0) { Sound.play('giggle', nearVol(d)); e.giggleT = rand(3, 6); }
@@ -856,7 +906,7 @@ function updateFlowers(dt) {
       if (f.watch >= 3) { flowerAlarm(f, d); f.watch = -5; }
     } else f.watch = f.watch < 0 ? Math.min(0, f.watch + dt) : Math.max(0, f.watch - dt);
   }
-  if (watching) p.san -= Math.min(watching, 2) * 1.5 * dt;
+  if (watching) p.san -= Math.min(watching, 2) * 1.5 * D().san * dt;
   G.flowers = G.flowers.filter(f => !f.dead);
 }
 function flowerAlarm(f, d) {
@@ -1237,16 +1287,16 @@ function thumbClown(c, S) {
   c.restore();
 }
 const BESTIARY = [
-  { name: '黑影', night: 1, draw: thumbShadow('#ff3344'), desc: '到處追你，燈光也擋不住牠。手電筒照著牠會一直扣血，血扣光就消失。' },
+  { name: '黑影', night: 1, draw: thumbShadow('#ff3344'), desc: '到處追你，燈光也擋不住牠。手電筒照著牠會一直扣血，平底鍋一敲就散掉。' },
+  { name: '火柴人', night: INTRO.stick, draw: thumbStick, desc: '會穿牆，一邊吹口哨一邊朝你揮手走過來，走得很慢。紙做的身體被手電筒照到就會燒起來。' },
   { name: '衣櫃怪', night: 2, draw: thumbShadow('#ffd23a', true), desc: '衣櫃晃動時沒去按住 E 壓住門，就會衝出來，速度很快。' },
-  { name: '黑球', night: 3, draw: thumbBlob, desc: '不追你，專門去吃燈，每吃一次燈泡降一級，特殊燈泡會直接被吃掉。用手電筒把牠的血扣光。' },
-  { name: '血淚女', night: 4, draw: drawWomanFace, desc: '你看著她，她就不會動；但一直盯著她，理智會快速下降。手電筒可以扣她的血，但你得一直看著她。' },
-  { name: '它', night: 5, draw: thumbTall, desc: '高大又非常耐打，手電筒對它只有一半效果。最好靠天使和火球幫忙。' },
-  { name: '火柴人', night: 6, draw: thumbStick, desc: '會穿牆，一邊吹口哨一邊朝你揮手走過來。紙做的身體被手電筒照到就會燒起來。' },
-  { name: '眼球花', night: 7, draw: thumbFlower, desc: '長在屋子裡、白天也不會消失。被它盯 3 秒它就會尖叫，把黑影叫過來。用手電筒照它，或走過去按住 E 拔掉。' },
-  { name: '爬行女', night: 8, draw: drawCrawlerFace, desc: '客廳的電視自己打開後，不快點關掉，她就會從螢幕裡爬出來。關掉電視或把她打倒都可以。' },
-  { name: '鳥腳女', night: 9, draw: drawMomoFace, desc: '眼睛不好，靠聲音找你，一跳一跳地追過來。別奔跑，輕輕推搖桿慢慢走。手電筒照到她的眼鏡會讓她暫時看不見，也會扣血。' },
-  { name: '小丑', night: 10, draw: thumbClown, desc: '先會飄來一顆紅氣球，用手電筒把它照破。讓氣球碰到你，小丑就會拿著刀出現在你背後，快跑或用手電筒打他！' },
+  { name: '黑球', night: INTRO.blob, draw: thumbBlob, desc: '不追你，專門去吃燈，每吃一次燈泡降一級，特殊燈泡會直接被吃掉。用手電筒照牠、用彈弓打牠。' },
+  { name: '眼球花', night: INTRO.flower, draw: thumbFlower, desc: '長在屋子裡、白天也不會消失。被它盯 3 秒它就會尖叫，把黑影叫過來。用手電筒照它、用平底鍋打它，或走過去按住 E 拔掉。' },
+  { name: '血淚女', night: INTRO.woman, draw: drawWomanFace, desc: '你看著她，她就不會動；但一直盯著她，理智會快速下降。看著她走過去，用平底鍋或聖水槍打她！' },
+  { name: '小丑', night: INTRO.clown, draw: thumbClown, desc: '先會飄來一顆紅氣球，用手電筒照破或用武器打破它。讓氣球碰到你，小丑就會拿著刀出現在你背後！撒鹽巴可以把他推開。' },
+  { name: '爬行女', night: INTRO.tv, draw: drawCrawlerFace, desc: '客廳的電視自己打開後，不快點關掉，她就會從螢幕裡爬出來。關掉電視或把她打倒都可以。' },
+  { name: '鳥腳女', night: INTRO.momo, draw: drawMomoFace, desc: '眼睛不好，靠聲音找你，一跳一跳地追過來。別奔跑，輕輕推搖桿慢慢走。鞭炮很吵會把她引過去！手電筒照到她的眼鏡會讓她暫時看不見。' },
+  { name: '它', night: INTRO.tall, draw: thumbTall, desc: '高大又非常耐打，手電筒和武器對它只有一半效果。靠聖水槍、鞭炮、天使和火球一起對付它。' },
 ];
 let bookBuilt = false, bookFrom = 'title';
 function openBook(from) {
@@ -1273,6 +1323,7 @@ function openBook(from) {
 // 12 夜版的難度：越後面越難（第 12 夜大約是原本的第 30 夜）
 // ====================================================================
 const diffN = () => G.day * 2.5;
+const D = () => DIFFS[(G && G.diff) || 'normal'] || DIFFS.normal; // 玩家選的難度
 const randi = (a, b) => Math.floor(rand(a, b + 1));
 const fixtures = () => [...G.sockets, ...G.lamps];
 
@@ -1411,6 +1462,220 @@ function updateFireballs(dt) {
 }
 
 // ====================================================================
+// 武器：在物品欄選好武器，按 Q 攻擊
+// ====================================================================
+const WEAPON = {
+  pan:         { cd: 0.5 },
+  slingshot:   { cd: 0.45, ammo: 'marble' },
+  watergun:    { cd: 0.75, ammo: 'holywater' },
+  salt:        { cd: 0.8 },
+  firecracker: { cd: 0.9 },
+};
+const PAN_RANGE = 1.9, PAN_ARC = 0.8, PAN_DMG = 1.6;
+const SHOT_SPEED = 14, SHOT_DMG = 1.3;
+const SPRAY_TIME = 0.6, SPRAY_RANGE = 5.5, SPRAY_ARC = 0.3, SPRAY_DPS = 3.2;
+const SALT_R = 2.6, SALT_DMG = 1.5;
+const BOMB_FUSE = 1.1, BOMB_R = 2.8, BOMB_DMG = 2.6;
+const WEAPON_EMPTY = { slingshot: '🎯 沒有彈珠了！搜索櫃子、箱子找彈珠。', watergun: '🔫 聖水用完了！浴室的藥櫃常常有聖水。' };
+
+// 武器打得到的東西：怪物和長好的眼球花
+const hittable = t => !t.dead && !(t.emerge > 0) && (t.kind ? G.enemies.includes(t) : t.grow >= 1 && G.flowers.includes(t));
+// 中間有沒有牆（火柴人會穿牆，所以一定打得到）
+const seeLine = (x, y, t, d) => t.kind === 'stick' || castRay(x, y, Math.atan2(t.y - y, t.x - x), d) >= d - 0.05;
+// 左手的位置（武器拿在左手，手電筒在右手）
+function handPos(fwd = 0.35, side = 0.15) {
+  const p = G.p, c = Math.cos(p.face), s = Math.sin(p.face);
+  return { x: p.x + c * fwd + s * side, y: p.y + s * fwd - c * side };
+}
+// 打中怪物：扣血、敲暈、推開
+function whack(t, dmg, stun, kb, fx, fy) {
+  hurtMonster(t, dmg);
+  const h = targetH(t);
+  for (let i = 0; i < 8; i++) G.fx.push({ type: 'spark', x: t.x + rand(-0.15, 0.15), y: t.y + rand(-0.15, 0.15), h: h + rand(-0.3, 0.3), vx: rand(-1.5, 1.5), vy: rand(-1.5, 1.5), vh: rand(-0.5, 1.5), life: rand(0.25, 0.5), max: 0.5, color: [255, 245, 200] });
+  if (t.dead || !t.kind) return;
+  if (stun) {
+    t.stunT = Math.max(t.stunT || 0, stun * (t.kind === 'tall' ? 0.5 : 1));
+    if (t.kind === 'momo') { t.hopping = 0; t.air = 0; }
+  }
+  if (kb) {
+    const a = Math.atan2(t.y - fy, t.x - fx);
+    move(t, Math.cos(a) * kb, Math.sin(a) * kb, ENEMY_R);
+  }
+}
+// 自動瞄準：前方角度最小、看得到的怪物
+function aimTarget(range, arc) {
+  const p = G.p;
+  let best = null, bs = Infinity;
+  for (const t of [...G.enemies, ...G.flowers]) {
+    if (!hittable(t)) continue;
+    const d = Math.hypot(t.x - p.x, t.y - p.y);
+    if (d > range) continue;
+    const a = lookAngle(t.x, t.y);
+    if (a > arc || !seeLine(p.x, p.y, t, d)) continue;
+    if (a + d * 0.02 < bs) { bs = a + d * 0.02; best = t; }
+  }
+  return best;
+}
+function useWeapon(id) {
+  const w = WEAPON[id], p = G.p;
+  if (G.wcd > 0) return;
+  if (w.ammo && !G.inv[w.ammo]) { toast(WEAPON_EMPTY[id], 'warn'); Sound.play('empty'); G.wcd = 0.4; return; }
+  G.wcd = w.cd;
+  G.swingT = 1; G.swingId = id;
+  const fx = Math.cos(p.face), fy = Math.sin(p.face);
+  switch (id) {
+    case 'pan': {
+      makeNoise(5);
+      let hit = 0;
+      for (const t of [...G.enemies, ...G.flowers]) {
+        if (!hittable(t)) continue;
+        const d = Math.hypot(t.x - p.x, t.y - p.y);
+        const reach = PAN_RANGE + (t.kind === 'blob' ? 0.4 * (t.size || 1) : 0);
+        if (d > reach || (d > 0.5 && lookAngle(t.x, t.y) > PAN_ARC) || !seeLine(p.x, p.y, t, d)) continue;
+        whack(t, PAN_DMG, 1.3, 0.9, p.x, p.y);
+        if (++hit >= 2) break;
+      }
+      Sound.play(hit ? 'clang' : 'swish');
+      if (hit) { makeNoise(8); G.shake = Math.max(G.shake, 0.12); }
+      break;
+    }
+    case 'slingshot': {
+      removeItem('marble');
+      makeNoise(3);
+      const t = aimTarget(13, 0.35), hp = handPos(0.3, 0.12);
+      const cp = Math.cos(p.pitch);
+      G.shots.push({ x: hp.x, y: hp.y, h: 1.35, vx: fx * cp * SHOT_SPEED, vy: fy * cp * SHOT_SPEED, vh: Math.sin(p.pitch) * SHOT_SPEED, life: 1.2, target: t });
+      Sound.play('twang');
+      break;
+    }
+    case 'watergun':
+      removeItem('holywater');
+      makeNoise(3);
+      G.spray = SPRAY_TIME;
+      Sound.play('spray');
+      break;
+    case 'salt': {
+      removeItem('salt');
+      makeNoise(4);
+      let hit = 0;
+      for (const t of [...G.enemies, ...G.flowers]) {
+        if (!hittable(t)) continue;
+        const d = Math.hypot(t.x - p.x, t.y - p.y);
+        if (d > SALT_R || !seeLine(p.x, p.y, t, d)) continue;
+        whack(t, SALT_DMG, 1, 1.8, p.x, p.y);
+        hit++;
+      }
+      for (let i = 0; i < 40; i++) {
+        const a = i / 40 * Math.PI * 2 + rand(-0.05, 0.05), sp = rand(3.5, 5);
+        G.fx.push({ type: 'spark', x: p.x, y: p.y, h: rand(0.5, 1.2), vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, vh: rand(-0.6, 0.2), life: 0.5, max: 0.5, color: [245, 245, 255] });
+      }
+      Sound.play('salt');
+      if (hit) toast(`🧂 撒鹽！打中了 ${hit} 隻怪物。`, 'good');
+      break;
+    }
+    case 'firecracker': {
+      removeItem('firecracker');
+      // 有瞄準到怪物就丟到牠腳邊（落地大約要 0.8 秒），不然丟到前面 4 格左右
+      const hp = handPos(0.3, 0.12), t = aimTarget(9, 0.45);
+      let vx = fx * 4.5, vy = fy * 4.5;
+      if (t) { const dx = t.x - hp.x, dy = t.y - hp.y, d = Math.hypot(dx, dy) || 1; vx = dx / d * d / 0.9; vy = dy / d * d / 0.9; }
+      G.bombs.push({ x: hp.x, y: hp.y, h: 1.2, vx, vy, vh: 2.5 + Math.max(-0.5, Math.sin(p.pitch)) * 2, fuse: BOMB_FUSE, spin: 0 });
+      Sound.play('fuse');
+      break;
+    }
+  }
+}
+function explode(x, y) {
+  makeNoise(14); // 很吵：鳥腳女會聽到
+  Sound.play('bang');
+  G.shake = Math.max(G.shake, clamp(0.6 - Math.hypot(x - G.p.x, y - G.p.y) * 0.06, 0.1, 0.6));
+  const tx = Math.floor(x), ty = Math.floor(y);
+  const room = inMap(tx, ty) ? roomGrid[ty][tx] || (doorGrid[ty][tx] && doorGrid[ty][tx].rooms[0]) : null;
+  if (room) G.booms.push({ x, y, life: 0.35, room });
+  for (let i = 0; i < 36; i++) {
+    const a = Math.random() * Math.PI * 2, sp = rand(1, 4.5);
+    G.fx.push({ type: i % 3 ? 'ember' : 'spark', x, y, h: rand(0.1, 0.5), vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, vh: rand(0, 3), life: rand(0.3, 0.8), max: 0.8, color: i % 3 ? pick(EMBER_COLORS) : [255, 250, 220] });
+  }
+  puff(x, y, [70, 65, 70], 14, 0.5);
+  for (const t of [...G.enemies, ...G.flowers]) {
+    if (!hittable(t)) continue;
+    const d = Math.hypot(t.x - x, t.y - y);
+    if (d > BOMB_R || !seeLine(x, y, t, d)) continue;
+    whack(t, BOMB_DMG * (1 - d / BOMB_R * 0.4), 1.2, 1.5, x, y);
+  }
+}
+function updateWeapons(dt) {
+  const p = G.p;
+  G.wcd = Math.max(0, G.wcd - dt);
+  G.swingT = Math.max(0, G.swingT - dt * 3.5);
+  // 聖水槍：前方一小段範圍的怪物一直扣血（對大怪物特別有效）
+  if (G.spray > 0) {
+    G.spray -= dt;
+    for (const t of [...G.enemies, ...G.flowers]) {
+      if (!hittable(t)) continue;
+      const d = Math.hypot(t.x - p.x, t.y - p.y);
+      if (d > SPRAY_RANGE || (d > 0.6 && lookAngle(t.x, t.y) > SPRAY_ARC) || !seeLine(p.x, p.y, t, d)) continue;
+      hurtMonster(t, SPRAY_DPS * (BOSSES.includes(t.kind) ? 1.5 : 1) * dt);
+      if (Math.random() < dt * 20) G.fx.push({ type: 'spark', x: t.x + rand(-0.2, 0.2), y: t.y + rand(-0.2, 0.2), h: targetH(t) + rand(-0.3, 0.3), vx: rand(-0.5, 0.5), vy: rand(-0.5, 0.5), vh: rand(0, 1), life: 0.4, max: 0.4, color: [170, 220, 255] });
+    }
+    const hp = handPos(0.4, 0.13);
+    for (let i = 0; i < 3; i++) {
+      const a = p.face + rand(-0.1, 0.1), sp = rand(6, 9);
+      G.fx.push({ type: 'spark', x: hp.x, y: hp.y, h: 1.3, vx: Math.cos(a) * sp * Math.cos(p.pitch), vy: Math.sin(a) * sp * Math.cos(p.pitch), vh: Math.sin(p.pitch) * sp + rand(-0.4, 0.2), life: 0.55, max: 0.55, color: [110, 180, 255] });
+    }
+  }
+  // 彈珠
+  for (const sh of G.shots) {
+    sh.life -= dt;
+    if (sh.life <= 0) { sh.dead = true; continue; }
+    const t = sh.target;
+    if (t && hittable(t)) { // 瞄準到的怪物會自動追過去
+      const dx = t.x - sh.x, dy = t.y - sh.y, dh = targetH(t) - sh.h, d = Math.hypot(dx, dy, dh) || 1;
+      sh.vx = dx / d * SHOT_SPEED; sh.vy = dy / d * SHOT_SPEED; sh.vh = dh / d * SHOT_SPEED;
+    } else sh.vh -= 5 * dt;
+    const steps = Math.max(1, Math.ceil(SHOT_SPEED * dt / 0.2));
+    for (let i = 0; i < steps && !sh.dead; i++) {
+      sh.x += sh.vx * dt / steps; sh.y += sh.vy * dt / steps; sh.h += sh.vh * dt / steps;
+      if (sh.h < 0.03 || sh.h > 2.65 || isWall(Math.floor(sh.x), Math.floor(sh.y))) {
+        sh.dead = true;
+        puff(sh.x, sh.y, [120, 120, 130], 4, clamp(sh.h, 0.1, 2.5));
+        Sound.play('tick', nearVol(Math.hypot(sh.x - p.x, sh.y - p.y)) * 0.5);
+        break;
+      }
+      for (const m of [...G.enemies, ...G.flowers]) {
+        if (!hittable(m)) continue;
+        const r = 0.4 + (m.kind === 'blob' ? 0.4 * (m.size || 1) : 0);
+        if (Math.hypot(m.x - sh.x, m.y - sh.y) > r || Math.abs(targetH(m) - sh.h) > 0.95) continue;
+        whack(m, SHOT_DMG, 0.4, 0.3, sh.x - sh.vx, sh.y - sh.vy);
+        Sound.play('tick', nearVol(Math.hypot(sh.x - p.x, sh.y - p.y)));
+        sh.dead = true;
+        break;
+      }
+    }
+  }
+  G.shots = G.shots.filter(sh => !sh.dead);
+  // 鞭炮：丟出去會彈跳，引信燒完就爆炸
+  for (const b of G.bombs) {
+    b.fuse -= dt; b.spin += dt * 8;
+    b.vh -= 9.8 * dt;
+    const nx = b.x + b.vx * dt, ny = b.y + b.vy * dt;
+    if (hits(nx, b.y, 0.08)) b.vx *= -0.4; else b.x = nx;
+    if (hits(b.x, ny, 0.08)) b.vy *= -0.4; else b.y = ny;
+    b.h += b.vh * dt;
+    if (b.h > 2.6) { b.h = 2.6; b.vh = -Math.abs(b.vh) * 0.3; }
+    if (b.h < 0.06) {
+      b.h = 0.06; b.vh = Math.abs(b.vh) * 0.35; b.vx *= 0.6; b.vy *= 0.6;
+      if (b.vh < 0.4) b.vh = 0;
+    }
+    if (Math.random() < dt * 40) G.fx.push({ type: 'ember', x: b.x, y: b.y, h: b.h + 0.1, vx: rand(-0.5, 0.5), vy: rand(-0.5, 0.5), vh: rand(0.3, 1.2), life: 0.3, max: 0.3, color: pick(EMBER_COLORS) });
+    if (b.fuse <= 0) { b.dead = true; explode(b.x, b.y); }
+  }
+  G.bombs = G.bombs.filter(b => !b.dead);
+  for (const b of G.booms) b.life -= dt;
+  G.booms = G.booms.filter(b => b.life > 0);
+}
+
+// ====================================================================
 // 硬幣、怪物掉寶
 // ====================================================================
 function addCoins(n) { G.coins = (G.coins || 0) + n; }
@@ -1424,10 +1689,11 @@ function dropLoot(x, y, lv = 1) {
   if (!inMap(tx, ty) || isSolid(tx, ty)) return;
   const r = Math.random();
   let id = 'coin', n = 1 + Math.floor(lv / 3);
-  if (r > 0.62) {
+  if (r > 0.55) {
     n = 1;
-    if (r < 0.74) id = 'battery';
-    else if (r < 0.84) id = pick(['snack', 'canned', 'cocoa']);
+    if (r < 0.65) id = 'battery';
+    else if (r < 0.77) id = pick(['snack', 'canned', 'cocoa', 'chocolate', 'milk']);
+    else if (r < 0.86) { id = pick(['marble', 'firecracker', 'salt', 'holywater']); n = LOOT_QTY[id]; }
     else if (r < 0.97) id = 'bulb' + Math.min(NORMAL_MAX, rollTier(1 + lv * 0.3, G.day));
     else id = 'key';
   }
@@ -1441,9 +1707,9 @@ function updatePickups(dt) {
     if (pk.age > 120) { pk.got = true; continue; } // 放太久沒撿就消失
     if (Math.hypot(pk.x - p.x, pk.y - p.y) > 0.75) continue;
     pk.got = true;
-    if (pk.id === 'coin') addCoins(pk.n); else addItem(pk.id, pk.n);
+    const got = gainItem(pk.id, pk.n);
     Sound.play('pickup');
-    toast(`撿到了${ITEMS[pk.id].name}${pk.n > 1 ? ' ×' + pk.n : ''}`, 'item');
+    toast('撿到了' + got.map(([id, n]) => ITEMS[id].name + (n > 1 ? ' ×' + n : '')).join('、'), 'item');
   }
   G.pickups = G.pickups.filter(pk => !pk.got);
   const tr = G.treasure;
@@ -1464,7 +1730,8 @@ function prepareDay() {
 function makeGift() {
   const k = G.nightStats || { kills: 0, caught: 0 };
   const score = Math.min(3, Math.floor(k.kills / 3)) + (k.caught === 0 ? 2 : k.caught <= 2 ? 1 : 0); // 0～5
-  const items = [[pick(['battery', 'cocoa', 'canned', 'medkit']), 1]];
+  const items = [[pick(['battery', 'cocoa', 'canned', 'medkit', 'chocolate', 'milk']), 1], [pick(['cocoa', 'chocolate', 'milk']), 1]];
+  if (score >= 2) { const w = pick(['marble', 'firecracker', 'salt', 'holywater']); items.push([w, LOOT_QTY[w]]); }
   for (let i = 0, nb = score >= 4 ? 2 : score >= 2 ? 1 : 0; i < nb; i++) items.push(['bulb' + Math.min(NORMAL_MAX, rollTier(1 + score * 0.5, G.day)), 1]);
   if (score >= 4 && Math.random() < 0.4) items.push(['key', 1]);
   if (score >= 5 && Math.random() < 0.3) items.push(['bulb' + pick([ANGEL_TIER, SLIME_TIER]), 1]);
@@ -1474,10 +1741,10 @@ function openGift() {
   const g = G.gift;
   if (!g) return;
   G.gift = null;
-  for (const [id, n] of g.items) addItem(id, n);
+  const got = gainAll(g.items);
   addCoins(g.coins);
   Sound.play('win');
-  showReward('🎁 早晨禮物', `昨晚你消滅了 ${g.kills} 隻怪物、被抓到 ${g.caught} 次。表現越好，禮物越好！`, [...g.items, ['coin', g.coins]]);
+  showReward('🎁 早晨禮物', `昨晚你消滅了 ${g.kills} 隻怪物、被抓到 ${g.caught} 次。表現越好，禮物越好！`, [...got, ['coin', g.coins]]);
 }
 function hideTreasure() {
   G.treasure = null;
@@ -1489,23 +1756,31 @@ function hideTreasure() {
     return;
   }
 }
+// 還沒拿到的武器（強力手電筒換上了就不算）
+const missingWeapons = () => ['pan', 'slingshot', 'watergun', 'amulet', 'strongflash'].filter(id => (id === 'strongflash' ? !strongFlash() : !G.inv[id]));
 function openTreasure() {
-  const coins = randi(3, 6);
-  const b = Math.random() < 0.3 ? 'key' : 'bulb' + Math.min(NORMAL_MAX, rollTier(2, G.day) + 1);
-  addCoins(coins); addItem(b);
+  const coins = randi(3, 6), r = Math.random(), miss = missingWeapons();
+  const b = r < 0.25 ? 'key' : r < 0.55 && miss.length ? pick(miss) : 'bulb' + Math.min(NORMAL_MAX, rollTier(2, G.day) + 1);
+  addCoins(coins);
+  const got = gainItem(b);
   Sound.play('win');
-  showReward('⭐ 找到今天的寶藏星星了！', '', [[b, 1], ['coin', coins]]);
+  showReward('⭐ 找到今天的寶藏星星了！', '', [...got, ['coin', coins]]);
 }
 function makeStock() {
   const d = G.day;
   const tiers = [...new Set([Math.min(FIRE_TIER, rollTier(1, d) + 1), Math.min(NORMAL_MAX, rollTier(2, d) + 2), pick([ANGEL_TIER, SLIME_TIER, STAR_TIER])])];
+  const miss = missingWeapons(), ammo = pick(['marble', 'holywater', 'firecracker', 'salt']);
   G.stock = [
     ...tiers.map(t => ({ id: 'bulb' + t, price: BULB_PRICE[t], qty: 1 })),
+    ...(miss.length ? [{ id: pick(miss), price: 0, qty: 1 }] : []),
+    { id: ammo, price: 2, qty: 2, n: LOOT_QTY[ammo] },
     { id: 'lamp_floor', price: 5, qty: 1 }, { id: 'lamp_desk', price: 3, qty: 1 },
     { id: 'battery', price: 2, qty: 2 }, { id: 'key', price: 8, qty: 1 },
-    { id: 'medkit', price: 6, qty: 1 }, { id: 'cocoa', price: 3, qty: 1 },
+    { id: 'medkit', price: 6, qty: 1 }, { id: 'cocoa', price: 2, qty: 2 }, { id: 'chocolate', price: 1, qty: 3 },
   ];
+  for (const st of G.stock) if (WEAPON_PRICE[st.id]) st.price = WEAPON_PRICE[st.id];
 }
+const WEAPON_PRICE = { pan: 4, slingshot: 6, watergun: 8, amulet: 7, strongflash: 9 };
 const merchantHere = () => !!G && G.phase === 'day' && G.t < DAY_LEN - DUSK;
 function updateDelivery(dt) {
   const ev = G.ev;
@@ -1523,13 +1798,14 @@ function updateDelivery(dt) {
 function takeDelivery() {
   const ev = G.ev;
   ev.delivery = 0;
-  const pool = ['bulb' + Math.min(NORMAL_MAX, rollTier(1, G.day) + 1), 'battery', 'canned', 'candle', 'lamp_desk', 'cocoa'];
-  const items = [[pool[0], 1], [pick(pool.slice(1)), 1]];
+  const pool = ['bulb' + Math.min(NORMAL_MAX, rollTier(1, G.day) + 1), 'battery', 'canned', 'candle', 'lamp_desk', 'cocoa', 'chocolate', 'milk', 'firecracker'];
+  const extra = pick(pool.slice(1));
+  const items = [[pool[0], 1], [extra, LOOT_QTY[extra] || 1], [pick(['snack', 'noodles', 'milk']), 1]];
   const coins = randi(2, 4);
-  for (const [id, n] of items) addItem(id, n);
+  const got = gainAll(items);
   addCoins(coins);
   Sound.play('pickup');
-  showReward('📦 送貨員的包裹', '門口放著一個寫著你名字的包裹……', [...items, ['coin', coins]]);
+  showReward('📦 送貨員的包裹', '門口放著一個寫著你名字的包裹……', [...got, ['coin', coins]]);
 }
 
 // ====================================================================
@@ -1563,6 +1839,7 @@ const GACHA_PRICE = 3;
 const GACHA_TABLE = {
   bulb1: 8, bulb2: 10, bulb3: 12, bulb4: 11, bulb5: 10, bulb6: 8, bulb7: 7, bulb8: 6, bulb9: 5, bulb10: 4,
   bulb11: 2.5, bulb12: 3, bulb13: 3, lamp_floor: 4, lamp_chand: 1.5, key: 2, coin5: 3,
+  pan: 2, slingshot: 1.5, watergun: 1.2, amulet: 1, strongflash: 1, firecracker: 4, salt: 3, marble: 3, holywater: 3, chocolate: 3,
 };
 function openGacha() {
   let last = null;
@@ -1576,7 +1853,10 @@ function openGacha() {
     G.coins -= GACHA_PRICE;
     const k = weighted(GACHA_TABLE);
     if (k === 'coin5') { addCoins(5); last = { id: 'coin', n: 5 }; }
-    else { addItem(k); last = { id: k, n: 1, rare: (ITEMS[k].tier || 0) >= 9 || k === 'lamp_chand' }; }
+    else {
+      const [[id, n]] = gainItem(k, LOOT_QTY[k] || 1);
+      last = { id, n, rare: (ITEMS[id].tier || 0) >= 9 || id === 'lamp_chand' || ITEMS[id].kind === 'weapon' || id === 'amulet' || id === 'strongflash' };
+    }
     Sound.play(last.rare ? 'win' : 'pickup');
   });
 }
@@ -1584,7 +1864,7 @@ function openShop() {
   openModal('🛒 神秘商人', () => {
     const cards = G.stock.map((s, i) => {
       const it = ITEMS[s.id], can = s.qty > 0 && G.coins >= s.price;
-      return `<div class="shopcard${s.qty > 0 ? '' : ' sold'}"><div class="ic">${itemIcon(s.id)}</div><div class="nm">${it.name}</div>` +
+      return `<div class="shopcard${s.qty > 0 ? '' : ' sold'}"><div class="ic">${itemIcon(s.id)}</div><div class="nm">${it.name}${s.n > 1 ? ' ×' + s.n : ''}</div>` +
         `<div class="ds">${it.desc}</div><button data-act="buy:${i}" ${can ? '' : 'disabled'}>${s.qty > 0 ? `🪙 ${s.price}` : '賣完了'}</button></div>`;
     }).join('');
     return `<p class="hint">「嘿嘿……要買點好東西嗎？天黑之前我就會離開。」</p><div class="shop">${cards}</div>`;
@@ -1592,7 +1872,7 @@ function openShop() {
     const s = G.stock[+act.split(':')[1]];
     if (!s || s.qty <= 0 || G.coins < s.price) return;
     G.coins -= s.price; s.qty--;
-    addItem(s.id);
+    gainItem(s.id, s.n || 1);
     Sound.play('pickup');
   });
 }
@@ -1646,8 +1926,8 @@ function updateSpawns(dt) {
   if (G.phase !== 'night') return;
   const n = diffN(), ev = G.ev;
   const mult = ev.blood ? 1.5 : 1;
-  const maxS = Math.round((G.day === 1 ? 4 : Math.min(5 + Math.floor(n / 2.5), 24)) * mult);
-  const interval = Math.max(1.4, 6 - n * 0.12) / mult / (G.power ? 1 : 1.4);
+  const maxS = Math.max(2, Math.round((G.day === 1 ? 4 : Math.min(5 + Math.floor(n / 2.5), 24)) * mult * D().maxS));
+  const interval = Math.max(1.4, 6 - n * 0.12) / mult / (G.power ? 1 : 1.4) / D().spawn;
   G.spawnT -= dt;
   if (G.spawnT <= 0) {
     G.spawnT = interval * rand(0.7, 1.3);
@@ -1665,43 +1945,46 @@ function startNight() {
   if (G.treasure) { G.treasure = null; toast('⭐ 今天的寶藏星星消失了……明天再找吧。'); }
   ev.schedule = []; ev.blood = night % 6 === 0; // 第 6 夜和最後一夜是血月
   const add = (type, a, b) => ev.schedule.push({ type, at: rand(a, b) });
+  const hz = D().hazard;
+  // 登場之後每晚還會再來的機率
+  const again = base => Math.random() < Math.min(base + n * 0.01, 0.9) * (ev.blood ? 1.3 : 1);
   if (night === 1) add('knock', 40, 60);
   else if (Math.random() < 0.8) add('knock', 15, NIGHT_LEN - 25);
   if (night === 2) add('blackout', 40, 60);
-  else if (night > 2 && Math.random() < Math.min(0.45 + n * 0.015, 0.9)) add('blackout', 20, NIGHT_LEN - 30);
-  if (n >= 12 && Math.random() < Math.min(0.2 + (n - 12) * 0.01, 0.55)) add('blackout', 40, NIGHT_LEN - 20);
-  if (night >= 2 && Math.random() < 0.75) add('closet', 20, NIGHT_LEN - 35);
+  else if (night > 2 && Math.random() < Math.min(0.45 + n * 0.015, 0.9) * hz) add('blackout', 20, NIGHT_LEN - 30);
+  if (n >= 12 && Math.random() < Math.min(0.2 + (n - 12) * 0.01, 0.55) * hz) add('blackout', 40, NIGHT_LEN - 20);
+  if (night >= 2 && Math.random() < 0.75 * hz) add('closet', 20, NIGHT_LEN - 35);
   if (Math.random() < 0.5) add('phone', 10, NIGHT_LEN - 20);
-  if (night >= 5 && (ev.blood || Math.random() < Math.min(0.3 + n * 0.01, 0.9))) add('tall', 15, 60);
-  // 黑球：第 3 夜第一次出現，之後越來越多
-  if (night === 3) add('blob', 30, 50);
-  else if (night > 3) {
+  // 火柴人：第 1 夜就登場
+  if (night === INTRO.stick) add('stick', 50, 70);
+  else if (night > INTRO.stick) { for (let i = 0, k = 1 + (n >= 18); i < k; i++) if (again(0.55)) add('stick', 15, NIGHT_LEN - 30); }
+  // 黑球：之後越來越多
+  if (night === INTRO.blob) add('blob', 25, 45);
+  else if (night > INTRO.blob) {
     const k = 1 + (n >= 12) + (n >= 24);
-    for (let i = 0; i < k; i++) if (Math.random() < Math.min(0.5 + n * 0.012, 0.9) * (ev.blood ? 1.3 : 1)) add('blob', 15, NIGHT_LEN - 40);
+    for (let i = 0; i < k; i++) if (again(0.5)) add('blob', 15, NIGHT_LEN - 40);
   }
-  // 血淚女：第 4 夜第一次出現
-  if (night === 4) add('woman', 25, 45);
-  else if (night > 4 && (ev.blood || Math.random() < Math.min(0.45 + n * 0.01, 0.85))) add('woman', 20, 90);
-  // 第二批怪物：第 6～10 夜每晚介紹一隻新的
-  if (night === 6) add('stick', 20, 40);
-  else if (night > 6) { for (let i = 0, k = 1 + (n >= 18); i < k; i++) if (Math.random() < Math.min(0.45 + n * 0.01, 0.85)) add('stick', 15, NIGHT_LEN - 30); }
-  if (night === 7) add('flower', 5, 15);
-  else if (night > 7 && Math.random() < 0.7) add('flower', 5, 60);
-  if (night === 8) add('tv', 30, 50);
-  else if (night > 8 && Math.random() < Math.min(0.45 + n * 0.01, 0.85)) add('tv', 20, NIGHT_LEN - 40);
-  if (night === 9) add('momo', 25, 45);
-  else if (night > 9 && Math.random() < Math.min(0.45 + n * 0.01, 0.85)) add('momo', 15, 80);
-  if (night === 10) add('clown', 30, 50);
-  else if (night > 10 && Math.random() < Math.min(0.4 + n * 0.01, 0.8)) add('clown', 20, NIGHT_LEN - 40);
+  if (night === INTRO.flower) add('flower', 70, 90);
+  else if (night > INTRO.flower && again(0.45)) add('flower', 5, 60);
+  if (night === INTRO.woman) add('woman', 25, 45);
+  else if (night > INTRO.woman && (ev.blood || again(0.5))) add('woman', 20, 90);
+  if (night === INTRO.clown) add('clown', 80, 100);
+  else if (night > INTRO.clown && again(0.45)) add('clown', 20, NIGHT_LEN - 40);
+  if (night === INTRO.tv) add('tv', 25, 45);
+  else if (night > INTRO.tv && again(0.45)) add('tv', 20, NIGHT_LEN - 40);
+  if (night === INTRO.momo) add('momo', 75, 95);
+  else if (night > INTRO.momo && again(0.45)) add('momo', 15, 80);
+  if (night >= INTRO.tall && (ev.blood || night === INTRO.tall || again(0.3))) add('tall', 15, 60);
   if (night === LAST_NIGHT) showBig('最後一夜', '🩸 血月之夜：撐到天亮就贏了！');
   else showBig(`第 ${night} 夜`, ev.blood ? '🩸 血月之夜：怪物更多、等級更高' : '拿好手電筒');
   Sound.play('dusk');
   if (night === 1) toast('🌙 夜晚來了。燈光擋不住怪物，但待在亮處理智不會掉。按 F 開手電筒，照著怪物可以扣牠的血！', 'warn');
+  if (night > 1 && Object.values(INTRO).includes(night)) toast('📖 今晚會有新的怪物出現……可以先去「怪物圖鑑」看看怎麼對付牠們。', 'warn');
 }
 function startDay(d) {
   G.day = d; G.phase = 'day'; G.t = 0; G.power = true;
   for (const e of G.enemies) puff(e.x, e.y);
-  G.enemies = []; G.ghosts = []; G.fireballs = [];
+  G.enemies = []; G.ghosts = []; G.fireballs = []; G.shots = []; G.bombs = []; G.spray = 0;
   Object.assign(G.ev, { knock: 0, phone: 0, closet: 0, bedTimer: 0, bedWarned: false, duskWarned: false, blood: false, schedule: [], merchantBye: 0 });
   for (const o of [...G.sockets, ...G.lamps]) { o.dying = 0; o.eaten = 0; }
   G.stare = 0;
@@ -1759,7 +2042,7 @@ function triggerEvent(type) {
     }
     case 'flower': {
       let grown = 0;
-      for (let i = 0, k = G.day === 7 ? 2 : 1 + (Math.random() < 0.4); i < k; i++) if (spawnFlower()) grown++;
+      for (let i = 0, k = G.day === INTRO.flower ? 2 : 1 + (Math.random() < 0.4); i < k; i++) if (spawnFlower()) grown++;
       if (!grown) break;
       toast(ev.flowerTip ? `🌼 屋子裡又長出了 ${grown} 朵眼球花。` : '🌼 屋子裡長出了眼球花……被它盯 3 秒它就會尖叫！用手電筒照它，或走過去按住 E 拔掉。', 'warn');
       ev.flowerTip = 1;
@@ -1791,7 +2074,7 @@ function triggerEvent(type) {
     case 'tall':
       if (spawnEnemy('tall')) {
         Sound.play('tall');
-        toast('👁️ 有個高大的東西進了屋子……只有 LED（第 3 級）以上的燈擋得住它。', 'warn');
+        toast('👁️ 有個高大的東西進了屋子……它非常耐打，用手電筒和武器一起對付它！', 'warn');
       }
       break;
   }
@@ -1803,6 +2086,7 @@ function updateTime(dt) {
     if (G.day === 1) {
       if (G.t > 3 && !ev.tip1) { ev.tip1 = 1; toast('👉 走到櫃子、箱子旁邊按住 E 搜索，找燈泡！'); }
       if (G.t > 18 && !ev.tip2) { ev.tip2 = 1; toast('👉 選中燈泡，走到圓形的天花板燈座旁按 Q 安裝。'); }
+      if (G.t > 27 && !ev.tipPan && !G.inv.pan) { ev.tipPan = 1; toast('🍳 廚房的抽屜裡好像有一個平底鍋，可以拿來打怪物！'); }
       if (G.t > 36 && !ev.tip3) { ev.tip3 = 1; toast('👉 檯燈可以按 Q 放在地上，再裝上燈泡。燈泡等級越高照越遠。'); }
       if (G.t > 55 && !ev.tip4) { ev.tip4 = 1; toast('🪙 搜索會找到硬幣：地下室的神秘商人會賣東西，車庫有扭蛋機，儲藏室有工作台。'); }
       if (G.t > 75 && !ev.tip5 && G.treasure) { ev.tip5 = 1; toast(`⭐ 每天都有一顆寶藏星星藏在屋子裡，今天在「${G.treasure.room}」。`); }
@@ -1840,7 +2124,7 @@ function updateEvents(dt) {
       ev.closet = 0;
       const e = spawnEnemy('fast', { x: 30.5, y: 2.5 });
       if (e) e.spawn = 0.4;
-      p.san -= 12;
+      p.san -= 12 * D().san;
       Sound.play('hurt');
       toast('衣櫃門猛然打開！有東西衝了出來！', 'warn');
     }
@@ -1933,15 +2217,15 @@ function updatePlayer(dt) {
 
   // 狀態
   const n = diffN();
-  p.hunger -= 0.18 * dt;
+  p.hunger -= 0.18 * D().hunger * dt;
   if (p.hunger <= 0) { p.hunger = 0; p.hp -= 0.8 * dt; }
   const L = lightAt(p.x, p.y);
   if (G.phase === 'night') {
-    if (L < 0.3) p.san -= (1.6 + n * 0.03) * (flashOn() ? 0.65 : 1) * (G.ev.blood ? 1.3 : 1) * dt;
+    if (L < 0.3) p.san -= (1.6 + n * 0.03) * (flashOn() ? 0.65 : 1) * (G.ev.blood ? 1.3 : 1) * D().san * dt;
     else p.san += 2 * L * dt;
   } else p.san += 1.2 * dt;
   if (p.san <= 0) { p.san = 0; p.hp -= 2 * dt; }
-  if (p.hunger > 60 && p.san > 50) p.hp += 0.2 * dt;
+  if (p.hunger > 60 && p.san > 50) p.hp += (0.2 + (1 - D().dmg) * 0.3) * dt;
   p.san = clamp(p.san, 0, 100); p.hp = Math.min(100, p.hp); p.hunger = Math.min(100, p.hunger);
 
   // 心跳聲
@@ -2065,8 +2349,8 @@ function answerPhone() {
     Sound.play('dawn');
     toast(`☎️ 一個溫柔的聲音說：「${f.room.name}的${f.name}裡……有光。」`, 'good');
   } else {
-    G.p.san -= 15;
-    if (G.day >= 9 && !G.enemies.some(e => e.kind === 'momo') && Math.random() < 0.4) {
+    G.p.san -= 15 * D().san;
+    if (G.day >= INTRO.momo && !G.enemies.some(e => e.kind === 'momo') && Math.random() < 0.4) {
       const e = spawnEnemy('momo');
       if (e) {
         e.state = 'hunt'; setMomoTarget(e, G.p.x, G.p.y);
@@ -2085,7 +2369,7 @@ function openFrontDoor() {
   if (G.phase === 'night' && ev.knock > 0) {
     ev.knock = 0;
     for (const at of [{ x: 1.5, y: 12.5 }, { x: 1.6, y: 11.6 }]) { const e = spawnEnemy('shadow', at); if (e) e.spawn = 0.3; }
-    G.p.san -= 20; G.shake = 0.6;
+    G.p.san -= 20 * D().san; G.shake = 0.6;
     Sound.play('hurt');
     toast('你打開了門……門外什麼都沒有。然後，有東西擠了進來！', 'warn');
   } else if (G.phase === 'night') toast('門外一片漆黑……還是別開了。');
@@ -2119,6 +2403,13 @@ function useSelected() {
     }
     case 'lamp': placeLamp(it.lamp, id); break;
     case 'key': toast('🗝️ 走到上鎖的寶箱前按 E 就會用鑰匙打開。'); break;
+    case 'weapon': useWeapon(id); break;
+    case 'ammo': {
+      const gun = id === 'marble' ? 'slingshot' : 'watergun';
+      toast(G.inv[gun] ? `${it.icon} 在物品欄選${ITEMS[gun].name}，按 Q 就會用掉${it.name}。` : `${it.icon} 要先找到${ITEMS[gun].name}才能用${it.name}。`);
+      break;
+    }
+    case 'charm': toast('📿 護身符帶在身上就有效，被怪物抓到只扣一半的血。'); break;
     case 'bulb': {
       const fx = nearestFixture();
       if (!fx) { toast('靠近天花板燈座或燈具才能安裝燈泡。'); return; }
@@ -2192,6 +2483,7 @@ function update(dt) {
   updateAngels(dt);
   updateFireLamps(dt);
   updateFireballs(dt);
+  updateWeapons(dt);
   updatePickups(dt);
   updateBulbs(dt);
   flowTimer -= dt;
@@ -2411,8 +2703,16 @@ function renderHotbar() {
   }).join('');
   const it = G.selId && ITEMS[G.selId];
   let hint = '';
-  if (it) hint = { bulb: '[Q] 裝到看著的燈座／燈具', lamp: '[Q] 放在前方', food: '[Q] 使用', battery: '[Q] 換電池', candle: '[Q] 點蠟燭' }[it.kind];
+  if (it) hint = { bulb: '[Q] 裝到看著的燈座／燈具', lamp: '[Q] 放在前方', food: '[Q] 使用', battery: '[Q] 換電池', candle: '[Q] 點蠟燭', weapon: '[Q] 攻擊', charm: '帶在身上就有效' }[it.kind] || '';
+  if (G.selId === 'slingshot') hint = `[Q] 發射（彈珠 ${G.inv.marble || 0} 顆）`;
+  if (G.selId === 'watergun') hint = `[Q] 噴聖水（聖水 ${G.inv.holywater || 0} 瓶）`;
   $('itemInfo').innerHTML = it ? `<b>${it.name}</b>　${it.desc}<span class="hint">${hint}</span>` : '';
+  // 觸控的 Q 按鈕顯示現在拿著的東西
+  const q = document.querySelector('#tbtns .tb[data-k="q"]');
+  const [ic, lb] = !it ? ['Q', '使用'] : it.kind === 'weapon' ? [it.icon, '攻擊'] : it.kind === 'food' ? [it.icon, it.hp ? '治療' : '吃'] :
+    it.kind === 'bulb' ? ['💡', '安裝'] : it.kind === 'lamp' ? ['Q', '放下'] : it.kind === 'battery' ? [it.icon, '換電池'] : it.kind === 'candle' ? [it.icon, '點蠟燭'] : ['Q', '使用'];
+  const qh = `${ic}<small>${lb}</small>`;
+  if (q && q.dataset.h !== qh) { q.innerHTML = qh; q.dataset.h = qh; }
 }
 function setBar(id, v) {
   const el = $(id);
@@ -2516,6 +2816,7 @@ function releaseInputs() {
 function pauseGame() {
   if (mode !== 'play') return;
   mode = 'pause';
+  $('pauseDiff').textContent = `難度：${diffName(G.diff)}`;
   Sound.setDrone(0);
   releaseInputs();
   if (document.pointerLockElement) document.exitPointerLock();
@@ -2669,18 +2970,19 @@ function showBuild() {
   $('buildInfo').textContent = t;
   $('buildInfoPause').textContent = t;
 }
+const diffName = d => (DIFFS[d] || DIFFS.normal).name;
 function refreshTitle() {
   showBuild();
   const s = readSave();
   $('btnContinue').disabled = !s;
-  $('saveInfo').textContent = s ? `存檔：第 ${s.day} 天早上` : '還沒有存檔';
+  $('saveInfo').textContent = s ? `存檔：第 ${Math.min(s.day, LAST_NIGHT)} 天早上（${diffName(s.diff)}）` : '還沒有存檔';
 }
 function toTitle() {
   mode = 'title';
   Sound.setDrone(0);
   if (document.pointerLockElement) document.exitPointerLock();
   G = demoState();
-  for (const id of ['pause', 'gameover', 'help', 'book']) $(id).classList.add('hidden');
+  for (const id of ['pause', 'gameover', 'help', 'book', 'diffPick']) $(id).classList.add('hidden');
   $('hud').classList.add('hidden');
   $('title').classList.remove('hidden');
   refreshTitle();
@@ -2689,8 +2991,11 @@ let helpFrom = 'title';
 $('btnNew').onclick = () => {
   Sound.init();
   if (readSave() && !confirm('開始新遊戲會覆蓋目前的存檔，確定嗎？')) return;
-  newGame();
+  $('title').classList.add('hidden');
+  $('diffPick').classList.remove('hidden');
 };
+for (const b of document.querySelectorAll('#diffPick .diffbtn')) b.onclick = () => { Sound.init(); newGame(b.dataset.d); };
+$('btnDiffBack').onclick = () => { $('diffPick').classList.add('hidden'); $('title').classList.remove('hidden'); };
 $('btnContinue').onclick = () => {
   Sound.init();
   if (!loadGame()) return;
