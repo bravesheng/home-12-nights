@@ -4,7 +4,7 @@
 const VERSION = 'home12-v8';
 const ASSETS = [
   './', './index.html', './style.css', './manifest.webmanifest',
-  './js/data.js', './js/audio.js', './js/game.js', './js/render3d.js',
+  './js/version.js', './js/data.js', './js/audio.js', './js/game.js', './js/render3d.js',
   './lib/three.module.js', './lib/three.core.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png',
 ];

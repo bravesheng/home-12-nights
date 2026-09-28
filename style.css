@@ -185,6 +185,7 @@ button:hover { filter: brightness(1.1); }
 button:disabled { opacity: .35; cursor: default; filter: none; }
 button.ghost { background: rgba(255, 255, 255, .08); color: #eee; font-weight: 500; }
 .small { font-size: 13px; opacity: .6; margin-top: 14px; }
+.small.build { margin-top: 6px; font-size: 12px; opacity: .6; letter-spacing: .5px; }
 .cols { display: grid; grid-template-columns: 1fr 1.4fr; gap: 26px; }
 @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
 .keys td { padding: 4px 8px 4px 0; font-size: 14px; }

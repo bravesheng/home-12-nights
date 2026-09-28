@@ -2663,7 +2663,14 @@ $('hotbar').addEventListener('click', e => {
 addEventListener('resize', resize);
 
 // ---------- 選單按鈕 ----------
+// 顯示發布時間，方便確認平板上跑的是哪一版
+function showBuild() {
+  const t = '版本：' + (typeof BUILD_TIME === 'string' ? BUILD_TIME : '未知');
+  $('buildInfo').textContent = t;
+  $('buildInfoPause').textContent = t;
+}
 function refreshTitle() {
+  showBuild();
   const s = readSave();
   $('btnContinue').disabled = !s;
   $('saveInfo').textContent = s ? `存檔：第 ${s.day} 天早上` : '還沒有存檔';
