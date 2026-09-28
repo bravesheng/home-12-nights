@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#07060b">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <title>在家生存 12 夜</title>
+  <link rel="stylesheet" href="style.css?v=7">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- 遊戲中介面 -->
+  <div id="hud" class="hidden">
+    <div id="vignette" class="fxl"></div>
+    <div id="hurtfx" class="fxl"></div>
+    <div id="bloodfx" class="fxl"></div>
+    <div id="cross"></div>
+    <div id="prompt"></div>
+    <canvas id="minimap"></canvas>
+    <div id="clock">
+      <div id="dayLabel">第 1 天</div>
+      <div id="phaseBar"><div id="phaseFill"></div></div>
+      <div id="phaseText">06:00</div>
+      <div id="alert"></div>
+    </div>
+    <div id="bars">
+      <div class="bar"><span class="ico">❤️</span><div class="track"><div id="hpFill" class="fill hp"></div></div></div>
+      <div class="bar"><span class="ico">🧠</span><div class="track"><div id="sanFill" class="fill san"></div></div></div>
+      <div class="bar"><span class="ico">🍗</span><div class="track"><div id="hungerFill" class="fill hunger"></div></div></div>
+      <div class="bar"><span class="ico">🔦</span><div class="track"><div id="batFill" class="fill bat"></div></div></div>
+      <div class="bar"><span class="ico">🏃</span><div class="track"><div id="stamFill" class="fill stam"></div></div></div>
+      <div class="coins">🪙 <b id="coinText">0</b></div>
+      <div class="bar hidden" id="noiseBar"><span class="ico">👂</span><div class="track"><div id="noiseFill" class="fill noise"></div></div></div>
+    </div>
+    <div id="bottom">
+      <div id="itemInfo"></div>
+      <div id="hotbar"></div>
+    </div>
+    <div id="toasts"></div>
+    <div id="bigText"></div>
+
+    <!-- 平板觸控操作 -->
+    <div id="touch">
+      <div id="stick"><div id="knob"></div></div>
+      <div id="tbtns">
+        <button class="tb" data-k="r">R<small>拿起</small></button>
+        <button class="tb" data-k="f">🔦<small>手電筒</small></button>
+        <button class="tb" data-k="q">Q<small>使用</small></button>
+        <button class="tb big" data-k="e">E<small>互動</small></button>
+      </div>
+      <button id="tpause" class="tb">⏸</button>
+    </div>
+  </div>
+
+  <canvas id="jumpscare"></canvas>
+
+  <!-- 主選單 -->
+  <div id="title" class="screen">
+    <div class="panel title-panel">
+      <div class="logo">🏠</div>
+      <h1>在家生存 <span class="num">12</span> 夜</h1>
+      <p class="sub">停電了。屋子裡有東西。<br>白天找燈泡，晚上待在光裡。撐過 12 個夜晚！</p>
+      <p class="tag">3D 第一人稱</p>
+      <div class="btns">
+        <button id="btnContinue">繼續遊戲</button>
+        <button id="btnNew">新遊戲</button>
+        <button id="btnHelp" class="ghost">玩法說明</button>
+        <button id="btnBook" class="ghost">怪物圖鑑</button>
+        <button id="btnTransfer" class="ghost">存檔轉移</button>
+      </div>
+      <p id="saveInfo" class="small"></p>
+    </div>
+  </div>
+
+  <!-- 說明 -->
+  <div id="help" class="screen hidden">
+    <div class="panel">
+      <h2>玩法說明</h2>
+      <div class="cols">
+        <div>
+          <h3>操作</h3>
+          <table class="keys">
+            <tr><td>點一下畫面</td><td>鎖定滑鼠</td></tr>
+            <tr><td>滑鼠 / <kbd>←</kbd><kbd>→</kbd></td><td>轉頭（手電筒照向你看的地方）</td></tr>
+            <tr><td><kbd>W A S D</kbd></td><td>移動</td></tr>
+            <tr><td><kbd>Shift</kbd></td><td>奔跑</td></tr>
+            <tr><td><kbd>C</kbd></td><td>慢慢走（很安靜）</td></tr>
+            <tr><td><kbd>F</kbd></td><td>開 / 關手電筒</td></tr>
+            <tr><td><kbd>E</kbd> / 左鍵</td><td>互動（按住搜索）</td></tr>
+            <tr><td><kbd>Q</kbd> / 右鍵</td><td>使用選中的物品</td></tr>
+            <tr><td><kbd>R</kbd></td><td>拿回燈具 / 拆下燈泡</td></tr>
+            <tr><td><kbd>1</kbd>–<kbd>0</kbd> / 滾輪</td><td>切換物品</td></tr>
+            <tr><td><kbd>M</kbd></td><td>靜音</td></tr>
+            <tr><td><kbd>Esc</kbd></td><td>暫停</td></tr>
+          </table>
+          <h3>平板觸控</h3>
+          <table class="keys">
+            <tr><td>左半邊拖曳</td><td>移動（輕推慢慢走、推到底奔跑）</td></tr>
+            <tr><td>右半邊滑動</td><td>轉頭看四周</td></tr>
+            <tr><td>右下按鈕</td><td>E 互動（可按住）、Q 使用、🔦、R 拿起</td></tr>
+            <tr><td>下方物品欄</td><td>點一下切換物品</td></tr>
+          </table>
+        </div>
+        <div>
+          <h3>生存守則</h3>
+          <ul>
+            <li>☀️ <b>白天</b>：搜索櫃子、箱子、冰箱（有東西的會閃光）。看著它按住 E。物資每天早上會刷新。</li>
+            <li>💡 <b>燈泡</b>分 10 級，等級越高照得越遠、越華麗。看著天花板的吊燈按 Q 裝上，或先放下檯燈 / 落地燈再裝上燈泡。</li>
+            <li>🌙 <b>晚上</b>：待在燈光下。黑暗會讓理智下降，黑影只敢在暗處活動。</li>
+            <li>⚡ <b>停電</b>時所有燈都會熄滅，拿手電筒去<b>洗衣間的電箱</b>按住 E 恢復電力。</li>
+            <li>🚪 晚上有人敲門……<b>千萬不要開門</b>。</li>
+            <li>🛏️ 衣櫃在晃？按住 E 壓住它，或讓它照到光。床邊不要待在暗處。</li>
+            <li>⚫ <b>黑球</b>（第 3 夜起）：不會追你，專門去<b>吃燈</b>，每吃一次燈泡就降一級。燈光擋不住它，只有<b>手電筒</b>照它才能消滅它。</li>
+            <li>😢 <b>血淚女</b>（第 4 夜起）：你<b>看著她</b>她就不會動，但一直盯著她理智會快速下降。她怕燈光，會在黑暗的門口等你。聽到哭聲越來越近，就快轉頭找她！</li>
+            <li>👁️ 第 5 夜之後，高大的「它」可能會出現。只有 <b>LED（第 3 級）以上</b>的燈光擋得住它。</li>
+            <li>📖 第 6～10 夜每晚會出現一隻新怪物：火柴人、眼球花、爬行女、鳥腳女、小丑。牠們的弱點都不一樣，去<b>怪物圖鑑</b>看看怎麼對付。</li>
+            <li>💡 <b>特殊燈泡</b>：✨星空燈泡照得最遠；😇天使燈泡會飛出去打怪物（停電也會）；🟢粘液燈泡不會發光，但黏液會讓怪物變很慢。</li>
+            <li>🪙 <b>硬幣</b>：搜索、打倒怪物會拿到硬幣。白天可以去地下室找<b>神秘商人</b>買東西，或到車庫<b>轉扭蛋</b>。</li>
+            <li>🔧 儲藏室的<b>工作台</b>：3 顆一樣的燈泡合成 1 顆高一級的。</li>
+            <li>🎁 每天早上床邊有<b>禮物</b>（前一晚表現越好越好）；⭐ 屋子裡藏著<b>寶藏星星</b>；📦 白天有<b>送貨員</b>敲門；🗝️ 找到<b>鑰匙</b>可以打開上鎖的寶箱。</li>
+            <li>👻 打倒怪物有時候會<b>掉東西</b>，走過去就能撿起來。</li>
+            <li>💾 每天早上自動存檔。</li>
+          </ul>
+        </div>
+      </div>
+      <div class="btns"><button id="btnHelpBack">返回</button></div>
+    </div>
+  </div>
+
+  <!-- 工作台／商人／扭蛋機／獎勵共用的視窗 -->
+  <div id="modal" class="screen hidden">
+    <div class="panel modal-panel">
+      <div class="mhead"><h2 id="mTitle"></h2><span class="coinpill">🪙 <b id="mCoins">0</b></span></div>
+      <div id="mBody"></div>
+      <div class="btns"><button id="mClose" class="ghost">離開</button></div>
+    </div>
+  </div>
+
+  <!-- 存檔轉移：把存檔從一個網址搬到另一個（例如從 Wi-Fi 網址搬到網頁 App） -->
+  <div id="transfer" class="screen hidden">
+    <div class="panel small-panel transfer-panel">
+      <h2>存檔轉移</h2>
+      <p class="small">用 Wi-Fi 網址玩和用網頁 App 玩，存檔是分開的。在舊的地方複製存檔代碼，到新的地方貼上就能接著玩。</p>
+      <h3>1. 複製這裡的存檔</h3>
+      <textarea id="saveOut" readonly></textarea>
+      <div class="btns"><button id="btnCopySave">複製存檔代碼</button></div>
+      <h3>2. 貼上別的地方的存檔</h3>
+      <textarea id="saveIn" placeholder="把存檔代碼貼在這裡"></textarea>
+      <div class="btns"><button id="btnLoadSave">讀取這個存檔</button></div>
+      <p id="transferMsg" class="small"></p>
+      <div class="btns"><button id="btnTransferBack" class="ghost">返回</button></div>
+    </div>
+  </div>
+
+  <!-- 怪物圖鑑 -->
+  <div id="book" class="screen hidden">
+    <div class="panel">
+      <h2>怪物圖鑑</h2>
+      <div id="bookList" class="book"></div>
+      <div class="btns"><button id="btnBookBack">返回</button></div>
+    </div>
+  </div>
+
+  <!-- 暫停 -->
+  <div id="pause" class="screen hidden">
+    <div class="panel small-panel">
+      <h2>暫停</h2>
+      <div class="btns col">
+        <button id="btnResume">繼續</button>
+        <button id="btnMute" class="ghost">🔊 聲音：開</button>
+        <button id="btnPauseHelp" class="ghost">玩法說明</button>
+        <button id="btnPauseBook" class="ghost">怪物圖鑑</button>
+        <button id="btnQuit" class="ghost">回主選單</button>
+      </div>
+      <p class="small">遊戲會在每天早上自動存檔。</p>
+    </div>
+  </div>
+
+  <!-- 結束 -->
+  <div id="gameover" class="screen hidden">
+    <div class="panel small-panel">
+      <h2 id="goTitle">你倒下了……</h2>
+      <p id="goText"></p>
+      <div class="btns col">
+        <button id="btnRetry">從上次存檔重來</button>
+        <button id="btnGoMenu" class="ghost">回主選單</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/data.js?v=7"></script>
+  <script src="js/audio.js?v=7"></script>
+  <script src="js/game.js?v=7"></script>
+  <script type="module" src="js/render3d.js?v=7"></script>
+</body>
+</html>
