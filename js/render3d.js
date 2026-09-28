@@ -1432,6 +1432,77 @@ function syncExtras(t) {
   for (const [pk, s] of pickMap) if (!seen.has(pk)) { scene.remove(s); s.material.dispose(); pickMap.delete(pk); }
 }
 
+// ====================================================================
+// 怪物頭上的等級與血條、火焰燈泡的火球
+// ====================================================================
+function barH(t) {
+  if (!t.kind) return 1.72;
+  switch (t.kind) {
+    case 'tall': return 2.85;
+    case 'fast': return 1.45;
+    case 'blob': return (t.h || 0.4) + 0.4 * (t.size || 1) + 0.3;
+    case 'woman': return 2.05;
+    case 'momo': return 2.1 + (t.air || 0) * 0.45;
+    case 'crawler': return 1.0;
+    case 'balloon': return 2.25;
+    case 'clown': return 2.55;
+    case 'stick': return 1.95;
+    default: return 2.0;
+  }
+}
+function drawHpBar(c, t, ratio) {
+  c.clearRect(0, 0, 160, 44);
+  c.fillStyle = 'rgba(8,6,12,.6)';
+  c.beginPath(); c.roundRect(0, 0, 160, 44, 10); c.fill();
+  c.font = 'bold 17px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillStyle = BOSSES.includes(t.kind) ? '#ffb347' : '#f0ecf5';
+  c.fillText(`Lv.${t.lv} ${MONSTER_NAME[kindOf(t)]}`, 80, 14);
+  c.fillStyle = '#3a0a10'; c.fillRect(10, 28, 140, 9);
+  c.fillStyle = ratio > 0.5 ? '#e6394a' : ratio > 0.25 ? '#ff8a2a' : '#ffd23a';
+  c.fillRect(10, 28, 140 * ratio, 9);
+}
+const hpMap = new Map();
+function syncHpBars() {
+  const p = G.p, seen = new Set();
+  if (mode !== 'title') for (const t of [...G.enemies, ...G.flowers]) {
+    if (!t.maxHp) continue;
+    seen.add(t);
+    let b = hpMap.get(t);
+    if (!b) {
+      const cv = document.createElement('canvas'); cv.width = 160; cv.height = 44;
+      const tex = new THREE.CanvasTexture(cv); tex.colorSpace = SRGB;
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false }));
+      sp.scale.set(0.8, 0.22, 1); scene.add(sp);
+      b = { ctx: cv.getContext('2d'), tex, sp, key: '' };
+      hpMap.set(t, b);
+    }
+    const ratio = clamp(t.hp / t.maxHp, 0, 1), d = Math.hypot(t.x - p.x, t.y - p.y);
+    const key = t.lv + ':' + Math.ceil(ratio * 40);
+    if (key !== b.key) { b.key = key; drawHpBar(b.ctx, t, ratio); b.tex.needsUpdate = true; }
+    b.sp.visible = !t.dead && d < 11 && (ratio < 1 || d < 7) && (t.kind ? enemyAlpha(t) > 0.1 : t.grow >= 1);
+    b.sp.position.set(t.x, barH(t), t.y);
+  }
+  for (const [t, b] of hpMap) if (!seen.has(t)) { scene.remove(b.sp); b.sp.material.dispose(); b.tex.dispose(); hpMap.delete(t); }
+}
+const fbMap = new Map();
+function syncFireballs(t) {
+  const seen = new Set();
+  for (const f of G.fireballs || []) {
+    seen.add(f);
+    let r = fbMap.get(f);
+    if (!r) {
+      const g = new THREE.Group();
+      const outer = ownSprite(glowTex, 0xff7a1a), core = ownSprite(glowTex, 0xffe08a);
+      outer.scale.setScalar(0.55); core.scale.setScalar(0.22);
+      g.add(outer, core); scene.add(g);
+      r = { g, outer }; fbMap.set(f, r);
+    }
+    r.g.position.set(f.x, f.h, f.y);
+    r.outer.scale.setScalar(0.5 + 0.1 * Math.sin(t * 30));
+  }
+  for (const [f, r] of fbMap) if (!seen.has(f)) { disposeGroup(r.g); fbMap.delete(f); }
+}
+
 const enemyMap = new Map();
 function eyePair(g, y, z, color, size, gap) {
   const eyes = [];
@@ -1663,6 +1734,8 @@ function render(dt) {
   syncFlowers(t);
   syncAngels(t);
   syncExtras(t);
+  syncFireballs(t);
+  syncHpBars();
   syncGhosts();
   syncParticles();
   updateFurniture(t);

@@ -97,7 +97,7 @@ function freshState() {
     inv: {}, selId: null,
     sockets: SOCKETS.map(s => ({ kind: 'socket', type: 'socket', id: s.id, x: s.x, y: s.y, room: s.room, bulb: 0, dying: 0 })),
     lamps: [], candles: [], containers: {}, flowers: [],
-    coins: 0, pickups: [], chests: {}, gift: null, treasure: null, stock: [], nightStats: null,
+    coins: 0, pickups: [], chests: {}, gift: null, treasure: null, stock: [], nightStats: null, fireballs: [],
     enemies: [], fx: [], ghosts: [], lights: [],
     ev: { schedule: [], blood: false, knock: 0, knockTick: 0, phone: 0, phoneTick: 0, closet: 0, closetTick: 0, closetLight: 0,
           bedTimer: 0, bedCd: 0, bedWarned: false, duskWarned: false, ghostT: 5, beatT: 0, whisperT: 10,
@@ -112,7 +112,7 @@ function newGame() {
   G = freshState();
   G.sockets.find(s => s.id === 's_living').bulb = 1;
   for (const f of FURN) if (f.loot) G.containers[f.id] = { items: [] };
-  refillContainers(0.85);
+  refillContainers(0.6);
   prepareDay();
   addItem('bulb1', 2); addItem('lamp_desk', 1); addItem('snack', 2); addItem('battery', 1); addItem('candle', 1);
   G.selId = 'bulb1';
@@ -141,7 +141,7 @@ function saveGame() {
     sockets: G.sockets.map(s => s.bulb),
     lamps: G.lamps.map(l => ({ type: l.type, x: l.x, y: l.y, bulb: l.bulb })),
     containers: G.containers, stats: G.stats,
-    flowers: G.flowers.map(f => ({ x: f.x, y: f.y })),
+    flowers: G.flowers.map(f => ({ x: f.x, y: f.y, lv: f.lv })),
     coins: G.coins, chests: G.chests, gift: G.gift, treasure: G.treasure, stock: G.stock,
     pickups: G.pickups.map(pk => ({ x: pk.x, y: pk.y, id: pk.id, n: pk.n })), delivery: G.ev.deliveryAt,
   };
@@ -163,7 +163,7 @@ function loadGame() {
   G.containers = s.containers || {};
   for (const f of FURN) if (f.loot && !G.containers[f.id]) G.containers[f.id] = { items: [] };
   G.stats = Object.assign(G.stats, s.stats || {});
-  G.flowers = (s.flowers || []).map(f => ({ ...newFlower(f.x, f.y), grow: 1 }));
+  G.flowers = (s.flowers || []).map(f => ({ ...setLevel(newFlower(f.x, f.y), 'flower', f.lv || 1), grow: 1 }));
   G.coins = s.coins || 0; G.chests = s.chests || {}; G.gift = s.gift || null; G.treasure = s.treasure || null;
   G.pickups = (s.pickups || []).map(pk => ({ ...pk, t: Math.random() * 6 }));
   G.ev.deliveryAt = s.delivery === undefined ? -1 : s.delivery;
@@ -184,12 +184,12 @@ function rollItem(table, level, day) {
   const k = weighted(LOOT[table]);
   return k === 'bulb' ? 'bulb' + rollTier(level, day) : k;
 }
-function refillContainers(chance = 0.55) {
+function refillContainers(chance = 0.35) {
   for (const f of FURN) {
     if (!f.loot) continue;
     const c = G.containers[f.id];
     if (c.items.length || Math.random() > chance) continue;
-    const n = Math.random() < 0.35 ? 2 : 1;
+    const n = Math.random() < 0.2 ? 2 : 1;
     for (let i = 0; i < n; i++) c.items.push(rollItem(f.loot, f.room.level, G.day));
   }
 }
@@ -222,7 +222,7 @@ function search(f) {
   if (!c.items.length) { toast(`${f.name}裡什麼都沒有。`); Sound.play('empty'); return; }
   const counts = {};
   for (const id of c.items) {
-    if (id === 'coin') { const n = randi(1, 2); addCoins(n); counts.coin = (counts.coin || 0) + n; }
+    if (id === 'coin') { const n = 1; addCoins(n); counts.coin = (counts.coin || 0) + n; }
     else { addItem(id); counts[id] = (counts[id] || 0) + 1; }
   }
   const best = Math.max(0, ...c.items.map(id => ITEMS[id].tier || 0));
@@ -278,19 +278,6 @@ function lightAt(x, y, minTier = 0) {
     if (i > best) best = i;
   }
   return best * scale;
-}
-function brightestLight(x, y, minTier = 0) {
-  let best = null, bi = 0;
-  const tx = Math.floor(x), ty = Math.floor(y);
-  const room = inMap(tx, ty) ? roomGrid[ty][tx] : null;
-  for (const L of G.lights) {
-    if (L.tier < minTier || (room && L.room !== room)) continue;
-    const d = Math.hypot(x - L.x, y - L.y);
-    if (d >= L.r) continue;
-    const i = 1 - d / L.r;
-    if (i > bi) { bi = i; best = L; }
-  }
-  return best;
 }
 const flashOn = () => G.p.flash && G.p.bat > 0;
 function castRay(x, y, a, maxD) {
@@ -391,10 +378,58 @@ function findSpawn(minDist = 9) {
     if (isSolid(x, y)) continue;
     const d = flow[y][x];
     if (d === Infinity || d < minDist) continue;
-    if (lightAt(x + 0.5, y + 0.5) > 0.1) continue;
     return { x: x + 0.5, y: y + 0.5 };
   }
   return null;
+}
+
+// ====================================================================
+// 怪物的等級與血量：手電筒、天使、火球都會扣血，血扣光就打倒了
+// ====================================================================
+const FL_DPS = 1;                // 手電筒每秒對怪物造成的傷害
+const BASE_HP = { shadow: 1, fast: 0.8, blob: 1.3, stick: 1.5, balloon: 0.8, flower: 1.5, woman: 4, momo: 4, crawler: 3.5, clown: 4, tall: 6 };
+const MONSTER_NAME = { shadow: '黑影', fast: '衣櫃怪', blob: '黑球', stick: '火柴人', balloon: '紅氣球', flower: '眼球花', woman: '血淚女', momo: '鳥腳女', crawler: '爬行女', clown: '小丑', tall: '它' };
+const BOSSES = ['woman', 'momo', 'crawler', 'clown', 'tall'];
+const kindOf = t => t.kind || 'flower';
+function rollLevel() {
+  let lv = 1 + Math.floor((G.day - 1) / 2) + (Math.random() < 0.35 ? 1 : 0);
+  if (G.ev && G.ev.blood) lv++;
+  return clamp(lv, 1, 8);
+}
+function setLevel(m, kind, lv) {
+  m.lv = lv;
+  m.maxHp = BASE_HP[kind] * (1 + 0.4 * (lv - 1));
+  m.hp = m.maxHp;
+  return m;
+}
+const initHp = (m, kind) => setLevel(m, kind, rollLevel());
+function hurtMonster(t, dmg) {
+  if (t.dead || !(t.hp > 0)) return;
+  t.hp -= dmg * (kindOf(t) === 'tall' ? 0.5 : 1); // 「它」很耐打
+  t.hitT = 0.3;
+  if (t.hp <= 0) defeatMonster(t);
+}
+// 手電筒照著怪物時每一幀呼叫
+function flashHurt(t, dt) {
+  hurtMonster(t, FL_DPS * dt);
+  if (Math.random() < dt * 12) G.fx.push({ type: 'spark', x: t.x + rand(-0.2, 0.2), y: t.y + rand(-0.2, 0.2), h: targetH(t) + rand(-0.3, 0.3), vx: rand(-0.4, 0.4), vy: rand(-0.4, 0.4), vh: rand(0, 0.8), life: 0.4, max: 0.4, color: [255, 240, 200] });
+}
+function defeatMonster(t) {
+  const kind = kindOf(t);
+  t.hp = 0; t.dead = true;
+  G.stats.dissolved++;
+  if (kind === 'flower') { puff(t.x, t.y, [70, 110, 60], 14, 1.2); Sound.play('dissolve'); }
+  else if (kind === 'balloon') { puff(t.x, t.y, [200, 20, 30], 12, 1.8); Sound.play('pop'); }
+  else if (kind === 'stick') { puff(t.x, t.y, [40, 30, 20], 16, 1); Sound.play('burn'); }
+  else { puff(t.x, t.y, [10, 6, 16], 18, targetH(t)); Sound.play('dissolve'); }
+  if (kind === 'blob' && t.target) t.target.eaten = 0;
+  if (kind === 'crawler') { G.ev.tvOn = false; G.ev.tvT = 0; }
+  onKill(t);
+  const msg = {
+    blob: '⚫ 黑球被打散了！', stick: '✏️ 火柴人被燒掉了！', balloon: '🎈 氣球破了！小丑找不到你了。', flower: '🌼 眼球花枯萎了。',
+    woman: '😢 血淚女消散了！', momo: '🐦 鳥腳女被打跑了！', crawler: '📺 爬行女被打倒了，電視也關掉了！', clown: '🤡 小丑被打倒了！', tall: '👁️ 你打倒了「它」！',
+  }[kind];
+  if (msg && (BOSSES.includes(kind) || !G.ev['kill_' + kind])) { G.ev['kill_' + kind] = 1; toast(`${msg}（Lv.${t.lv}）`, 'good'); }
 }
 
 // ====================================================================
@@ -403,7 +438,7 @@ function findSpawn(minDist = 9) {
 function spawnEnemy(kind, at) {
   const pos = at || findSpawn(['tall', 'woman', 'momo', 'balloon'].includes(kind) ? 12 : kind === 'stick' ? 10 : 8);
   if (!pos) return null;
-  const e = { kind, x: pos.x, y: pos.y, fade: 0, spawn: 1, wob: Math.random() * 10 };
+  const e = initHp({ kind, x: pos.x, y: pos.y, spawn: 1, wob: Math.random() * 10 }, kind);
   if (kind === 'blob') Object.assign(e, { size: 1, h: 0.4, eatT: 0, target: null, retarget: 0, slurpT: 0 });
   if (kind === 'woman') Object.assign(e, { cd: 0, sobT: 1, giggleT: 2, seen: false });
   if (kind === 'stick') Object.assign(e, { burn: 0, whistleT: 2 });
@@ -429,31 +464,11 @@ function updateEnemies(dt) {
     const edt = dt * slimeFactor(e.x, e.y); // 在黏液裡動作變慢
     if (SPECIAL_AI[e.kind]) { SPECIAL_AI[e.kind](e, edt); continue; }
     const beam = inBeam(e);
-    let dir = chaseDir(e);
+    const dir = chaseDir(e);
     let sp;
-    if (e.kind === 'tall') {
-      sp = Math.min(1.5 + n * 0.012, 2.6);
-      const src = lightAt(e.x, e.y, 3) > 0.15 ? brightestLight(e.x, e.y, 3) : null;
-      if (src) {
-        const vx = e.x - src.x, vy = e.y - src.y, l = Math.hypot(vx, vy) || 1;
-        dir = { x: vx / l, y: vy / l }; sp *= 1.2;
-      }
-      if (beam) sp *= 0.8;
-    } else {
-      sp = Math.min(1.8 + n * 0.025, 3.6) * (e.kind === 'fast' ? 1.5 : 1) * (G.ev.alarm > 0 ? 1.4 : 1);
-      const L = lightAt(e.x, e.y);
-      if (L > 0.2) {
-        e.fade += dt * (0.3 + L * 1.4);
-        const src = brightestLight(e.x, e.y);
-        if (src) { const vx = e.x - src.x, vy = e.y - src.y, l = Math.hypot(vx, vy) || 1; dir = { x: vx / l, y: vy / l }; }
-        sp *= 0.6;
-      } else if (!beam) e.fade = Math.max(0, e.fade - dt * 0.2);
-      if (beam) { e.fade += dt * 0.9; sp *= 0.35; }
-      if (e.fade >= 1) {
-        e.dead = true; puff(e.x, e.y); Sound.play('dissolve'); G.stats.dissolved++; onKill(e);
-        continue;
-      }
-    }
+    if (e.kind === 'tall') sp = Math.min(1.5 + n * 0.012, 2.6) * (beam ? 0.8 : 1);
+    else sp = Math.min(1.8 + n * 0.025, 3.6) * (e.kind === 'fast' ? 1.5 : 1) * (G.ev.alarm > 0 ? 1.4 : 1) * (beam ? 0.35 : 1);
+    if (beam) { flashHurt(e, dt); if (e.dead) continue; }
     if (e.spawn > 0) sp *= 0.3;
     move(e, dir.x * sp * edt, dir.y * sp * edt, ENEMY_R);
 
@@ -465,7 +480,7 @@ function hurtPlayer(e) {
   const p = G.p, n = diffN();
   if (e.kind === 'tall') {
     damage(35 + n * 0.15, 25);
-    toast('「它」抓住了你！快逃到明亮的地方！', 'warn');
+    toast('「它」抓住了你！快逃！', 'warn');
     const pos = findSpawn(14);
     if (pos) { e.x = pos.x; e.y = pos.y; e.spawn = 1.5; }
   } else {
@@ -495,13 +510,12 @@ function lookedAt(e) {
 }
 const nearVol = d => clamp(1.1 - d / 12, 0.12, 1);
 
-// 血淚女：你看著她就不會動，但盯著她理智會一直掉；怕燈光，會在暗處等你
+// 血淚女：你看著她就不會動，但盯著她理智會一直掉
 function updateWoman(e, dt) {
   const p = G.p, n = diffN();
   const d = Math.hypot(e.x - p.x, e.y - p.y);
   e.cd = Math.max(0, e.cd - dt);
-  if (lightAt(e.x, e.y) > 0.3) e.fade += dt * 1.2; else e.fade = Math.max(0, e.fade - dt * 0.5);
-  if (e.fade >= 1) { womanVanish(e, 12); return; }
+  if (inBeam(e)) { flashHurt(e, dt); if (e.dead) return; }
   e.seen = e.spawn <= 0 && lookedAt(e);
   if (e.seen) {
     const k = clamp(1.2 - d / 10, 0.3, 1);
@@ -513,9 +527,7 @@ function updateWoman(e, dt) {
   } else if (e.cd <= 0) {
     const dir = chaseDir(e);
     const sp = Math.min(2.2 + n * 0.012, 3.3) * (e.spawn > 0 ? 0.3 : 1);
-    const ox = e.x, oy = e.y;
     move(e, dir.x * sp * dt, dir.y * sp * dt, ENEMY_R);
-    if (lightAt(e.x, e.y) > 0.3) { e.x = ox; e.y = oy; } // 不肯走進燈光裡
     e.sobT -= dt;
     if (e.sobT <= 0 && d < 12) { Sound.play('sob', nearVol(d)); e.sobT = rand(2.5, 4.5); }
   }
@@ -532,10 +544,10 @@ function womanVanish(e, minDist) {
   puff(e.x, e.y, [40, 30, 40], 12, 1.3);
   const pos = findSpawn(minDist);
   if (pos) { e.x = pos.x; e.y = pos.y; }
-  e.fade = 0; e.spawn = 1.5;
+  e.spawn = 1.5;
 }
 
-// 黑球：不追你，專門去吃亮著的燈，把燈泡吸掉一級；只有手電筒能消滅它
+// 黑球：不追你，專門去吃燈，把燈泡吸掉一級（特殊燈泡直接吃掉）
 const EAT_TIME = 6;
 const isLitFixture = o => o.bulb > 0 && G.power;
 function blobTarget(e) {
@@ -553,8 +565,7 @@ function updateBlob(e, dt) {
   const p = G.p, n = diffN();
   const R = 0.4 * e.size;
   const beam = inBeam(e);
-  if (beam) e.fade += dt * 1.1; else e.fade = Math.max(0, e.fade - dt * 0.15);
-  if (e.fade >= 1) { killBlob(e); return; }
+  if (beam) { flashHurt(e, dt); if (e.dead) return; }
   e.retarget -= dt;
   if (!e.target || !isLitFixture(e.target) || e.retarget <= 0) {
     const nt = blobTarget(e);
@@ -606,22 +617,14 @@ function updateBlob(e, dt) {
 }
 function eatBulb(e, o) {
   const old = o.bulb;
-  o.bulb = old - 1; o.eaten = 0; o.dying = 0;
+  o.bulb = isSpecialBulb(old) ? 0 : old - 1; // 特殊燈泡被吃掉就直接消失
+  o.eaten = 0; o.dying = 0;
   e.eatT = 0; e.target = null; e.retarget = 0; e.warned = false;
   e.size = Math.min(1.7, e.size + 0.15);
   Sound.play('gulp');
   const bp = bulbPos(o);
   puff(bp.x, bp.y, [20, 10, 30], 10, bp.h);
   toast(`⚫ 黑球吞掉了${o.room.name}的光！${BULBS[old].name} → ${o.bulb ? BULBS[o.bulb].name : '燈泡沒了'}`, 'warn');
-}
-function killBlob(e) {
-  e.dead = true;
-  if (e.target) e.target.eaten = 0;
-  puff(e.x, e.y, [10, 6, 16], 18, e.h);
-  Sound.play('dissolve');
-  G.stats.dissolved++;
-  onKill(e);
-  if (!G.ev.blobKillTip) { G.ev.blobKillTip = 1; toast('⚫ 黑球被手電筒照散了！', 'good'); }
 }
 
 // 被血淚女抓到時，她的臉會撲到畫面上
@@ -780,7 +783,7 @@ const MAX_FLOWERS = 6;
 const HOP_DUR = 0.32;
 const TV_FLOOR = { x: 15, y: 16.5 };            // 電視前面的地板
 const tvEmergeTime = () => Math.max(8, 18 - diffN() * 0.25);
-const newFlower = (x, y) => ({ x, y, watch: 0, burn: 0, alarm: 0, sees: false, grow: 0 });
+const newFlower = (x, y) => initHp({ x, y, watch: 0, burn: 0, alarm: 0, sees: false, grow: 0 }, 'flower');
 
 function playerNoise() { return Math.max(G.p.noise || 0, G.p.noiseBurst || 0); }
 function makeNoise(r) { if (G) G.p.noiseBurst = Math.max(G.p.noiseBurst || 0, r); }
@@ -790,24 +793,20 @@ function findSpawnNear(cx, cy, rMin, rMax) {
     const x = Math.floor(cx + Math.cos(a) * d), y = Math.floor(cy + Math.sin(a) * d);
     if (!inMap(x, y) || isSolid(x, y) || tiles[y][x] !== 1) continue;
     if (flow && flow[y][x] === Infinity) continue;
-    if (lightAt(x + 0.5, y + 0.5) > 0.15) continue;
     return { x: x + 0.5, y: y + 0.5 };
   }
   return null;
 }
 
-// ---------- 火柴人：會穿牆、燈光擋不住，被手電筒照到會燒起來 ----------
+// ---------- 火柴人：會穿牆，被手電筒照到會燒起來 ----------
 function updateStick(e, dt) {
   const p = G.p, n = diffN();
   const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy) || 0.001;
   if (inBeam(e)) {
-    e.burn += dt;
+    e.burn = Math.min(1.4, e.burn + dt);
     if (Math.random() < dt * 30) G.fx.push({ type: 'ember', x: e.x + rand(-0.2, 0.2), y: e.y + rand(-0.2, 0.2), h: rand(0.2, 1.7), vx: rand(-0.2, 0.2), vy: rand(-0.2, 0.2), vh: rand(0.6, 1.4), life: rand(0.5, 1), max: 1, color: pick([[255, 200, 60], [255, 120, 30], [255, 80, 20]]) });
-    if (e.burn >= 1.4) {
-      e.dead = true; puff(e.x, e.y, [40, 30, 20], 16, 1); Sound.play('burn'); G.stats.dissolved++; onKill(e);
-      toast('✏️ 火柴人被手電筒燒掉了！', 'good');
-      return;
-    }
+    flashHurt(e, dt);
+    if (e.dead) return;
   } else e.burn = Math.max(0, e.burn - dt * 0.3);
   const sp = Math.min(1.1 + n * 0.008, 1.8) * (e.spawn > 0 ? 0.3 : 1) * (e.burn > 0 ? 0.5 : 1);
   e.x = clamp(e.x + dx / d * sp * dt, 0.5, MAP_W - 0.5);
@@ -821,7 +820,7 @@ function updateStick(e, dt) {
   }
 }
 
-// ---------- 眼球花：長在暗處不會動，盯著你 3 秒就尖叫、把黑影叫過來 ----------
+// ---------- 眼球花：長在屋子裡不會動，盯著你 3 秒就尖叫、把黑影叫過來 ----------
 function spawnFlower() {
   if (G.flowers.length >= MAX_FLOWERS) return false;
   if (!flow) computeFlow();
@@ -829,7 +828,6 @@ function spawnFlower() {
     const r = pick(ROOMS);
     const x = r.x + Math.floor(Math.random() * r.w), y = r.y + Math.floor(Math.random() * r.h);
     if (isSolid(x, y) || flow[y][x] === Infinity || flow[y][x] < 5) continue;
-    if (lightAt(x + 0.5, y + 0.5) > 0.15) continue;
     if ([...G.sockets, ...G.lamps].some(o => o.x === x && o.y === y)) continue;
     if (G.flowers.some(f => Math.hypot(f.x - x - 0.5, f.y - y - 0.5) < 2)) continue;
     G.flowers.push(newFlower(x + 0.5, y + 0.5));
@@ -847,12 +845,9 @@ function updateFlowers(dt) {
     if (!night || f.grow < 1) { f.watch = 0; continue; }
     const d = Math.hypot(f.x - p.x, f.y - p.y);
     if (d < 7 && inBeam(f)) {
-      f.burn += dt;
-      if (f.burn >= 1.5) {
-        f.dead = true; puff(f.x, f.y, [70, 110, 60], 14, 1.2); Sound.play('dissolve'); onKill(f);
-        toast('🌼 眼球花被照得閉上眼睛，枯萎了。', 'good');
-        continue;
-      }
+      f.burn = Math.min(1.5, f.burn + dt);
+      flashHurt(f, dt);
+      if (f.dead) continue;
     } else f.burn = Math.max(0, f.burn - dt * 0.5);
     f.sees = d < 9 && castRay(f.x, f.y, Math.atan2(p.y - f.y, p.x - f.x), d) >= d - 0.05;
     if (f.sees) {
@@ -906,6 +901,7 @@ function updateTV(dt) {
 function updateCrawler(e, dt) {
   const p = G.p, n = diffN(), d = Math.hypot(e.x - p.x, e.y - p.y);
   if (e.emerge > 0) { e.emerge -= dt; return; }
+  if (inBeam(e)) { flashHurt(e, dt); if (e.dead) return; }
   if (e.pauseT > 0) e.pauseT -= dt; // 一頓一頓地爬
   else {
     const sp = Math.min(2.5 + n * 0.012, 3.4) * (inBeam(e) ? 0.45 : 1);
@@ -939,7 +935,9 @@ function pickWander(e) {
 function updateMomo(e, dt) {
   const p = G.p, n = diffN(), d = Math.hypot(e.x - p.x, e.y - p.y);
   e.cd = Math.max(0, e.cd - dt); e.stun = Math.max(0, e.stun - dt); e.stunCd = Math.max(0, e.stunCd - dt);
-  if (e.stunCd <= 0 && d < 8 && inBeam(e)) {
+  const beam = d < 8 && inBeam(e);
+  if (beam) { flashHurt(e, dt); if (e.dead) return; }
+  if (e.stunCd <= 0 && beam) {
     e.stun = 2.5; e.stunCd = 6; e.hopping = 0; e.air = 0;
     Sound.play('cackle', nearVol(d) * 0.6);
     if (!G.ev.momoStunTip) { G.ev.momoStunTip = 1; toast('🐦 手電筒照到她的眼鏡反光，她暫時看不見了！', 'good'); }
@@ -982,12 +980,9 @@ function updateMomo(e, dt) {
 function updateBalloon(e, dt) {
   const p = G.p, n = diffN(), d = Math.hypot(e.x - p.x, e.y - p.y);
   if (d < 9 && inBeam(e)) {
-    e.burn += dt;
-    if (e.burn >= 1) {
-      e.dead = true; Sound.play('pop'); puff(e.x, e.y, [200, 20, 30], 12, 1.8); onKill(e);
-      toast('🎈 氣球被照破了！小丑找不到你了。', 'good');
-      return;
-    }
+    e.burn = Math.min(1, e.burn + dt);
+    flashHurt(e, dt);
+    if (e.dead) return;
   } else e.burn = Math.max(0, e.burn - dt * 0.5);
   const sp = Math.min(0.9 + n * 0.006, 1.5) * (e.spawn > 0 ? 0.3 : 1);
   const dir = chaseDir(e);
@@ -1008,16 +1003,16 @@ function clownAppears() {
   if (!e) return;
   e.spawn = 0.5;
   Sound.play('laugh');
-  toast('🤡 氣球破了……有人站在你背後！快跑到燈光下！', 'warn');
+  toast('🤡 氣球破了……有人站在你背後！快跑，或用手電筒打他！', 'warn');
 }
 function updateClown(e, dt) {
   const p = G.p, n = diffN(), d = Math.hypot(e.x - p.x, e.y - p.y);
   e.chase -= dt;
-  const lit = lightAt(e.x, e.y) > 0.4;
-  if (lit || e.chase <= 0) {
+  if (inBeam(e)) { flashHurt(e, dt); if (e.dead) return; }
+  if (e.chase <= 0) {
     e.dead = true; puff(e.x, e.y, [30, 20, 30], 14, 1);
     Sound.play('laugh', nearVol(d) * 0.7);
-    toast(lit ? '🤡 小丑討厭燈光，消失了。' : '🤡 小丑笑著消失在黑暗裡……', lit ? 'good' : '');
+    toast('🤡 小丑笑著消失在黑暗裡……');
     return;
   }
   const sp = Math.min(3.3 + n * 0.01, 4.2) * (e.spawn > 0 ? 0.3 : 1);
@@ -1242,16 +1237,16 @@ function thumbClown(c, S) {
   c.restore();
 }
 const BESTIARY = [
-  { name: '黑影', night: 1, draw: thumbShadow('#ff3344'), desc: '在黑暗中追你。怕燈光，被手電筒照一下就會散掉。' },
-  { name: '衣櫃怪', night: 2, draw: thumbShadow('#ffd23a', true), desc: '衣櫃晃動時沒壓住門、也沒用燈照它，就會衝出來，速度很快。' },
-  { name: '黑球', night: 3, draw: thumbBlob, desc: '不追你，專門去吃燈泡的光，每吃一次燈泡降一級。燈光擋不住它，只有手電筒能消滅它。' },
-  { name: '血淚女', night: 4, draw: drawWomanFace, desc: '你看著她，她就不會動；但一直盯著她，理智會快速下降。她怕燈光，會在黑暗的門口等你。' },
-  { name: '它', night: 5, draw: thumbTall, desc: '高大的黑影，只有 LED（第 3 級）以上的燈光擋得住它。' },
-  { name: '火柴人', night: 6, draw: thumbStick, desc: '會穿牆、燈光也擋不住，一邊吹口哨一邊朝你揮手走過來。紙做的身體被手電筒照到就會燒起來。' },
-  { name: '眼球花', night: 7, draw: thumbFlower, desc: '長在暗處、白天也不會消失。被它盯 3 秒它就會尖叫，把黑影叫過來。用手電筒照它，或走過去按住 E 拔掉。' },
-  { name: '爬行女', night: 8, draw: drawCrawlerFace, desc: '客廳的電視自己打開後，不快點關掉，她就會從螢幕裡爬出來。關掉電視可以把她吸回去。' },
-  { name: '鳥腳女', night: 9, draw: drawMomoFace, desc: '眼睛不好，靠聲音找你，一跳一跳地追過來。別奔跑，輕輕推搖桿慢慢走。手電筒照到她的眼鏡會讓她暫時看不見。' },
-  { name: '小丑', night: 10, draw: thumbClown, desc: '先會飄來一顆紅氣球，用手電筒把它照破。讓氣球碰到你，小丑就會拿著刀出現在你背後，快跑到燈光下！' },
+  { name: '黑影', night: 1, draw: thumbShadow('#ff3344'), desc: '到處追你，燈光也擋不住牠。手電筒照著牠會一直扣血，血扣光就消失。' },
+  { name: '衣櫃怪', night: 2, draw: thumbShadow('#ffd23a', true), desc: '衣櫃晃動時沒去按住 E 壓住門，就會衝出來，速度很快。' },
+  { name: '黑球', night: 3, draw: thumbBlob, desc: '不追你，專門去吃燈，每吃一次燈泡降一級，特殊燈泡會直接被吃掉。用手電筒把牠的血扣光。' },
+  { name: '血淚女', night: 4, draw: drawWomanFace, desc: '你看著她，她就不會動；但一直盯著她，理智會快速下降。手電筒可以扣她的血，但你得一直看著她。' },
+  { name: '它', night: 5, draw: thumbTall, desc: '高大又非常耐打，手電筒對它只有一半效果。最好靠天使和火球幫忙。' },
+  { name: '火柴人', night: 6, draw: thumbStick, desc: '會穿牆，一邊吹口哨一邊朝你揮手走過來。紙做的身體被手電筒照到就會燒起來。' },
+  { name: '眼球花', night: 7, draw: thumbFlower, desc: '長在屋子裡、白天也不會消失。被它盯 3 秒它就會尖叫，把黑影叫過來。用手電筒照它，或走過去按住 E 拔掉。' },
+  { name: '爬行女', night: 8, draw: drawCrawlerFace, desc: '客廳的電視自己打開後，不快點關掉，她就會從螢幕裡爬出來。關掉電視或把她打倒都可以。' },
+  { name: '鳥腳女', night: 9, draw: drawMomoFace, desc: '眼睛不好，靠聲音找你，一跳一跳地追過來。別奔跑，輕輕推搖桿慢慢走。手電筒照到她的眼鏡會讓她暫時看不見，也會扣血。' },
+  { name: '小丑', night: 10, draw: thumbClown, desc: '先會飄來一顆紅氣球，用手電筒把它照破。讓氣球碰到你，小丑就會拿著刀出現在你背後，快跑或用手電筒打他！' },
 ];
 let bookBuilt = false, bookFrom = 'title';
 function openBook(from) {
@@ -1299,22 +1294,26 @@ function slimeFactor(x, y) {
 const ANGEL_RANGE = 6;
 const angels = new Map(); // 燈具 → 住在裡面的天使
 function angelHome(o) { const b = bulbPos(o); return { x: b.x, y: b.y, h: b.h - 0.05 }; }
-const targetAlive = t => (t.kind ? G.enemies.includes(t) && !t.dead : G.flowers.includes(t));
+const targetAlive = t => !t.dead && (t.kind ? G.enemies.includes(t) : G.flowers.includes(t));
 function targetH(t) {
   if (!t.kind) return 1.28;
   return { tall: 2.2, blob: t.h || 0.4, balloon: 1.75, crawler: 0.5 }[t.kind] || 1.3;
 }
-function findAngelTarget(o, a) {
-  const home = angelHome(o);
-  const taken = new Set([...angels.values()].filter(x => x !== a && x.target).map(x => x.target));
-  let best = null, bd = ANGEL_RANGE;
+// 找範圍內最近、而且看得到的怪物（天使和火球共用）
+function findTarget(x, y, range, skip) {
+  let best = null, bd = range;
   for (const t of [...G.enemies, ...G.flowers]) {
-    if (t.dead || taken.has(t) || t.emerge > 0 || (!t.kind && t.grow < 1)) continue;
-    const d = Math.hypot(t.x - home.x, t.y - home.y);
-    if (d >= bd || castRay(home.x, home.y, Math.atan2(t.y - home.y, t.x - home.x), d) < d - 0.05) continue;
+    if (t.dead || (skip && skip.has(t)) || t.emerge > 0 || (!t.kind && t.grow < 1)) continue;
+    const d = Math.hypot(t.x - x, t.y - y);
+    if (d >= bd || castRay(x, y, Math.atan2(t.y - y, t.x - x), d) < d - 0.05) continue;
     bd = d; best = t;
   }
   return best;
+}
+function findAngelTarget(o, a) {
+  const home = angelHome(o);
+  const taken = new Set([...angels.values()].filter(x => x !== a && x.target).map(x => x.target));
+  return findTarget(home.x, home.y, ANGEL_RANGE, taken);
 }
 function updateAngels(dt) {
   const seen = new Set();
@@ -1346,48 +1345,69 @@ function updateAngels(dt) {
         fly(tg.x, tg.y, targetH(tg), 7);
         a.smite += dt;
         if (Math.random() < dt * 40) G.fx.push({ type: 'spark', x: tg.x + rand(-0.3, 0.3), y: tg.y + rand(-0.3, 0.3), h: targetH(tg) + rand(-0.4, 0.4), vx: rand(-0.5, 0.5), vy: rand(-0.5, 0.5), vh: rand(-0.2, 0.8), life: 0.6, max: 0.6, color: [255, 230, 150] });
-        if (a.smite >= 0.7) { angelSmite(tg); a.state = 'back'; a.target = null; a.cd = 4; }
+        if (a.smite >= 0.7) { angelSmite(tg, a); a.state = 'back'; a.target = null; a.cd = 3; }
       }
     } else if (fly(home.x, home.y, home.h, 5) < 0.1) a.state = 'home';
   }
   for (const o of [...angels.keys()]) if (!seen.has(o)) angels.delete(o);
 }
-function angelSmite(t) {
+const ANGEL_DMG = 2.5;
+function angelSmite(t, a) {
   const h = targetH(t);
   for (let i = 0; i < 16; i++) {
-    const a = Math.random() * Math.PI * 2, s = rand(0.5, 2);
-    G.fx.push({ type: 'spark', x: t.x, y: t.y, h, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vh: rand(-0.5, 1.5), life: rand(0.4, 0.9), max: 0.9, color: [255, 225, 140] });
+    const r = Math.random() * Math.PI * 2, s = rand(0.5, 2);
+    G.fx.push({ type: 'spark', x: t.x, y: t.y, h, vx: Math.cos(r) * s, vy: Math.sin(r) * s, vh: rand(-0.5, 1.5), life: rand(0.4, 0.9), max: 0.9, color: [255, 225, 140] });
   }
   Sound.play('smite');
-  if (!t.kind) { // 眼球花
-    G.flowers.splice(G.flowers.indexOf(t), 1);
-    onKill(t);
-    angelTip();
-    return;
+  hurtMonster(t, ANGEL_DMG);
+  // 大怪物沒被打倒的話會被撞開
+  if (!t.dead && t.kind && BOSSES.includes(t.kind)) {
+    const r = Math.atan2(t.y - a.y, t.x - a.x);
+    move(t, Math.cos(r) * 1.5, Math.sin(r) * 1.5, ENEMY_R);
   }
-  switch (t.kind) {
-    case 'shadow': case 'fast': case 'stick': case 'blob': case 'balloon':
-      if (t.kind === 'blob' && t.target) t.target.eaten = 0;
-      t.dead = true; G.stats.dissolved++; onKill(t);
-      break;
-    case 'woman': womanVanish(t, 12); break;
-    case 'momo': {
-      const pos = findSpawn(12);
-      if (pos) { t.x = pos.x; t.y = pos.y; }
-      Object.assign(t, { cd: 6, spawn: 1, state: 'idle', hopping: 0, air: 0 });
-      pickWander(t);
-      break;
-    }
-    case 'crawler': t.dead = true; G.ev.tvT = 0; break;
-    case 'clown': t.dead = true; break;
-    case 'tall': { const pos = findSpawn(14); if (pos) { t.x = pos.x; t.y = pos.y; t.spawn = 1.5; } break; }
-  }
-  angelTip();
+  if (!G.ev.angelTip) { G.ev.angelTip = 1; toast('😇 天使飛出去打怪物了！', 'good'); }
 }
-function angelTip() {
-  if (G.ev.angelTip) return;
-  G.ev.angelTip = 1;
-  toast('😇 天使飛出去把怪物趕走了！', 'good');
+
+// ====================================================================
+// 火焰燈泡：射出火球攻擊怪物（停電也會）
+// ====================================================================
+const FIRE_RANGE = 7, FIRE_CD = 1.6, FIRE_SPEED = 8, FIRE_DMG = 1.2;
+const EMBER_COLORS = [[255, 200, 60], [255, 120, 30], [255, 80, 20]];
+function updateFireLamps(dt) {
+  if (G.phase !== 'night') return;
+  for (const o of fixtures()) {
+    if (o.bulb !== FIRE_TIER) continue;
+    o.fireCd = Math.max(0, (o.fireCd || 0) - dt);
+    if (o.fireCd > 0) continue;
+    const from = bulbPos(o), tg = findTarget(from.x, from.y, FIRE_RANGE);
+    if (!tg) continue;
+    o.fireCd = FIRE_CD;
+    G.fireballs.push({ x: from.x, y: from.y, h: from.h, target: tg, life: 3 });
+    Sound.play('fireball', nearVol(Math.hypot(from.x - G.p.x, from.y - G.p.y)));
+    if (!G.ev.fireTip) { G.ev.fireTip = 1; toast('🔥 火焰燈泡射出火球攻擊怪物！', 'good'); }
+  }
+}
+function updateFireballs(dt) {
+  for (const f of G.fireballs) {
+    f.life -= dt;
+    const t = f.target;
+    if (!targetAlive(t) || f.life <= 0) { f.dead = true; continue; }
+    const dx = t.x - f.x, dy = t.y - f.y, dh = targetH(t) - f.h, d = Math.hypot(dx, dy, dh);
+    if (d < 0.35) {
+      f.dead = true;
+      hurtMonster(t, FIRE_DMG);
+      Sound.play('fireHit', nearVol(Math.hypot(f.x - G.p.x, f.y - G.p.y)));
+      for (let i = 0; i < 14; i++) {
+        const r = Math.random() * Math.PI * 2, s = rand(0.5, 2.2);
+        G.fx.push({ type: 'ember', x: f.x, y: f.y, h: f.h, vx: Math.cos(r) * s, vy: Math.sin(r) * s, vh: rand(-0.5, 1.5), life: rand(0.3, 0.7), max: 0.7, color: pick(EMBER_COLORS) });
+      }
+      continue;
+    }
+    const step = Math.min(d, FIRE_SPEED * dt);
+    f.x += dx / d * step; f.y += dy / d * step; f.h += dh / d * step;
+    if (Math.random() < dt * 30) G.fx.push({ type: 'ember', x: f.x, y: f.y, h: f.h, vx: rand(-0.2, 0.2), vy: rand(-0.2, 0.2), vh: rand(0, 0.4), life: rand(0.2, 0.45), max: 0.45, color: [255, 150, 40] });
+  }
+  G.fireballs = G.fireballs.filter(f => !f.dead);
 }
 
 // ====================================================================
@@ -1396,19 +1416,19 @@ function angelTip() {
 function addCoins(n) { G.coins = (G.coins || 0) + n; }
 function onKill(e) {
   if (G.nightStats) G.nightStats.kills++;
-  dropLoot(e.x, e.y);
+  dropLoot(e.x, e.y, e.lv || 1);
 }
-function dropLoot(x, y) {
-  if (Math.random() > 0.45) return;
+function dropLoot(x, y, lv = 1) {
+  if (Math.random() > Math.min(0.4, 0.18 + 0.03 * lv)) return;
   const tx = Math.floor(x), ty = Math.floor(y);
   if (!inMap(tx, ty) || isSolid(tx, ty)) return;
   const r = Math.random();
-  let id = 'coin', n = Math.random() < 0.4 ? 2 : 1;
+  let id = 'coin', n = 1 + Math.floor(lv / 3);
   if (r > 0.62) {
     n = 1;
     if (r < 0.74) id = 'battery';
     else if (r < 0.84) id = pick(['snack', 'canned', 'cocoa']);
-    else if (r < 0.97) id = 'bulb' + rollTier(1, G.day);
+    else if (r < 0.97) id = 'bulb' + Math.min(NORMAL_MAX, rollTier(1 + lv * 0.3, G.day));
     else id = 'key';
   }
   G.pickups.push({ x, y, id, n, t: Math.random() * 6 });
@@ -1438,17 +1458,17 @@ function prepareDay() {
   if (G.day > 1) makeGift();
   hideTreasure();
   makeStock();
-  ev.deliveryAt = G.day === 1 || Math.random() < 0.5 ? rand(20, DAY_LEN - 50) : -1;
+  ev.deliveryAt = G.day === 1 || Math.random() < 0.35 ? rand(20, DAY_LEN - 50) : -1;
   ev.delivery = 0;
 }
 function makeGift() {
   const k = G.nightStats || { kills: 0, caught: 0 };
   const score = Math.min(3, Math.floor(k.kills / 3)) + (k.caught === 0 ? 2 : k.caught <= 2 ? 1 : 0); // 0～5
   const items = [[pick(['battery', 'cocoa', 'canned', 'medkit']), 1]];
-  for (let i = 0, nb = score >= 3 ? 2 : 1; i < nb; i++) items.push(['bulb' + Math.min(NORMAL_MAX, rollTier(1 + score * 0.5, G.day)), 1]);
-  if (score >= 4 && Math.random() < 0.5) items.push(['key', 1]);
-  if (score >= 5 && Math.random() < 0.35) items.push(['bulb' + pick([ANGEL_TIER, SLIME_TIER]), 1]);
-  G.gift = { items, coins: 2 + score * 2, kills: k.kills, caught: k.caught };
+  for (let i = 0, nb = score >= 4 ? 2 : score >= 2 ? 1 : 0; i < nb; i++) items.push(['bulb' + Math.min(NORMAL_MAX, rollTier(1 + score * 0.5, G.day)), 1]);
+  if (score >= 4 && Math.random() < 0.4) items.push(['key', 1]);
+  if (score >= 5 && Math.random() < 0.3) items.push(['bulb' + pick([ANGEL_TIER, SLIME_TIER]), 1]);
+  G.gift = { items, coins: 1 + score, kills: k.kills, caught: k.caught };
 }
 function openGift() {
   const g = G.gift;
@@ -1470,7 +1490,7 @@ function hideTreasure() {
   }
 }
 function openTreasure() {
-  const coins = randi(4, 8);
+  const coins = randi(3, 6);
   const b = Math.random() < 0.3 ? 'key' : 'bulb' + Math.min(NORMAL_MAX, rollTier(2, G.day) + 1);
   addCoins(coins); addItem(b);
   Sound.play('win');
@@ -1481,9 +1501,9 @@ function makeStock() {
   const tiers = [...new Set([Math.min(FIRE_TIER, rollTier(1, d) + 1), Math.min(NORMAL_MAX, rollTier(2, d) + 2), pick([ANGEL_TIER, SLIME_TIER, STAR_TIER])])];
   G.stock = [
     ...tiers.map(t => ({ id: 'bulb' + t, price: BULB_PRICE[t], qty: 1 })),
-    { id: 'lamp_floor', price: 5, qty: 1 }, { id: 'lamp_desk', price: 3, qty: 2 },
-    { id: 'battery', price: 2, qty: 3 }, { id: 'key', price: 7, qty: 1 },
-    { id: 'medkit', price: 5, qty: 1 }, { id: 'cocoa', price: 3, qty: 2 },
+    { id: 'lamp_floor', price: 5, qty: 1 }, { id: 'lamp_desk', price: 3, qty: 1 },
+    { id: 'battery', price: 2, qty: 2 }, { id: 'key', price: 8, qty: 1 },
+    { id: 'medkit', price: 6, qty: 1 }, { id: 'cocoa', price: 3, qty: 1 },
   ];
 }
 const merchantHere = () => !!G && G.phase === 'day' && G.t < DAY_LEN - DUSK;
@@ -1626,8 +1646,8 @@ function updateSpawns(dt) {
   if (G.phase !== 'night') return;
   const n = diffN(), ev = G.ev;
   const mult = ev.blood ? 1.5 : 1;
-  const maxS = Math.round((G.day === 1 ? 3 : Math.min(4 + Math.floor(n / 3), 20)) * mult);
-  const interval = Math.max(2, 8 - n * 0.08) / mult / (G.power ? 1 : 1.6);
+  const maxS = Math.round((G.day === 1 ? 4 : Math.min(5 + Math.floor(n / 2.5), 24)) * mult);
+  const interval = Math.max(1.4, 6 - n * 0.12) / mult / (G.power ? 1 : 1.4);
   G.spawnT -= dt;
   if (G.spawnT <= 0) {
     G.spawnT = interval * rand(0.7, 1.3);
@@ -1640,48 +1660,48 @@ function updateSpawns(dt) {
 // ====================================================================
 function startNight() {
   const night = G.day, n = diffN(), ev = G.ev; // night：第幾夜（決定新怪物登場）；n：難度
-  G.phase = 'night'; G.t = 0; G.spawnT = 8;
+  G.phase = 'night'; G.t = 0; G.spawnT = 5;
   G.nightStats = { kills: 0, caught: 0 };
   if (G.treasure) { G.treasure = null; toast('⭐ 今天的寶藏星星消失了……明天再找吧。'); }
   ev.schedule = []; ev.blood = night % 6 === 0; // 第 6 夜和最後一夜是血月
   const add = (type, a, b) => ev.schedule.push({ type, at: rand(a, b) });
   if (night === 1) add('knock', 40, 60);
-  else if (Math.random() < 0.7) add('knock', 15, NIGHT_LEN - 25);
+  else if (Math.random() < 0.8) add('knock', 15, NIGHT_LEN - 25);
   if (night === 2) add('blackout', 40, 60);
-  else if (night > 2 && Math.random() < Math.min(0.35 + n * 0.015, 0.85)) add('blackout', 20, NIGHT_LEN - 30);
+  else if (night > 2 && Math.random() < Math.min(0.45 + n * 0.015, 0.9)) add('blackout', 20, NIGHT_LEN - 30);
   if (n >= 12 && Math.random() < Math.min(0.2 + (n - 12) * 0.01, 0.55)) add('blackout', 40, NIGHT_LEN - 20);
-  if (night >= 2 && Math.random() < 0.65) add('closet', 20, NIGHT_LEN - 35);
-  if (Math.random() < 0.4) add('phone', 10, NIGHT_LEN - 20);
-  if (night >= 5 && (ev.blood || Math.random() < Math.min(0.18 + n * 0.008, 0.8))) add('tall', 15, 60);
+  if (night >= 2 && Math.random() < 0.75) add('closet', 20, NIGHT_LEN - 35);
+  if (Math.random() < 0.5) add('phone', 10, NIGHT_LEN - 20);
+  if (night >= 5 && (ev.blood || Math.random() < Math.min(0.3 + n * 0.01, 0.9))) add('tall', 15, 60);
   // 黑球：第 3 夜第一次出現，之後越來越多
   if (night === 3) add('blob', 30, 50);
   else if (night > 3) {
-    const k = 1 + (n >= 15) + (n >= 30);
-    for (let i = 0; i < k; i++) if (Math.random() < Math.min(0.35 + n * 0.012, 0.85) * (ev.blood ? 1.3 : 1)) add('blob', 15, NIGHT_LEN - 40);
+    const k = 1 + (n >= 12) + (n >= 24);
+    for (let i = 0; i < k; i++) if (Math.random() < Math.min(0.5 + n * 0.012, 0.9) * (ev.blood ? 1.3 : 1)) add('blob', 15, NIGHT_LEN - 40);
   }
   // 血淚女：第 4 夜第一次出現
   if (night === 4) add('woman', 25, 45);
-  else if (night > 4 && (ev.blood || Math.random() < Math.min(0.3 + n * 0.008, 0.75))) add('woman', 20, 90);
+  else if (night > 4 && (ev.blood || Math.random() < Math.min(0.45 + n * 0.01, 0.85))) add('woman', 20, 90);
   // 第二批怪物：第 6～10 夜每晚介紹一隻新的
   if (night === 6) add('stick', 20, 40);
-  else if (night > 6) { for (let i = 0, k = 1 + (n >= 20); i < k; i++) if (Math.random() < Math.min(0.3 + n * 0.01, 0.7)) add('stick', 15, NIGHT_LEN - 30); }
+  else if (night > 6) { for (let i = 0, k = 1 + (n >= 18); i < k; i++) if (Math.random() < Math.min(0.45 + n * 0.01, 0.85)) add('stick', 15, NIGHT_LEN - 30); }
   if (night === 7) add('flower', 5, 15);
-  else if (night > 7 && Math.random() < 0.5) add('flower', 5, 60);
+  else if (night > 7 && Math.random() < 0.7) add('flower', 5, 60);
   if (night === 8) add('tv', 30, 50);
-  else if (night > 8 && Math.random() < Math.min(0.3 + n * 0.008, 0.7)) add('tv', 20, NIGHT_LEN - 40);
+  else if (night > 8 && Math.random() < Math.min(0.45 + n * 0.01, 0.85)) add('tv', 20, NIGHT_LEN - 40);
   if (night === 9) add('momo', 25, 45);
-  else if (night > 9 && Math.random() < Math.min(0.3 + n * 0.008, 0.7)) add('momo', 15, 80);
+  else if (night > 9 && Math.random() < Math.min(0.45 + n * 0.01, 0.85)) add('momo', 15, 80);
   if (night === 10) add('clown', 30, 50);
-  else if (night > 10 && Math.random() < Math.min(0.25 + n * 0.008, 0.65)) add('clown', 20, NIGHT_LEN - 40);
+  else if (night > 10 && Math.random() < Math.min(0.4 + n * 0.01, 0.8)) add('clown', 20, NIGHT_LEN - 40);
   if (night === LAST_NIGHT) showBig('最後一夜', '🩸 血月之夜：撐到天亮就贏了！');
-  else showBig(`第 ${night} 夜`, ev.blood ? '🩸 血月之夜：黑影變多了' : '待在燈光下');
+  else showBig(`第 ${night} 夜`, ev.blood ? '🩸 血月之夜：怪物更多、等級更高' : '拿好手電筒');
   Sound.play('dusk');
-  if (night === 1) toast('🌙 夜晚來了。黑暗會讓理智下降，待在燈光下！按 F 開手電筒。', 'warn');
+  if (night === 1) toast('🌙 夜晚來了。燈光擋不住怪物，但待在亮處理智不會掉。按 F 開手電筒，照著怪物可以扣牠的血！', 'warn');
 }
 function startDay(d) {
   G.day = d; G.phase = 'day'; G.t = 0; G.power = true;
   for (const e of G.enemies) puff(e.x, e.y);
-  G.enemies = []; G.ghosts = [];
+  G.enemies = []; G.ghosts = []; G.fireballs = [];
   Object.assign(G.ev, { knock: 0, phone: 0, closet: 0, bedTimer: 0, bedWarned: false, duskWarned: false, blood: false, schedule: [], merchantBye: 0 });
   for (const o of [...G.sockets, ...G.lamps]) { o.dying = 0; o.eaten = 0; }
   G.stare = 0;
@@ -1710,7 +1730,7 @@ function triggerEvent(type) {
       break;
     case 'closet':
       ev.closet = 18; ev.closetLight = 0; ev.closetTick = 0;
-      toast('🚪 臥室的衣櫃在晃動……按住 E 壓住它，或讓燈光照到它。', 'warn');
+      toast('🚪 臥室的衣櫃在晃動……快去按住 E 壓住它！', 'warn');
       break;
     case 'phone':
       ev.phone = 15; ev.phoneTick = 0;
@@ -1816,10 +1836,6 @@ function updateEvents(dt) {
   if (ev.closet > 0) {
     ev.closet -= dt; ev.closetTick -= dt;
     if (ev.closetTick <= 0) { Sound.play('thump'); ev.closetTick = Math.max(0.6, ev.closet / 12); }
-    if (lightAt(30.5, 2.4) > 0.4) {
-      ev.closetLight += dt;
-      if (ev.closetLight >= 3) { ev.closet = 0; toast('燈光照進衣櫃的門縫，聲音消失了。', 'good'); }
-    }
     if (ev.closet < 0) {
       ev.closet = 0;
       const e = spawnEnemy('fast', { x: 30.5, y: 2.5 });
@@ -1834,7 +1850,7 @@ function updateEvents(dt) {
     const bed = FURN_BY_ID.bed;
     ev.bedCd -= dt;
     const near = rectDist(p.x, p.y, bed) < 1.2;
-    if (near && lightAt(24, 2.5) < 0.35 && ev.bedCd <= 0) {
+    if (near && ev.bedCd <= 0) {
       ev.bedTimer += dt;
       if (ev.bedTimer > 0.5 && !ev.bedWarned) { ev.bedWarned = true; toast('床底下有東西在動……', 'warn'); }
       if (ev.bedTimer >= 1.2) {
@@ -2042,7 +2058,7 @@ function sleep() {
 }
 function answerPhone() {
   G.ev.phone = 0;
-  if (Math.random() < 0.5) {
+  if (Math.random() < 0.4) {
     const f = pick(FURN.filter(f => f.loot));
     const tier = Math.min(NORMAL_MAX, rollTier(f.room.level, G.day) + 1);
     G.containers[f.id].items.push('bulb' + tier);
@@ -2174,6 +2190,8 @@ function update(dt) {
   updateEvents(dt);
   updateFlowers(dt);
   updateAngels(dt);
+  updateFireLamps(dt);
+  updateFireballs(dt);
   updatePickups(dt);
   updateBulbs(dt);
   flowTimer -= dt;
@@ -2258,7 +2276,8 @@ function darkLevel() {
   if (G.t > NIGHT_LEN - 4) return lerp(NIGHT_DARK, 0.6, (G.t - NIGHT_LEN + 4) / 4);
   return NIGHT_DARK;
 }
-const enemyAlpha = e => clamp((1 - e.fade) * (1 - e.spawn * 0.8), 0, 1);
+// 越沒血越透明
+const enemyAlpha = e => clamp(1 - e.spawn * 0.8, 0, 1) * (e.maxHp ? 0.55 + 0.45 * Math.max(0, e.hp) / e.maxHp : 1);
 function resize() { if (window.Renderer) Renderer.resize(); }
 
 // 主選單背景用的展示場景

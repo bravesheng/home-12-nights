@@ -10,7 +10,7 @@
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <title>在家生存 12 夜</title>
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -65,7 +65,7 @@
     <div class="panel title-panel">
       <div class="logo">🏠</div>
       <h1>在家生存 <span class="num">12</span> 夜</h1>
-      <p class="sub">停電了。屋子裡有東西。<br>白天找燈泡，晚上待在光裡。撐過 12 個夜晚！</p>
+      <p class="sub">停電了。屋子裡有東西。<br>白天找燈泡，晚上拿好手電筒。撐過 12 個夜晚！</p>
       <p class="tag">3D 第一人稱</p>
       <div class="btns">
         <button id="btnContinue">繼續遊戲</button>
@@ -111,16 +111,16 @@
           <h3>生存守則</h3>
           <ul>
             <li>☀️ <b>白天</b>：搜索櫃子、箱子、冰箱（有東西的會閃光）。看著它按住 E。物資每天早上會刷新。</li>
-            <li>💡 <b>燈泡</b>分 10 級，等級越高照得越遠、越華麗。看著天花板的吊燈按 Q 裝上，或先放下檯燈 / 落地燈再裝上燈泡。</li>
-            <li>🌙 <b>晚上</b>：待在燈光下。黑暗會讓理智下降，黑影只敢在暗處活動。</li>
+            <li>💡 <b>燈泡</b>分 11 級，另外還有 2 種特殊燈泡；等級越高照得越遠、越華麗。看著天花板的吊燈按 Q 裝上，或先放下檯燈 / 落地燈再裝上燈泡。</li>
+            <li>🌙 <b>晚上</b>：燈光只能照亮、<b>擋不住怪物</b>，但待在亮處理智不會掉。怪物都有<b>等級和血量</b>，手電筒照著牠會一直扣血。</li>
             <li>⚡ <b>停電</b>時所有燈都會熄滅，拿手電筒去<b>洗衣間的電箱</b>按住 E 恢復電力。</li>
             <li>🚪 晚上有人敲門……<b>千萬不要開門</b>。</li>
-            <li>🛏️ 衣櫃在晃？按住 E 壓住它，或讓它照到光。床邊不要待在暗處。</li>
+            <li>🛏️ 衣櫃在晃？快去按住 E 壓住它。晚上別在床邊待太久。</li>
             <li>⚫ <b>黑球</b>（第 3 夜起）：不會追你，專門去<b>吃燈</b>，每吃一次燈泡就降一級。燈光擋不住它，只有<b>手電筒</b>照它才能消滅它。</li>
             <li>😢 <b>血淚女</b>（第 4 夜起）：你<b>看著她</b>她就不會動，但一直盯著她理智會快速下降。她怕燈光，會在黑暗的門口等你。聽到哭聲越來越近，就快轉頭找她！</li>
-            <li>👁️ 第 5 夜之後，高大的「它」可能會出現。只有 <b>LED（第 3 級）以上</b>的燈光擋得住它。</li>
+            <li>👁️ 第 5 夜之後，高大的「它」可能會出現，非常耐打。</li>
             <li>📖 第 6～10 夜每晚會出現一隻新怪物：火柴人、眼球花、爬行女、鳥腳女、小丑。牠們的弱點都不一樣，去<b>怪物圖鑑</b>看看怎麼對付。</li>
-            <li>💡 <b>特殊燈泡</b>：✨星空燈泡照得最遠；😇天使燈泡會飛出去打怪物（停電也會）；🟢粘液燈泡不會發光，但黏液會讓怪物變很慢。</li>
+            <li>💡 <b>會幫你打怪的燈泡</b>：🔥火焰燈泡會射火球；😇天使燈泡的小天使會飛出去打怪物（兩種停電都照樣會打）；🟢粘液燈泡不會發光，但黏液會讓怪物變很慢；✨星空燈泡照得最遠。</li>
             <li>🪙 <b>硬幣</b>：搜索、打倒怪物會拿到硬幣。白天可以去地下室找<b>神秘商人</b>買東西，或到車庫<b>轉扭蛋</b>。</li>
             <li>🔧 儲藏室的<b>工作台</b>：3 顆一樣的燈泡合成 1 顆高一級的。</li>
             <li>🎁 每天早上床邊有<b>禮物</b>（前一晚表現越好越好）；⭐ 屋子裡藏著<b>寶藏星星</b>；📦 白天有<b>送貨員</b>敲門；🗝️ 找到<b>鑰匙</b>可以打開上鎖的寶箱。</li>
@@ -162,6 +162,7 @@
   <div id="book" class="screen hidden">
     <div class="panel">
       <h2>怪物圖鑑</h2>
+      <p class="small book-note">所有怪物都有等級（Lv）和血量，夜晚越後面等級越高、越耐打。</p>
       <div id="bookList" class="book"></div>
       <div class="btns"><button id="btnBookBack">返回</button></div>
     </div>
@@ -194,9 +195,9 @@
     </div>
   </div>
 
-  <script src="js/data.js?v=7"></script>
-  <script src="js/audio.js?v=7"></script>
-  <script src="js/game.js?v=7"></script>
-  <script type="module" src="js/render3d.js?v=7"></script>
+  <script src="js/data.js?v=8"></script>
+  <script src="js/audio.js?v=8"></script>
+  <script src="js/game.js?v=8"></script>
+  <script type="module" src="js/render3d.js?v=8"></script>
 </body>
 </html>
