@@ -113,6 +113,25 @@ async function startFromMenu(page, world, diff, tap = false) {
 }
 // 低 FPS 時遊戲時間走很慢（每幀最多 0.05 秒），直接把時間撥到天黑前一點點
 const skipToDusk = page => page.evaluate(() => { G.t = DAY_LEN - 0.3; });
+// 版面重疊：提示不能壓到大字、燈泡卡和左上角、右上角的面板，大字不能壓到下面的物品說明和物品列
+const overlaps = page => page.evaluate(() => {
+  const $ = id => document.getElementById(id);
+  const hit = (a, b) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+  const area = (name, e) => { const r = e.getBoundingClientRect(); return { name, l: r.left, t: r.top, r: r.right, b: r.bottom }; };
+  const shown = id => $(id).offsetWidth > 0 && $(id).offsetHeight > 0;
+  // 提示和燈泡卡用排版位置（offset），不受進場、飛走動畫的位移和縮放影響
+  const laid = (name, e, box) => ({ name, l: box.left + e.offsetLeft, t: box.top + e.offsetTop, r: box.left + e.offsetLeft + e.offsetWidth, b: box.top + e.offsetTop + e.offsetHeight });
+  const tb = $('toasts').getBoundingClientRect(), cb = $('cards').getBoundingClientRect();
+  const toasts = [...$('toasts').children].filter(e => e.style.opacity !== '0').map(e => laid(`提示「${e.textContent.slice(0, 8)}…」`, e, tb));
+  const cards = [...$('cards').children].map(e => laid('燈泡卡', e, cb));
+  const big = $('bigText').classList.contains('show') ? [area('大字', $('bigText'))] : [];
+  const panels = [['狀態列', 'bars'], ['時鐘', 'clock'], ['小地圖', 'minimap']].filter(([, id]) => shown(id)).map(([n, id]) => area(n, $(id)));
+  const bottom = [['物品說明', 'itemInfo'], ['物品列', 'hotbar']].filter(([, id]) => shown(id)).map(([n, id]) => area(n, $(id)));
+  const out = [];
+  for (const t of toasts) for (const o of [...panels, ...big, ...cards]) if (hit(t, o)) out.push(`${t.name}壓到${o.name}`);
+  for (const g of big) for (const o of bottom) if (hit(g, o)) out.push(`大字壓到${o.name}`);
+  return out;
+});
 
 // ---------- 情境 ----------
 await scenario('w1', '第一世界・簡單（電腦：主選單開新遊戲、走路、手電筒）', {}, async ({ page, shot, check }) => {
@@ -136,9 +155,13 @@ await scenario('w1', '第一世界・簡單（電腦：主選單開新遊戲、�
   await shot('3-walk');
   await skipToDusk(page);
   await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
+  await sleep(400);
   s = await state(page);
   check(s.label.includes('第 1 夜'), `天黑後要顯示第 1 夜（現在：${s.label}）`);
-  await sleep(1000);
+  // 黃昏和天黑的提示一起出現（4 則），最容易壓到「第 1 夜」大字
+  const lay = await overlaps(page);
+  check(lay.length === 0, '天黑時版面重疊：' + lay.join('、'));
+  await sleep(600);
   await shot('4-night');
 });
 
@@ -162,9 +185,12 @@ await scenario('w2', '第二世界第 6 夜＋全套裝備（?world=2&night=6&ki
   check(maxZ > 0, '第二世界按空白鍵要能跳');
   await skipToDusk(page);
   await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
+  await sleep(400);
   s = await state(page);
   check(s.label.includes('第 6 夜'), `天黑後要顯示第 6 夜（現在：${s.label}）`);
-  await sleep(1500);
+  const lay = await overlaps(page);
+  check(lay.length === 0, '天黑時版面重疊：' + lay.join('、'));
+  await sleep(1100);
   await shot('2-night');
 });
 
@@ -203,6 +229,25 @@ await scenario('tablet', '平板觸控（Android 平板尺寸，用點的開新�
   const touchUI = await page.evaluate(() => getComputedStyle(document.getElementById('touch')).display !== 'none');
   check(touchUI, '觸控按鈕（搖桿、E、手電筒）要出現');
   await shot('1-start');
+});
+
+await scenario('layout', '小平板版面（962×601：天黑、天亮、撿到燈泡時，提示不壓到大字、燈泡卡和面板）', { viewport: { width: 962, height: 601 }, isMobile: true, hasTouch: true }, async ({ page, shot, check }) => {
+  await page.goto(BASE + '?world=1&diff=easy', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play');
+  await sleep(3500); // 等「第 1 天」大字消失
+  // 直接叫天黑、天亮、撿到燈泡的函式，不用等遊戲時間；中間等提示都消失，才不會疊在一起
+  for (const [label, name, fn] of [
+    ['1-night', '天黑', () => startNight()],
+    ['2-day', '天亮', () => startDay(2)],
+    ['3-bulb', '撿到燈泡', () => { toast('撿到了' + itemName('bulb1'), 'item'); showBulbCard(1); }],
+  ]) {
+    await page.evaluate(fn);
+    await sleep(500);
+    const lay = await overlaps(page);
+    check(lay.length === 0, `${name}時版面重疊：${lay.join('、')}`);
+    await shot(label);
+    await sleep(4500);
+  }
 });
 
 await scenario('cut', '破關開門動畫（?cut=1）', {}, async ({ page, shot, check }) => {

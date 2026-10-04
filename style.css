@@ -50,7 +50,8 @@ button, .slot { touch-action: manipulation; -webkit-touch-callout: none; -webkit
 #itemInfo b { color: #ffd166; }
 #itemInfo .hint { opacity: .6; margin-left: 6px; }
 
-#toasts { position: absolute; top: 132px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+/* 提示：排在左上角面板下面（game.js 的 toast() 會照面板實際高度調整 top），最寬是畫面的 70% */
+#toasts { position: absolute; top: 160px; left: 15%; right: 15%; display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .toast { background: rgba(10, 8, 18, .85); border: 1px solid rgba(255, 255, 255, .1); padding: 7px 14px; border-radius: 8px;
   font-size: 14px; animation: toastIn .25s ease-out; transition: opacity .5s; max-width: 70vw; text-align: center; }
 .toast.warn { border-color: #ff5a5f; color: #ffb3b5; }
