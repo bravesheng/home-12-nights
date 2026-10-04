@@ -1,4 +1,3 @@
 .DS_Store
-.claude/
-old-2d/
+.claude/settings.local.json
 playtest-out/
