@@ -32,7 +32,7 @@
 node tools/playtest.mjs
 ```
 
-用無頭 Chromium 自動跑 5 個情境：第一世界開新遊戲、第二世界第 6 夜、平板觸控、破關動畫、離線。會檢查 JS 錯誤、檔案載入失敗，以及走路、手電筒、跳、天黑這些基本動作，截圖存在 `playtest-out/`。全部通過時結束代碼是 0。
+用無頭 Chromium 自動跑 6 個情境：第一世界開新遊戲、第二世界第 6 夜、平板觸控、小平板版面、破關動畫、離線。會檢查 JS 錯誤、檔案載入失敗、提示有沒有壓到大字或面板，以及走路、手電筒、跳、天黑這些基本動作，截圖存在 `playtest-out/`。全部通過時結束代碼是 0。
 
 需要 Node 18 以上和 Playwright（Claude Code 雲端 session 已內建；自己電腦上：`npm i -g playwright && npx playwright install chromium`）。沒有 GPU 時 3D 是用軟體算的，FPS 很低，所以只能抓錯誤，看不出平板上順不順。
 

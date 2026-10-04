@@ -278,6 +278,7 @@ function nextCard() {
   const t = cardQ.shift();
   if (t === undefined) return;
   const r = bulbRarity(t), el = document.createElement('div');
+  placeBelowToasts($('cards'));
   el.className = 'bcard r-' + r;
   el.innerHTML = `<div class="bc-ic">${bulbSVG(t)}</div><div class="bc-tx"><span class="rar r-${r}">${RARITY[r].name}燈泡</span>` +
     `<b>${bulbName(t)}</b><small>${BULBS[t].special ? '特殊燈泡' : `第 ${t} 級`}</small></div>`;
@@ -3180,15 +3181,29 @@ function toast(msg, cls = '') {
   if (msg === lastToast && now - lastToastT < 1500) return;
   lastToast = msg; lastToastT = now;
   const box = $('toasts'), el = document.createElement('div');
+  // 從左上角面板（時鐘、狀態列）下面開始排，才不會蓋到面板；出現「👂」那一列時狀態列會變高
+  const panels = Math.max($('clock').getBoundingClientRect().bottom, $('bars').getBoundingClientRect().bottom);
+  if (panels > 0) box.style.top = panels + 8 + 'px';
   el.className = 'toast ' + cls; el.textContent = msg;
   box.appendChild(el);
   while (box.children.length > 4) box.firstChild.remove();
+  if ($('bigText').classList.contains('show')) placeBelowToasts($('bigText'));
+  if ($('cards').children.length) placeBelowToasts($('cards'));
   setTimeout(() => { el.style.opacity = 0; setTimeout(() => el.remove(), 500); }, 4200);
+}
+// 畫面中間跳出來的東西（大字、燈泡卡）要在提示下面：平常在 style.css 的位置，
+// 提示多、換行或螢幕比較矮的時候就往下移，才不會被提示蓋住
+function placeBelowToasts(el) {
+  el.style.top = '';
+  if (!$('hud').clientHeight) return; // 介面還沒顯示：就用 style.css 的位置
+  const min = $('toasts').getBoundingClientRect().bottom + 14;
+  if (el.getBoundingClientRect().top < min) el.style.top = min + 'px';
 }
 let bigTimer = 0;
 function showBig(title, sub) {
   const el = $('bigText');
   el.innerHTML = `${title}<small>${sub || ''}</small>`;
+  placeBelowToasts(el);
   el.classList.add('show');
   clearTimeout(bigTimer);
   bigTimer = setTimeout(() => el.classList.remove('show'), 2600);
