@@ -26,6 +26,24 @@
 - `?world=2&night=6`：直接開第二世界的第 6 夜（加 `&kit=1` 會帶齊武器和燈泡）。
 - `?cut=1`：直接播第一世界破關的開門動畫。
 
+## 自動試玩測試
+
+```
+node tools/playtest.mjs
+```
+
+用無頭 Chromium 自動跑 5 個情境：第一世界開新遊戲、第二世界第 6 夜、平板觸控、破關動畫、離線。會檢查 JS 錯誤、檔案載入失敗，以及走路、手電筒、跳、天黑這些基本動作，截圖存在 `playtest-out/`。全部通過時結束代碼是 0。
+
+需要 Node 18 以上和 Playwright（Claude Code 雲端 session 已內建；自己電腦上：`npm i -g playwright && npx playwright install chromium`）。沒有 GPU 時 3D 是用軟體算的，FPS 很低，所以只能抓錯誤，看不出平板上順不順。
+
+## 發布
+
+```
+./stamp.sh
+```
+
+寫入發布時間（台灣時間）、更新快取版本號，平板連上網路才會下載新版。Mac 和 Linux 都能跑。
+
 ## 使用的程式庫
 
 - [Three.js](https://threejs.org/)（MIT 授權，見 `lib/three-LICENSE`）
