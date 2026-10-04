@@ -20,6 +20,10 @@
     <div id="vignette" class="fxl"></div>
     <div id="hurtfx" class="fxl"></div>
     <div id="bloodfx" class="fxl"></div>
+    <div id="awakefx" class="fxl"></div>
+    <div id="dizzyfx" class="fxl"></div>
+    <div id="sporefx" class="fxl"></div>
+    <div id="healfx" class="fxl"></div>
     <div id="cross"></div>
     <div id="prompt"></div>
     <canvas id="minimap"></canvas>
@@ -33,7 +37,7 @@
       <div class="bar"><span class="ico">❤️</span><div class="track"><div id="hpFill" class="fill hp"></div></div></div>
       <div class="bar"><span class="ico">🧠</span><div class="track"><div id="sanFill" class="fill san"></div></div></div>
       <div class="bar"><span class="ico">🍗</span><div class="track"><div id="hungerFill" class="fill hunger"></div></div></div>
-      <div class="bar"><span class="ico">🔦</span><div class="track"><div id="batFill" class="fill bat"></div></div></div>
+      <div class="bar"><span class="ico">🔦</span><div class="track"><div id="batFill" class="fill bat"></div></div><b id="flashTier" class="ftier">破爛</b></div>
       <div class="bar"><span class="ico">🏃</span><div class="track"><div id="stamFill" class="fill stam"></div></div></div>
       <div class="coins">🪙 <b id="coinText">0</b></div>
       <div class="bar hidden" id="noiseBar"><span class="ico">👂</span><div class="track"><div id="noiseFill" class="fill noise"></div></div></div>
@@ -43,13 +47,14 @@
       <div id="hotbar"></div>
     </div>
     <div id="toasts"></div>
+    <div id="cards"></div>
     <div id="bigText"></div>
 
     <!-- 平板觸控操作 -->
     <div id="touch">
       <div id="stick"><div id="knob"></div></div>
       <div id="tbtns">
-        <button class="tb" data-k="r">R<small>拿起</small></button>
+        <button class="tb jump" data-k="j">⤒<small>跳</small></button>
         <button class="tb" data-k="f">🔦<small>手電筒</small></button>
         <button class="tb" data-k="q">Q<small>使用</small></button>
         <button class="tb big" data-k="e">E<small>互動</small></button>
@@ -59,6 +64,13 @@
   </div>
 
   <canvas id="jumpscare"></canvas>
+
+  <!-- 破關動畫：前門打開，走進第二世界 -->
+  <div id="cutscene" class="hidden">
+    <div id="cutFade"></div>
+    <div id="cutText"></div>
+    <div id="cutSkip">點一下畫面跳過</div>
+  </div>
 
   <!-- 主選單 -->
   <div id="title" class="screen">
@@ -74,8 +86,21 @@
         <button id="btnBook" class="ghost">怪物圖鑑</button>
         <button id="btnTransfer" class="ghost">存檔轉移</button>
       </div>
+      <p id="w2Badge" class="w2badge hidden">🌸 第二世界：夢核花園 已解鎖</p>
       <p id="saveInfo" class="small"></p>
       <p id="buildInfo" class="small build"></p>
+    </div>
+  </div>
+
+  <!-- 開始新遊戲前選世界 -->
+  <div id="worldPick" class="screen hidden">
+    <div class="panel small-panel world-panel">
+      <h2>選擇世界</h2>
+      <div class="worlds">
+        <button class="worldbtn w1" data-w="1"><b>🏠 第一世界：家</b><small>停電的家裡有東西。白天找燈泡，晚上撐過 12 夜。</small></button>
+        <button class="worldbtn w2" data-w="2"><b>🌸 第二世界：夢核花園</b><small>🔒 打贏第一世界的 12 夜就會解鎖</small></button>
+      </div>
+      <div class="btns"><button id="btnWorldBack" class="ghost">返回</button></div>
     </div>
   </div>
 
@@ -106,9 +131,9 @@
             <tr><td><kbd>Shift</kbd></td><td>奔跑</td></tr>
             <tr><td><kbd>C</kbd></td><td>慢慢走（很安靜）</td></tr>
             <tr><td><kbd>F</kbd></td><td>開 / 關手電筒</td></tr>
-            <tr><td><kbd>E</kbd> / 左鍵</td><td>互動（按住搜索）</td></tr>
+            <tr><td><kbd>E</kbd> / 左鍵</td><td>互動（按住搜索）；對著燈：手上拿燈泡就裝上，沒拿燈泡就拿起來</td></tr>
             <tr><td><kbd>Q</kbd> / 右鍵</td><td>使用選中的物品（拿著武器就是攻擊）</td></tr>
-            <tr><td><kbd>R</kbd></td><td>拿回燈具 / 拆下燈泡</td></tr>
+            <tr><td><kbd>空白鍵</kbd></td><td>跳（第二世界的新技能）</td></tr>
             <tr><td><kbd>1</kbd>–<kbd>0</kbd> / 滾輪</td><td>切換物品</td></tr>
             <tr><td><kbd>M</kbd></td><td>靜音</td></tr>
             <tr><td><kbd>Esc</kbd></td><td>暫停</td></tr>
@@ -117,7 +142,7 @@
           <table class="keys">
             <tr><td>左半邊拖曳</td><td>移動（輕推慢慢走、推到底奔跑）</td></tr>
             <tr><td>右半邊滑動</td><td>轉頭看四周</td></tr>
-            <tr><td>右下按鈕</td><td>E 互動（可按住）、Q 使用／攻擊（會顯示手上拿的東西）、🔦、R 拿起</td></tr>
+            <tr><td>右下按鈕</td><td>E 互動（可按住；對著燈也是拿起／安裝）、Q 使用／攻擊（會顯示手上拿的東西）、🔦、⤒ 跳（第二世界）</td></tr>
             <tr><td>下方物品欄</td><td>點一下切換物品</td></tr>
           </table>
         </div>
@@ -125,12 +150,15 @@
           <h3>生存守則</h3>
           <ul>
             <li>☀️ <b>白天</b>：搜索櫃子、箱子、冰箱（有東西的會閃光）。看著它按住 E。物資每天早上會刷新。</li>
-            <li>💡 <b>燈泡</b>分 11 級，另外還有 2 種特殊燈泡；等級越高照得越遠、越華麗。看著天花板的吊燈按 Q 裝上，或先放下檯燈 / 落地燈再裝上燈泡。</li>
+            <li>💡 <b>燈泡</b>分 11 級，另外還有 3 種特殊燈泡；等級越高照得越遠、越華麗。選好燈泡，看著天花板的燈座按 E 裝上（手上沒拿燈泡時按 E 就是拿起來），或先放下檯燈 / 落地燈再裝上燈泡。</li>
+            <li>✨ <b>燈泡稀有度</b>：1～5 級是<b style="color:#4da3ff">稀有</b>、6 級以上沒有技能的是<b style="color:#c27bff">史詩</b>、有技能的（火焰、天使、粘液、回血）是<b style="color:#ffc23a">傳奇</b>。拿到燈泡時畫面會跳出燈泡卡。</li>
+            <li>💚 <b>回血燈泡</b>：站在它下面會慢慢回血（停電時不會）。</li>
+            <li>🔦 <b>手電筒</b>分三級：破爛 → 稀有（傷害 2 倍）→ 巨光（傷害 3 倍、照最遠）。撿到就自動換上。</li>
             <li>🌙 <b>晚上</b>：燈光只能照亮、<b>擋不住怪物</b>，但待在亮處理智不會掉。怪物都有<b>等級和血量</b>，手電筒照著牠會一直扣血。</li>
             <li>⚡ <b>停電</b>時所有燈都會熄滅，拿手電筒去<b>洗衣間的電箱</b>按住 E 恢復電力。</li>
             <li>🚪 晚上有人敲門……<b>千萬不要開門</b>。</li>
             <li>🛏️ 衣櫃在晃？快去按住 E 壓住它。晚上別在床邊待太久。</li>
-            <li>⚔️ <b>武器</b>：搜索時會找到武器，在物品欄選好武器按 <b>Q</b> 攻擊。🍳<b>平底鍋</b>敲前面的怪物還會把牠敲暈（第一天廚房抽屜就有一個）；🎯<b>彈弓</b>發射彈珠打遠處；🔫<b>聖水槍</b>噴聖水，對大怪物特別有效；🧂<b>鹽巴</b>撒一圈把身邊的怪物推開；🧨<b>鞭炮</b>丟出去會爆炸（很吵！）；💪<b>強力手電筒</b>撿到就自動升級；📿<b>護身符</b>帶著就只會扣一半的血。</li>
+            <li>⚔️ <b>武器</b>：搜索時會找到武器，在物品欄選好武器按 <b>Q</b> 攻擊。🍳<b>平底鍋</b>敲前面的怪物還會把牠敲暈（第一天廚房抽屜就有一個）；🎯<b>彈弓</b>發射彈珠打遠處；🔫<b>聖水槍</b>噴聖水，對大怪物特別有效；🧂<b>鹽巴</b>撒一圈把身邊的怪物推開；🧨<b>鞭炮</b>丟出去會爆炸（很吵！）；🔦<b>稀有</b>／🔆<b>巨光手電筒</b>撿到就自動升級；📿<b>護身符</b>帶著就只會扣一半的血。</li>
             <li>🍫 <b>食物</b>：冰箱和櫥櫃每天幾乎都會補滿。☕熱可可、🍫巧克力、🥛熱牛奶可以回復<b>理智</b>。</li>
             <li>📖 <b>特殊怪物</b>：第 1 夜火柴人、第 2 夜黑球和眼球花、第 3 夜血淚女和小丑、第 4 夜爬行女和鳥腳女、第 5 夜高大的「它」。牠們的弱點都不一樣，去<b>怪物圖鑑</b>看看怎麼對付。</li>
             <li>💡 <b>會幫你打怪的燈泡</b>：🔥火焰燈泡會射火球；😇天使燈泡的小天使會飛出去打怪物（兩種停電都照樣會打）；🟢粘液燈泡不會發光，但黏液會讓怪物變很慢；✨星空燈泡照得最遠。</li>
@@ -139,6 +167,7 @@
             <li>🎁 每天早上床邊有<b>禮物</b>（前一晚表現越好越好）；⭐ 屋子裡藏著<b>寶藏星星</b>；📦 白天有<b>送貨員</b>敲門；🗝️ 找到<b>鑰匙</b>可以打開上鎖的寶箱。</li>
             <li>👻 打倒怪物有時候會<b>掉東西</b>，走過去就能撿起來。</li>
             <li>😊 開始新遊戲時可以選<b>難度</b>（簡單／普通／困難）。</li>
+            <li>🌸 <b>第二世界：夢核花園</b>：打贏第一世界的 12 夜，打開前門就會走進一座用樹當牆、有天花板的怪花園，背包裡的東西都會帶過去。這裡會<b>跳</b>（空白鍵／平板「跳」按鈕），藍鑽、紅鑽、紫鑽燈泡變成<b>花、樹、水燈泡</b>，血月變成<b>萬物甦醒</b>。新怪物：向日葵眼、千眼菇、草叢人、大嘴觸角蟲、眼花女孩（去圖鑑看怎麼對付）；第一世界的怪物也都會來，只有爬行女和衣櫃怪不會。</li>
             <li>💾 每天早上自動存檔。</li>
           </ul>
         </div>
@@ -176,7 +205,8 @@
   <div id="book" class="screen hidden">
     <div class="panel">
       <h2>怪物圖鑑</h2>
-      <p class="small book-note">所有怪物都有等級（Lv）和血量，夜晚越後面等級越高、越耐打。</p>
+      <div id="bookTabs" class="tabs"><button data-w="1" class="on">🏠 第一世界</button><button data-w="2">🌸 第二世界</button></div>
+      <p id="bookNote" class="small book-note">所有怪物都有等級（Lv）和血量，夜晚越後面等級越高、越耐打。</p>
       <div id="bookList" class="book"></div>
       <div class="btns"><button id="btnBookBack">返回</button></div>
     </div>
@@ -214,6 +244,7 @@
   <script src="js/version.js?v=10"></script>
   <script src="js/data.js?v=10"></script>
   <script src="js/audio.js?v=10"></script>
+  <script src="js/world2.js?v=10"></script>
   <script src="js/game.js?v=10"></script>
   <script type="module" src="js/render3d.js?v=10"></script>
 </body>

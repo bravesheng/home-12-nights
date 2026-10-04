@@ -102,7 +102,7 @@ const SOCKETS = [
   { id: 's_laundry', x: 37, y: 29 },
 ];
 
-// 燈泡：第 1～11 級越後面越亮；第 12、13 級是有特殊能力的燈泡
+// 燈泡：第 1～11 級越後面越亮；第 12～14 級是有特殊能力的燈泡
 const BULBS = [null,
   { name: '破爛燈泡',     r: 3.0,  color: [255, 150, 70],  desc: '又暗又會閃，晚上隨時可能燒壞。' },
   { name: '省電燈泡',     r: 3.8,  color: [255, 226, 150], desc: '穩定的暖黃光，偶爾會燒壞。' },
@@ -117,12 +117,35 @@ const BULBS = [null,
   { name: '星空燈泡',     r: 12,   color: [170, 195, 255], desc: '深藍色的燈泡裡有星星一閃一閃，照得最遠。' },
   { name: '天使燈泡',     r: 3.2,  color: [255, 236, 190], special: 'angel', desc: '燈泡裡住著小天使，晚上會飛出去打怪物（停電也會）；但燈光比較暗。' },
   { name: '粘液燈泡',     r: 0,    color: [120, 230, 90],  special: 'slime', noLight: true, desc: '不會發光，但會流出一灘黏液，走進黏液的怪物都會變得很慢。' },
+  { name: '回血燈泡',     r: 3.8,  color: [140, 255, 175], special: 'heal', desc: '站在燈泡下面（2.5 格內）會慢慢回血。停電時燈熄了就不會回血。' },
 ];
 const MAX_TIER = BULBS.length - 1;
-const FIRE_TIER = 10, STAR_TIER = 11, ANGEL_TIER = 12, SLIME_TIER = 13;
+const FIRE_TIER = 10, STAR_TIER = 11, ANGEL_TIER = 12, SLIME_TIER = 13, HEAL_TIER = 14;
 const NORMAL_MAX = STAR_TIER;                 // 一般燈泡的最高級（合成、升級到這裡為止）
 const isSpecialBulb = t => !!(BULBS[t] && BULBS[t].special);
-const BULB_PRICE = [0, 1, 2, 3, 4, 6, 8, 10, 13, 16, 20, 26, 22, 18];
+const BULB_PRICE = [0, 1, 2, 3, 4, 6, 8, 10, 13, 16, 20, 26, 22, 18, 24];
+
+// 第二世界裡，藍鑽、紅鑽、紫鑽燈泡變成花園版（等級、亮度、燈光顏色都一樣）
+const BULBS_W2 = {
+  6: { name: '花燈泡', desc: '一朵發著藍光的繡球花，會飄下藍色花瓣。' },
+  7: { name: '樹燈泡', desc: '燈泡裡長著一棵紅色的楓樹，會飄下紅葉。' },
+  8: { name: '水燈泡', desc: '裝滿發著紫光的水，會滴下紫色的水滴。' },
+};
+
+// 燈泡稀有度：1～5 級稀有、沒有技能的 6 級以上史詩、有技能的傳奇（火焰、天使、粘液、回血）
+const RARITY = {
+  rare:   { name: '稀有', color: '#4da3ff' },
+  epic:   { name: '史詩', color: '#c27bff' },
+  legend: { name: '傳奇', color: '#ffc23a' },
+};
+const bulbRarity = t => (BULBS[t].special || t === FIRE_TIER ? 'legend' : t <= 5 ? 'rare' : 'epic');
+
+// 手電筒三個等級
+const FLASH_TIERS = [null,
+  { name: '破爛手電筒', short: '破爛', dmg: 1, range: 7.5, half: 0.42, color: '#b9b1a8' },
+  { name: '稀有手電筒', short: '稀有', dmg: 2, range: 9, half: 0.42, color: '#4da3ff' },
+  { name: '巨光手電筒', short: '巨光', dmg: 3, range: 10.5, half: 0.52, color: '#ffc23a' },
+];
 
 const LAMP_TYPES = {
   socket: { name: '天花板燈座', mult: 1.0 },
@@ -152,7 +175,8 @@ const ITEMS = {
   firecracker:{ name: '鞭炮',   kind: 'weapon', icon: '🧨', desc: '丟出去 1 秒後爆炸，附近的怪物都扣很多血。' },
   marble:     { name: '彈珠',   kind: 'ammo',   icon: '🔘', desc: '彈弓的子彈。選彈弓按 Q 發射。' },
   holywater:  { name: '聖水',   kind: 'ammo',   icon: '💧', desc: '聖水槍的水，一瓶噴一次。選聖水槍按 Q 噴。' },
-  strongflash:{ name: '強力手電筒', kind: 'upgrade', icon: '💪', desc: '撿到就自動換上：手電筒打怪物的傷害變兩倍、照得更遠。' },
+  strongflash:{ name: '稀有手電筒', kind: 'upgrade', icon: '🔦', desc: '撿到就自動換上：手電筒打怪物的傷害變 2 倍、照得更遠。' },
+  megaflash:  { name: '巨光手電筒', kind: 'upgrade', icon: '🔆', desc: '撿到就自動換上：手電筒打怪物的傷害變 3 倍、照得最遠，光圈也更寬。' },
   amulet:     { name: '護身符', kind: 'charm',  icon: '📿', desc: '帶在身上就有效：被怪物抓到時只扣一半的血。' },
   bandage:  { name: '繃帶',   kind: 'food', icon: '🩹', hp: 25, desc: '生命 +25' },
   medkit:   { name: '急救箱', kind: 'food', icon: '💊', hp: 60, desc: '生命 +60' },
@@ -163,8 +187,8 @@ for (let t = 1; t <= MAX_TIER; t++) {
 ITEMS.key = { name: '鑰匙', kind: 'key', icon: '🗝️', desc: '走到上鎖的寶箱前按 E 就能打開。' };
 ITEMS.coin = { name: '硬幣', kind: 'coin', icon: '🪙', desc: '可以跟神秘商人買東西，或投扭蛋機。' };
 const ITEM_ORDER = [
-  'pan', 'slingshot', 'watergun', 'firecracker', 'salt', 'marble', 'holywater', 'strongflash', 'amulet',
-  'bulb' + SLIME_TIER, 'bulb' + ANGEL_TIER,
+  'pan', 'slingshot', 'watergun', 'firecracker', 'salt', 'marble', 'holywater', 'strongflash', 'megaflash', 'amulet',
+  'bulb' + HEAL_TIER, 'bulb' + SLIME_TIER, 'bulb' + ANGEL_TIER,
   ...Array.from({ length: NORMAL_MAX }, (_, i) => 'bulb' + (NORMAL_MAX - i)),
   'key', 'lamp_chand', 'lamp_floor', 'lamp_desk', 'battery', 'candle',
   'cocoa', 'chocolate', 'milk', 'canned', 'noodles', 'snack', 'medkit', 'bandage',
@@ -186,3 +210,72 @@ const DIFFS = {
   normal: { name: '普通', spawn: 0.75, maxS: 0.75, lv: -1, hp: 0.85, dmg: 0.75, san: 0.75, hunger: 0.8, items: 1.35, hazard: 0.85 },
   hard:   { name: '困難', spawn: 1,    maxS: 1,    lv: 0,  hp: 1,    dmg: 1,    san: 1,    hunger: 1,   items: 1,    hazard: 1 },
 };
+
+// ====================================================================
+// 第二世界：夢核花園。房間和門的位置都跟第一世界一樣，只換名字、地板和家具
+// ====================================================================
+const WORLD_NAMES = { 1: '第一世界：家', 2: '第二世界：夢核花園' };
+const ROOMS_W2 = {
+  attic:    { name: '紫藤花架', floor: 'grass2', dayDark: 0.25 },
+  study:    { name: '樹洞書屋', floor: 'grass' },
+  bedroom:  { name: '花田',     floor: 'flowers' },
+  bathroom: { name: '噴水池',   floor: 'stone' },
+  hall:     { name: '花徑',     floor: 'path' },
+  storage:  { name: '園丁小屋', floor: 'dirt' },
+  living:   { name: '中央草坪', floor: 'grass' },
+  kitchen:  { name: '野餐區',   floor: 'grass2' },
+  basement: { name: '樹根洞穴', floor: 'dirt2', dayDark: 0.6 },
+  garage:   { name: '遊樂場',   floor: 'sand' },
+  laundry:  { name: '水井邊',   floor: 'grass' },
+};
+for (const r of ROOMS) {
+  const w2 = ROOMS_W2[r.id];
+  r.w1 = { name: r.name, floor: r.floor, dayDark: r.dayDark };
+  r.w2 = { name: w2.name, floor: w2.floor, dayDark: w2.dayDark };
+}
+// 第二世界的家具：同一個位置、同樣大小，換成花園裡的東西（沒有電視、沒有衣櫃）
+const FURN_W2 = {
+  rug1: { type: 'flowerbed', color: '#f08cc0' },
+  tvcab: { type: 'mailbox', name: '信箱' },
+  sofa: { type: 'bench' },
+  ctable: { type: 'stump' },
+  bookshelf: { type: 'log', name: '樹洞' },
+  phone: { name: '電話亭' },
+  plant1: { type: 'bigflower', color: '#ff9ec8' },
+  fridge: { type: 'vending', name: '自動販賣機' },
+  kdrawer: { type: 'picnicbox', name: '野餐箱' },
+  stove: { type: 'grill' },
+  kcab: { type: 'baskets', name: '野餐籃' },
+  ksink: { type: 'tap' },
+  dtable: { type: 'picnic' },
+  sshelf: { type: 'pots', name: '種子架' },
+  boxA: { type: 'crate', name: '木箱' },
+  boxB: { type: 'crate', name: '木箱' },
+  toolcab: { type: 'gardentools', name: '園藝工具箱' },
+  shoecab: { type: 'pots', name: '花盆架' },
+  plant2: { type: 'bigflower', color: '#ffe066' },
+  rug2: { type: 'flowerbed', color: '#9cc8ff' },
+  nightstand: { type: 'smallcab', name: '小木櫃' },
+  closet: { type: 'clothesline', name: '曬衣籃' },
+  dresser: { type: 'smallcab', name: '木頭櫃' },
+  toilet: { type: 'birdbath' },
+  medcab: { type: 'firstaid', name: '急救箱' },
+  bathtub: { type: 'fountain' },
+  sbook: { type: 'hollow', name: '樹洞' },
+  desk: { type: 'stonetable', name: '石桌' },
+  filecab: { type: 'crate', name: '舊木箱' },
+  chest1: { type: 'rootbox', name: '樹根木箱' },
+  chest2: { type: 'rootbox', name: '樹根木箱' },
+  chest3: { type: 'rootbox', name: '樹根木箱' },
+  doll: { type: 'scarecrow' },
+  oldbox1: { type: 'crate', name: '舊木箱' },
+  oldbox2: { type: 'crate', name: '舊木箱' },
+  boiler: { type: 'roots' },
+  toolbox: { type: 'toybox', name: '玩具箱' },
+  gshelf: { type: 'toyshelf', name: '玩具架' },
+  car: { type: 'slide' },
+  washer: { type: 'well', name: '水井' },
+  basket: { type: 'buckets', name: '水桶' },
+};
+const FURN_W1 = FURN.map(f => ({ ...f }));
+const furnForWorld = w => FURN_W1.map(f => ({ ...f, ...(w === 2 ? FURN_W2[f.id] || {} : {}) }));

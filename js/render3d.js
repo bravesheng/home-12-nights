@@ -150,6 +150,32 @@ function floorTex(type) {
       case 'tile2': checker('#e6d9c3', '#cbbb9f'); break;
       case 'concrete': speckle('#62656a', 160, 'rgba(0,0,0,.18)'); break;
       case 'concrete2': speckle('#575a60', 160, 'rgba(0,0,0,.18)'); break;
+      // 第二世界：草地、花田、石板、小路、泥土、沙子
+      case 'grass': case 'grass2': case 'flowers': {
+        c.fillStyle = type === 'grass2' ? '#6aa952' : '#5c9c48'; c.fillRect(0, 0, w, h);
+        for (let i = 0; i < 220; i++) {
+          const g = 120 + rnd() * 80 | 0;
+          c.strokeStyle = `rgba(${g * 0.45 | 0},${g},${g * 0.4 | 0},.7)`; c.lineWidth = 1;
+          const x = rnd() * w, y = rnd() * h; c.beginPath(); c.moveTo(x, y); c.lineTo(x + (rnd() - 0.5) * 3, y - 3 - rnd() * 4); c.stroke();
+        }
+        const cols = ['#ffb3d6', '#fff3a8', '#ffffff', '#b8d8ff', '#ffd0a0'];
+        for (let i = 0, n = type === 'flowers' ? 26 : 5; i < n; i++) { c.fillStyle = cols[(rnd() * cols.length) | 0]; c.beginPath(); c.arc(rnd() * w, rnd() * h, 1.6 + rnd() * 1.4, 0, 7); c.fill(); }
+        break;
+      }
+      case 'stone': {
+        c.fillStyle = '#b9b3a8'; c.fillRect(0, 0, w, h);
+        for (const [x, y, sw, sh] of [[1, 1, 30, 20], [33, 1, 30, 26], [1, 23, 22, 40], [25, 29, 38, 16], [25, 47, 38, 16]]) { c.fillStyle = shade('#c9c3b6', (rnd() - 0.5) * 24); c.fillRect(x, y, sw, sh); }
+        c.fillStyle = 'rgba(80,120,60,.5)'; for (let i = 0; i < 30; i++) c.fillRect(rnd() * w, rnd() * h, 2, 2);
+        break;
+      }
+      case 'path': {
+        c.fillStyle = '#7da35e'; c.fillRect(0, 0, w, h);
+        for (let i = 0; i < 9; i++) { c.fillStyle = shade('#d8c8a6', (rnd() - 0.5) * 30); c.beginPath(); c.ellipse(8 + (i % 3) * 24 + rnd() * 4, 10 + Math.floor(i / 3) * 22 + rnd() * 4, 10, 8, rnd(), 0, 7); c.fill(); }
+        break;
+      }
+      case 'dirt': speckle('#7a5a3e', 200, 'rgba(0,0,0,.2)'); break;
+      case 'dirt2': speckle('#4c3828', 220, 'rgba(0,0,0,.25)'); break;
+      case 'sand': speckle('#e0cf9f', 240, 'rgba(120,90,40,.25)'); break;
     }
   });
   floorTexCache[type] = t;
@@ -250,6 +276,91 @@ function makeTextures() {
   });
 }
 
+// 第二世界：樹牆、藍天白雲天花板（萬物甦醒時雲會睜開眼睛）、草葉、牆上的眼睛、門外的光
+let treeWallTex, skyTex, skyEyeTex, bladeTex, wallEyeTex, doorGlowTex, clothTex, snailFaceTex, grassFaceTex, girlFaceTex, sunPetalTex, flowerEyeTex, capTex;
+function makeGardenTextures() {
+  // 小眼球（球面貼圖：正面 u = 0.25 是瞳孔）
+  flowerEyeTex = canvasTex(128, 64, (c) => {
+    c.fillStyle = '#f6efe6'; c.fillRect(0, 0, 128, 64);
+    c.strokeStyle = 'rgba(180,40,50,.75)'; c.lineWidth = 1;
+    for (let i = 0; i < 26; i++) { const a = rnd() * Math.PI * 2; c.beginPath(); c.moveTo(32 + Math.cos(a) * 11, 32 + Math.sin(a) * 11); c.lineTo(32 + Math.cos(a) * (18 + rnd() * 14), 32 + Math.sin(a) * (18 + rnd() * 10)); c.stroke(); }
+    c.fillStyle = '#6a3a1e'; c.beginPath(); c.arc(32, 32, 9, 0, 7); c.fill();
+    c.fillStyle = '#0d0808'; c.beginPath(); c.arc(32, 32, 4.5, 0, 7); c.fill();
+    c.fillStyle = 'rgba(255,255,255,.85)'; c.beginPath(); c.arc(29, 29, 2, 0, 7); c.fill();
+  });
+  // 千眼菇的菇傘：紅色上面有很多眼睛
+  capTex = canvasTex(256, 128, (c) => {
+    c.fillStyle = '#c8303e'; c.fillRect(0, 0, 256, 128);
+    c.fillStyle = 'rgba(255,255,255,.08)'; for (let i = 0; i < 40; i++) c.fillRect(rnd() * 256, rnd() * 128, 3, 3);
+    for (let i = 0; i < 26; i++) {
+      const x = 8 + rnd() * 240, y = 10 + rnd() * 92, rr = 6 + rnd() * 5;
+      c.fillStyle = '#f6efe6'; c.beginPath(); c.ellipse(x, y, rr * 1.3, rr, 0, 0, 7); c.fill();
+      c.fillStyle = '#5a3a26'; c.beginPath(); c.arc(x, y, rr * 0.55, 0, 7); c.fill();
+      c.fillStyle = '#0d0808'; c.beginPath(); c.arc(x, y, rr * 0.25, 0, 7); c.fill();
+      c.strokeStyle = '#7a1a22'; c.lineWidth = 1.5; c.beginPath(); c.ellipse(x, y, rr * 1.3, rr, 0, 0, 7); c.stroke();
+    }
+  });
+  treeWallTex = canvasTex(64, 128, (c, w, h) => {
+    c.fillStyle = '#2c5629'; c.fillRect(0, 0, w, h);
+    const leaf = n => { for (let i = 0; i < n; i++) { c.fillStyle = ['#3c7a36', '#4f8f45', '#2a4f28', '#5ea050', '#356b30'][(rnd() * 5) | 0]; c.beginPath(); c.arc(rnd() * w, rnd() * h * 0.62, 4 + rnd() * 7, 0, 7); c.fill(); } };
+    leaf(140);
+    // 樹幹（下半部）和旁邊的矮樹叢
+    for (let i = 0; i < 60; i++) { c.fillStyle = ['#3c7a36', '#2a4f28', '#4a8a40'][(rnd() * 3) | 0]; c.beginPath(); c.arc(rnd() * w, h * 0.55 + rnd() * h * 0.45, 4 + rnd() * 6, 0, 7); c.fill(); }
+    c.fillStyle = '#5a3b22'; c.beginPath(); c.moveTo(24, 58); c.lineTo(40, 58); c.lineTo(43, 118); c.lineTo(50, 128); c.lineTo(14, 128); c.lineTo(21, 118); c.closePath(); c.fill();
+    c.strokeStyle = 'rgba(30,18,10,.6)'; c.lineWidth = 1;
+    for (let i = 0; i < 9; i++) { const x = 24 + rnd() * 16; c.beginPath(); c.moveTo(x, 60 + rnd() * 10); c.lineTo(x + (rnd() - 0.5) * 3, 120); c.stroke(); }
+    leaf(40);
+    const cols = ['#ffb3d6', '#ffffff', '#fff3a8'];
+    for (let i = 0; i < 10; i++) { c.fillStyle = cols[(rnd() * 3) | 0]; c.beginPath(); c.arc(rnd() * w, rnd() * h * 0.9, 1.6, 0, 7); c.fill(); }
+  });
+  const drawSky = (c, w, h, eyes) => {
+    const g = c.createLinearGradient(0, 0, w, h); g.addColorStop(0, '#9fcfff'); g.addColorStop(1, '#c6e2ff');
+    c.fillStyle = eyes === 'glow' ? '#000' : g; c.fillRect(0, 0, w, h);
+    const clouds = [[60, 70], [190, 50], [130, 170], [30, 210], [220, 200]];
+    for (const [x, y] of clouds) {
+      if (eyes !== 'glow') { c.fillStyle = 'rgba(255,255,255,.92)'; for (let i = 0; i < 6; i++) { c.beginPath(); c.arc(x + (i - 2.5) * 13, y + Math.sin(i * 1.7) * 6, 15 + (i % 3) * 5, 0, 7); c.fill(); } }
+      if (eyes) {
+        // 萬物甦醒時，雲上睜開一隻眼睛
+        c.fillStyle = eyes === 'glow' ? '#fff' : '#fbfbff'; c.beginPath(); c.ellipse(x, y, 16, 9, 0, 0, 7); c.fill();
+        c.fillStyle = eyes === 'glow' ? '#ff6aa0' : '#5a3a6a'; c.beginPath(); c.arc(x, y, 6, 0, 7); c.fill();
+        c.fillStyle = '#000'; c.beginPath(); c.arc(x, y, 2.6, 0, 7); c.fill();
+      }
+    }
+  };
+  skyTex = canvasTex(256, 256, (c, w, h) => drawSky(c, w, h, false));
+  skyEyeTex = canvasTex(256, 256, (c, w, h) => drawSky(c, w, h, 'glow'));
+  bladeTex = canvasTex(64, 64, (c) => {
+    for (let i = 0; i < 16; i++) {
+      const x = 6 + rnd() * 52, top = 6 + rnd() * 26, g = 120 + rnd() * 90 | 0;
+      c.strokeStyle = `rgb(${g * 0.42 | 0},${g},${g * 0.38 | 0})`; c.lineWidth = 2.5 + rnd() * 2;
+      c.beginPath(); c.moveTo(x, 64); c.quadraticCurveTo(x + (rnd() - 0.5) * 10, 40, x + (rnd() - 0.5) * 18, top); c.stroke();
+    }
+  });
+  bladeTex.wrapS = bladeTex.wrapT = THREE.ClampToEdgeWrapping;
+  wallEyeTex = canvasTex(64, 64, (c) => {
+    const g = c.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, 'rgba(255,150,200,.5)'); g.addColorStop(1, 'rgba(255,150,200,0)');
+    c.fillStyle = g; c.fillRect(0, 0, 64, 64);
+    c.fillStyle = '#fbf6ee'; c.beginPath(); c.ellipse(32, 32, 22, 13, 0, 0, 7); c.fill();
+    c.fillStyle = '#7a2a4a'; c.beginPath(); c.arc(32, 32, 8, 0, 7); c.fill();
+    c.fillStyle = '#000'; c.beginPath(); c.arc(32, 32, 3.5, 0, 7); c.fill();
+  });
+  wallEyeTex.wrapS = wallEyeTex.wrapT = THREE.ClampToEdgeWrapping;
+  doorGlowTex = canvasTex(64, 128, (c, w, h) => {
+    const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#bfe0ff'); g.addColorStop(0.5, '#fff4fb'); g.addColorStop(1, '#ffc8e4');
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+  });
+  clothTex = canvasTex(64, 64, (c) => { for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) { c.fillStyle = (x + y) % 2 ? '#e2394a' : '#fff4f0'; c.fillRect(x * 8, y * 8, 8, 8); } });
+  sunPetalTex = canvasTex(64, 64, (c) => {
+    c.fillStyle = '#f7d23a'; c.beginPath(); c.ellipse(32, 32, 30, 12, 0, 0, 7); c.fill();
+    c.strokeStyle = 'rgba(180,120,10,.6)'; c.lineWidth = 2; c.beginPath(); c.moveTo(4, 32); c.lineTo(60, 32); c.stroke();
+  });
+  sunPetalTex.wrapS = sunPetalTex.wrapT = THREE.ClampToEdgeWrapping;
+  const faceT = draw => { const t = canvasTex(512, 512, c => draw(c, 512)); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; return t; };
+  snailFaceTex = faceT(drawSnailFace);
+  grassFaceTex = faceT(drawGrassFace);
+  girlFaceTex = faceT(drawGirlFace);
+}
+
 // ====================================================================
 // 光照貼圖
 // ====================================================================
@@ -283,10 +394,11 @@ function addLight(x, y, r, room, col, k) {
 function updateLightmap(dark) {
   const day = 1 - dark / NIGHT_DARK;
   const amb = 0.95 * day;
+  const tg = isW2() ? 0.95 : 0.97, tb = isW2() ? 1.02 : 0.92; // 第二世界的白天帶一點粉紫色
   for (let i = 0, n = LMW * LMH; i < n; i++) {
     const r = texRoom[i];
     const a = r ? amb * (1 - (r.dayDark || 0)) : texDoor[i] ? amb * 0.9 : 0;
-    lmAcc[i * 3] = a; lmAcc[i * 3 + 1] = a * 0.97; lmAcc[i * 3 + 2] = a * 0.92;
+    lmAcc[i * 3] = a; lmAcc[i * 3 + 1] = a * tg; lmAcc[i * 3 + 2] = a * tb;
   }
   for (const L of G.lights) {
     const c = L.color || (L.candle ? [255, 160, 70] : bulbRGB(L.tier));
@@ -313,7 +425,8 @@ function updateLightmap(dark) {
 // 房子：地板、天花板、牆、門、窗
 // ====================================================================
 const windows = [];
-let frontDoorPanel;
+let frontDoorPanel, doorGlow, houseGroup = null, ceilMat = null, wallEyes = null, flowerEyes = null;
+const decoFlowers = [];   // 第二世界地上的小花（萬物甦醒時會長出眼睛看著你）
 function scaleUV(g, su, sv) {
   const uv = g.attributes.uv;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * su, uv.getY(i) * sv);
@@ -322,25 +435,52 @@ function addFloor(x, y, w, h, type) {
   const g = new THREE.PlaneGeometry(w, h);
   scaleUV(g, w, h);
   const m = new THREE.Mesh(g, floorMat(type));
+  m.userData.ownGeo = true;
   m.rotation.x = -Math.PI / 2;
   m.position.set(x + w / 2, 0, y + h / 2);
   m.receiveShadow = true;
-  scene.add(m);
+  houseGroup.add(m);
 }
 const floorMats = {};
 function floorMat(type) {
   return floorMats[type] || (floorMats[type] = patchLM(new THREE.MeshLambertMaterial({ map: floorTex(type) })));
 }
+// 換世界：拆掉整個房子（地板、牆、家具），用新的世界重新蓋
+function setWorld() {
+  if (houseGroup) {
+    scene.remove(houseGroup);
+    houseGroup.traverse(o => {
+      if (o.userData.ownGeo) o.geometry.dispose();
+      if (o.material && o.material.userData.own) o.material.dispose();
+    });
+  }
+  windows.length = 0; decoFlowers.length = 0;
+  frontDoorPanel = null; doorGlow = null; wallEyes = null; flowerEyes = null; ceilMat = null;
+  for (const k in furn3d) delete furn3d[k];
+  buildHouse();
+  buildFurniture();
+}
 function buildHouse() {
+  houseGroup = new THREE.Group(); scene.add(houseGroup);
+  const w2 = isW2();
   for (const r of ROOMS) addFloor(r.x, r.y, r.w, r.h, r.floor);
   for (const d of DOORS) addFloor(d.x, d.y, 1, 1, d.rooms[0] ? d.rooms[0].floor : 'wood');
 
-  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(MAP_W, MAP_H), lm('#6d6674'));
+  // 天花板：第二世界是藍天白雲（萬物甦醒時雲會睜開眼睛發光）
+  let cm;
+  if (w2) {
+    const sky = skyTex.clone(); sky.needsUpdate = true; sky.repeat.set(MAP_W / 6, MAP_H / 6);
+    const glow = skyEyeTex.clone(); glow.needsUpdate = true; glow.repeat.set(MAP_W / 6, MAP_H / 6);
+    cm = ceilMat = patchLM(new THREE.MeshLambertMaterial({ map: sky, emissiveMap: glow, emissive: 0x000000 }));
+    cm.userData.own = true;
+  } else cm = lm('#6d6674');
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(MAP_W, MAP_H), cm);
+  ceil.userData.ownGeo = true;
   ceil.rotation.x = Math.PI / 2;
   ceil.position.set(MAP_W / 2, WALL_H, MAP_H / 2);
-  scene.add(ceil);
+  houseGroup.add(ceil);
 
-  // 牆（只放在靠近室內的牆格）
+  // 牆（只放在靠近室內的牆格）；第二世界是一棵一棵的樹
   const list = [];
   for (let y = 0; y < MAP_H; y++) for (let x = 0; x < MAP_W; x++) {
     if (tiles[y][x] !== 0) continue;
@@ -351,22 +491,35 @@ function buildHouse() {
     }
     if (near) list.push([x, y]);
   }
-  const wallMat = patchLM(new THREE.MeshLambertMaterial({ map: wallTex }));
+  const wallMat = patchLM(new THREE.MeshLambertMaterial({ map: w2 ? treeWallTex : wallTex }));
+  wallMat.userData.own = true;
   const walls = new THREE.InstancedMesh(new THREE.BoxGeometry(1, WALL_H, 1), wallMat, list.length);
+  walls.userData.ownGeo = true;
   const mtx = new THREE.Matrix4();
   list.forEach(([x, y], i) => { mtx.makeTranslation(x + 0.5, WALL_H / 2, y + 0.5); walls.setMatrixAt(i, mtx); });
   walls.castShadow = true; walls.receiveShadow = true;
   walls.computeBoundingSphere();
-  scene.add(walls);
+  houseGroup.add(walls);
 
-  // 門楣與門框
-  const trim = lm('#4a3a2e');
+  // 門楣與門框（第二世界：花拱門）
+  const trim = lm('#4a3a2e'), vine = lm('#4f8a3a');
+  const archFlowers = [];
   for (const d of DOORS) {
-    const g = new THREE.Group(); g.position.set(d.x, 0, d.y); scene.add(g);
+    const g = new THREE.Group(); g.position.set(d.x, 0, d.y); houseGroup.add(g);
     box(g, 0, 1, 2.15, WALL_H, 0, 1, wallMat);
     // 門上下是牆 → 通道東西向，門框在南北兩側；否則在東西兩側
     const eastWest = !!(tiles[d.y - 1] && tiles[d.y - 1][d.x] === 0);
-    if (eastWest) { box(g, 0, 1, 0, 2.15, 0, 0.06, trim); box(g, 0, 1, 0, 2.15, 0.94, 1, trim); }
+    if (w2 && !d.front) {
+      const arch = new THREE.Group(); arch.position.set(0.5, 0, 0.5); arch.rotation.y = eastWest ? Math.PI / 2 : 0; g.add(arch);
+      for (const s of [-1, 1]) cyl(arch, 0.045, 0.05, 1.62, s * 0.45, 0, 0, vine, 8);
+      const top = new THREE.Mesh(geo('archTop', () => new THREE.TorusGeometry(0.45, 0.05, 6, 18, Math.PI)), vine);
+      top.position.y = 1.62; arch.add(top);
+      g.updateMatrixWorld(true);
+      for (const z of [0.05, -0.05]) {
+        for (let i = 0; i < 9; i++) { const a = i / 8 * Math.PI; archFlowers.push(arch.localToWorld(new THREE.Vector3(Math.cos(a) * 0.45, 1.62 + Math.sin(a) * 0.45, z))); }
+        for (const s of [-1, 1]) for (let k = 0; k < 3; k++) archFlowers.push(arch.localToWorld(new THREE.Vector3(s * 0.45, 0.4 + k * 0.45, z)));
+      }
+    } else if (eastWest) { box(g, 0, 1, 0, 2.15, 0, 0.06, trim); box(g, 0, 1, 0, 2.15, 0.94, 1, trim); }
     else { box(g, 0, 0.06, 0, 2.15, 0, 1, trim); box(g, 0.94, 1, 0, 2.15, 0, 1, trim); }
     if (d.front) {
       frontDoorPanel = new THREE.Group(); g.add(frontDoorPanel);
@@ -374,14 +527,22 @@ function buildHouse() {
       box(frontDoorPanel, 0.2, 0.23, 0.2, 1.0, 0.2, 0.8, lm('#8a5230'));
       box(frontDoorPanel, 0.2, 0.23, 1.15, 1.95, 0.2, 0.8, lm('#8a5230'));
       sph(frontDoorPanel, 0.035, 0.27, 1.0, 0.82, lm('#e0b84a'));
+      // 破關動畫：門打開後，門外是一片粉紅、淡藍的光
+      doorGlow = new THREE.Group(); doorGlow.position.set(-1.1, 0, 0.5); doorGlow.visible = false; g.add(doorGlow);
+      const pl = new THREE.Mesh(geo('doorGlowPl', () => new THREE.PlaneGeometry(3.0, 4.6)), ownBasic({ map: doorGlowTex, fog: false }));
+      pl.position.y = 0.9; pl.rotation.y = Math.PI / 2; doorGlow.add(pl);
+      const sp = ownSprite(glowTex, 0xffe8f6); sp.position.set(0.9, 1.2, 0); sp.scale.setScalar(3.2); doorGlow.add(sp);
+      doorGlow.userData.sprite = sp;
     }
   }
+  if (archFlowers.length) addInstancedFlowers(archFlowers, 0.05, ['#ff9ec8', '#ffffff', '#fff3a8', '#c9a8ff']);
 
+  if (w2) { buildGardenDeco(list); return; }
   // 窗戶（白天透進光、晚上一片漆黑）
   const W = [['n', 17.5], ['n', 27.5], ['n', 38.5], ['e', 19.5], ['e', 22.5], ['e', 12.5], ['w', 23.5], ['e', 30.5], ['s', 21.5], ['s', 28.5]];
   const frameMat = lm('#d8d2c8');
   for (const [side, at] of W) {
-    const g = new THREE.Group(); scene.add(g);
+    const g = new THREE.Group(); houseGroup.add(g);
     const pane = new THREE.Mesh(geo('pane', () => new THREE.PlaneGeometry(1.1, 1.0)), ownBasic({ color: 0xd9ecf7, fog: false }));
     g.add(pane);
     box(g, -0.6, 0.6, -0.56, -0.5, -0.03, 0.03, frameMat, false); box(g, -0.6, 0.6, 0.5, 0.56, -0.03, 0.03, frameMat, false);
@@ -392,6 +553,108 @@ function buildHouse() {
     if (side === 'e') { g.position.set(MAP_W - 1.01, 1.5, at); g.rotation.y = -Math.PI / 2; }
     if (side === 'w') { g.position.set(1.01, 1.5, at); g.rotation.y = Math.PI / 2; }
     windows.push(pane);
+  }
+}
+// 一次畫很多朵小花（只用一個 InstancedMesh，平板才跑得動）
+function addInstancedFlowers(points, r, cols) {
+  const m = patchLM(new THREE.MeshLambertMaterial({ color: 0xffffff }));
+  m.userData.own = true;
+  const im = new THREE.InstancedMesh(geo('dflower' + r, () => new THREE.SphereGeometry(r, 6, 4)), m, points.length);
+  const mtx = new THREE.Matrix4(), col = new THREE.Color();
+  points.forEach((p, i) => { mtx.makeTranslation(p.x, p.y, p.z); im.setMatrixAt(i, mtx); im.setColorAt(i, col.set(cols[i % cols.length])); });
+  im.computeBoundingSphere();
+  houseGroup.add(im);
+  return im;
+}
+// 第二世界的地面裝飾：一叢一叢的草、小花；萬物甦醒時牆上和花上冒出的眼睛
+function buildGardenDeco(wallList) {
+  const grass = [], heads = [], stems = [];
+  const r = seeded(424242);
+  for (const room of ROOMS) {
+    const fl = room.floor;
+    const pg = fl === 'sand' || fl === 'stone' ? 0.08 : fl === 'dirt2' ? 0.15 : fl === 'path' ? 0.25 : 0.5;
+    const pf = fl === 'flowers' ? 0.8 : fl === 'sand' || fl === 'dirt2' || fl === 'stone' ? 0.03 : fl === 'path' ? 0.15 : 0.28;
+    for (let y = room.y; y < room.y + room.h; y++) for (let x = room.x; x < room.x + room.w; x++) {
+      const f = furnGrid[y][x];
+      if (f) continue;
+      const bed = FURN.some(o => o.solid === false && x >= o.x && x < o.x + o.w && y >= o.y && y < o.y + o.h);
+      if (r() < pg) grass.push([x + 0.15 + r() * 0.7, y + 0.15 + r() * 0.7, 0.6 + r() * 0.6, r() * Math.PI]);
+      for (let k = 0, n = bed ? 3 : 1; k < n; k++) {
+        if (r() > (bed ? 0.9 : pf)) continue;
+        const fx = x + 0.12 + r() * 0.76, fy = y + 0.12 + r() * 0.76, h = 0.18 + r() * 0.22;
+        heads.push(new THREE.Vector3(fx, h, fy)); stems.push([fx, fy, h]);
+      }
+    }
+  }
+  // 草叢：兩片交叉的草葉貼圖
+  const bm = patchLM(new THREE.MeshLambertMaterial({ map: bladeTex, alphaTest: 0.45, side: THREE.DoubleSide }));
+  bm.userData.own = true;
+  const bg = geo('tuft', () => {
+    const a = new THREE.PlaneGeometry(0.6, 0.42), b = new THREE.PlaneGeometry(0.6, 0.42);
+    a.translate(0, 0.21, 0); b.translate(0, 0.21, 0); b.rotateY(Math.PI / 2);
+    const g = new THREE.BufferGeometry();
+    for (const k of ['position', 'normal', 'uv']) g.setAttribute(k, new THREE.Float32BufferAttribute([...a.attributes[k].array, ...b.attributes[k].array], a.attributes[k].itemSize));
+    const ia = [...a.index.array], ib = [...b.index.array].map(i => i + a.attributes.position.count);
+    g.setIndex([...ia, ...ib]);
+    return g;
+  });
+  const tufts = new THREE.InstancedMesh(bg, bm, grass.length);
+  const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), pos = new THREE.Vector3();
+  grass.forEach(([x, z, k, a], i) => { q.setFromAxisAngle(UP, a); s.set(k, k, k); pos.set(x, 0, z); mtx.compose(pos, q, s); tufts.setMatrixAt(i, mtx); });
+  tufts.computeBoundingSphere();
+  houseGroup.add(tufts);
+  // 小花：綠色的莖＋彩色的花
+  const sm = lm('#4f8a3a');
+  const st = new THREE.InstancedMesh(geo('dstem', () => new THREE.CylinderGeometry(0.008, 0.01, 1, 4)), sm, stems.length);
+  stems.forEach(([x, z, h], i) => { mtx.compose(pos.set(x, h / 2, z), q.identity(), s.set(1, h, 1)); st.setMatrixAt(i, mtx); });
+  st.computeBoundingSphere();
+  houseGroup.add(st);
+  addInstancedFlowers(heads, 0.045, ['#ff9ec8', '#fff3a8', '#ffffff', '#b8d8ff', '#ffb070', '#d8a8ff']);
+  decoFlowers.push(...heads);
+  // 萬物甦醒：花上長出眼睛（會轉過來看著你）
+  const em = ownLM('#ffffff', { map: flowerEyeTex, emissive: 0x3a2a2a });
+  flowerEyes = new THREE.InstancedMesh(geo('feye', () => new THREE.SphereGeometry(0.055, 10, 8)), em, heads.length);
+  flowerEyes.visible = false; flowerEyes.frustumCulled = false;
+  houseGroup.add(flowerEyes);
+  // 萬物甦醒：樹牆上冒出眼睛
+  const eyes = [];
+  for (const [x, y] of wallList) {
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy;
+      if (!inMap(nx, ny) || tiles[ny][nx] === 0 || r() > 0.35) continue;
+      const along = r() - 0.5;
+      eyes.push(x + 0.5 + dx * 0.53 + (dy ? along * 0.8 : 0), 0.5 + r() * 1.9, y + 0.5 + dy * 0.53 + (dx ? along * 0.8 : 0));
+    }
+  }
+  const eg = new THREE.BufferGeometry();
+  eg.setAttribute('position', new THREE.Float32BufferAttribute(eyes, 3));
+  wallEyes = new THREE.Points(eg, new THREE.PointsMaterial({ map: wallEyeTex, size: 0.32, transparent: true, depthWrite: false, fog: false }));
+  wallEyes.material.userData.own = true; wallEyes.userData.ownGeo = true;
+  wallEyes.visible = false;
+  houseGroup.add(wallEyes);
+}
+// 萬物甦醒的夜晚：天花板的雲睜開眼睛、牆上和花上冒出眼睛
+const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _one = new THREE.Vector3(1, 1, 1), _e = new THREE.Euler();
+function updateAwaken(t, dark) {
+  if (!isW2() || !ceilMat) return;
+  const on = !!(G.ev && G.ev.blood && G.phase === 'night' && mode !== 'title');
+  // 晚上天花板的藍天變成深藍紫色（就算有燈照著也是夜空）
+  const k = clamp(dark / NIGHT_DARK, 0, 1);
+  ceilMat.color.setRGB(1 - 0.62 * k, 1 - 0.66 * k, 1 - 0.38 * k);
+  ceilMat.emissive.setRGB(on ? 0.55 : 0, on ? 0.3 : 0, on ? 0.45 : 0);
+  if (wallEyes) { wallEyes.visible = on; if (on) wallEyes.material.opacity = 0.55 + 0.45 * Math.abs(Math.sin(t * 0.7)); }
+  if (flowerEyes) {
+    flowerEyes.visible = on;
+    if (on) {
+      const p = G.p;
+      decoFlowers.forEach((h, i) => {
+        _e.set(-Math.atan2(EYE - h.y, Math.max(0.3, Math.hypot(p.x - h.x, p.y - h.z))) * 0.6, Math.atan2(p.x - h.x, p.y - h.z), 0, 'YXZ');
+        _q.setFromEuler(_e);
+        _m4.compose(_v.set(h.x, h.y + 0.02, h.z), _q, _one);
+        flowerEyes.setMatrixAt(i, _m4);
+      });
+      flowerEyes.instanceMatrix.needsUpdate = true;
+    }
   }
 }
 
@@ -418,7 +681,7 @@ const frontLen = (f, side) => (side === 's' || side === 'n' ? f.w : f.h);
 
 function buildFurniture() {
   for (const f of FURN) {
-    const g = new THREE.Group(); g.position.set(f.x, 0, f.y); scene.add(g);
+    const g = new THREE.Group(); g.position.set(f.x, 0, f.y); houseGroup.add(g);
     const r = { g, top: 0.8 };
     furn3d[f.id] = r;
     const W = f.w, D = f.h, side = frontSide(f), len = frontLen(f, side);
@@ -433,7 +696,7 @@ function buildFurniture() {
       }
       r.top = h;
     };
-    switch (f.type) {
+    if (!gardenFurniture(f, g, r, W, D, side, len, cabinet)) switch (f.type) {
       case 'rug': {
         const t = canvasTex(128, 128, (c) => {
           c.fillStyle = f.color; c.fillRect(0, 0, 128, 128);
@@ -719,13 +982,289 @@ function buildFurniture() {
     }
   }
 }
+// ====================================================================
+// 第二世界的家具：同一個位置、同樣大小，換成花園裡的東西
+// ====================================================================
+function gardenFurniture(f, g, r, W, D, side, len, cabinet) {
+  const w2 = isW2();
+  if (!w2 && f.type !== 'flowerbed') return false;
+  const wood = lm('#9a7650'), dark = lm('#5e4633'), stone = lm('#b3aea3'), stone2 = lm('#97928a');
+  const bark = lm('#6b4a2e'), leaf = lm('#4f8f45'), white = lm('#f2f0ea'), hole = lm('#140c08');
+  const ownCloth = () => { const m = patchLM(new THREE.MeshLambertMaterial({ map: clothTex })); m.userData.own = true; return m; };
+  switch (f.type) {
+    case 'flowerbed': {
+      const t = canvasTex(128, 128, (c) => {
+        c.fillStyle = '#6b4a30'; c.fillRect(0, 0, 128, 128);
+        for (let i = 0; i < 220; i++) { c.fillStyle = 'rgba(0,0,0,.15)'; c.fillRect(rnd() * 128, rnd() * 128, 2, 2); }
+        const cols = [f.color, '#ffffff', '#fff3a8', f.color];
+        for (let i = 0; i < 80; i++) {
+          const x = 6 + rnd() * 116, y = 6 + rnd() * 116;
+          c.fillStyle = '#4f8f45'; c.fillRect(x - 1, y, 2, 5);
+          c.fillStyle = cols[(rnd() * cols.length) | 0]; c.beginPath(); c.arc(x, y, 3 + rnd() * 2.5, 0, 7); c.fill();
+        }
+        c.strokeStyle = 'rgba(210,200,180,.95)'; c.lineWidth = 6; c.strokeRect(3, 3, 122, 122);
+      });
+      const mat = patchLM(new THREE.MeshLambertMaterial({ map: t })); mat.userData.own = true;
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.2, D - 0.2), mat); m.userData.ownGeo = true;
+      m.rotation.x = -Math.PI / 2; m.position.set(W / 2, 0.008, D / 2); m.receiveShadow = true; g.add(m);
+      return true;
+    }
+    case 'mailbox': { // 一排粉彩色的信箱
+      const cols = ['#ff9ec8', '#8cc8ff', '#ffe27a', '#9be8b0'], n = Math.max(1, Math.round(len));
+      for (let i = 0; i < n; i++) {
+        const u = (i + 0.5) * len / n;
+        fb(g, f, side, u - 0.04, u + 0.04, 0, 0.95, 0.46, 0.54, wood);
+        fb(g, f, side, u - 0.2, u + 0.2, 0.95, 1.25, 0.25, 0.75, lm(cols[i % 4]));
+        fb(g, f, side, u - 0.15, u + 0.15, 1.04, 1.12, 0.22, 0.25, lm('#3a3040'), false);
+        fb(g, f, side, u + 0.2, u + 0.23, 1.12, 1.42, 0.55, 0.6, lm('#e2394a'), false);
+      }
+      r.top = 1.3;
+      return true;
+    }
+    case 'bench': { // 公園長椅
+      const iron = lm('#2f3a33');
+      for (const v0 of [0.12, 0.26, 0.4]) fb(g, f, side, 0.1, len - 0.1, 0.42, 0.47, v0, v0 + 0.12, wood);
+      for (const y0 of [0.6, 0.76]) fb(g, f, side, 0.1, len - 0.1, y0, y0 + 0.11, 0.62, 0.68, wood);
+      for (const u of [0.35, len - 0.35]) { fb(g, f, side, u - 0.04, u + 0.04, 0, 0.42, 0.14, 0.52, iron); fb(g, f, side, u - 0.04, u + 0.04, 0, 0.92, 0.64, 0.7, iron); }
+      r.top = 0.95;
+      return true;
+    }
+    case 'stump': // 樹樁
+      for (const x of [0.5, W - 0.5]) { cyl(g, 0.3, 0.36, 0.45, x, 0, D / 2, bark, 12); cyl(g, 0.29, 0.29, 0.01, x, 0.45, D / 2, lm('#d9b88a'), 12); }
+      r.top = 0.46;
+      return true;
+    case 'log': { // 倒下來的樹幹，正面有一個樹洞
+      const L = Math.max(W, D), m = cyl(g, 0.38, 0.4, L - 0.1, 0, 0, 0, bark, 12);
+      if (D >= W) m.rotation.x = Math.PI / 2; else m.rotation.z = Math.PI / 2;
+      m.position.set(W / 2, 0.4, D / 2);
+      fb(g, f, side, len / 2 - 0.22, len / 2 + 0.22, 0.22, 0.6, 0.06, 0.11, hole, false);
+      for (let i = 0; i < 4; i++) sph(g, 0.15, W / 2 + (rnd() - 0.5) * 0.3, 0.78, D / 2 + (rnd() - 0.5) * (L - 0.8), leaf, 1, 0.55, 1, 8);
+      r.top = 0.85;
+      return true;
+    }
+    case 'bigflower': { // 比人還高的大花
+      cyl(g, 0.03, 0.04, 1.1, 0.5, 0, 0.5, lm('#4f8a3a'), 8);
+      for (const s of [-1, 1]) { const lf = sph(g, 0.16, 0.5 + s * 0.14, 0.45, 0.5, leaf, 1, 0.25, 0.55, 8); lf.rotation.z = s * 0.5; }
+      const pm = lm(f.color || '#ff9ec8');
+      for (let i = 0; i < 7; i++) { const a = i / 7 * Math.PI * 2, p = sph(g, 0.13, 0.5 + Math.cos(a) * 0.15, 1.15, 0.5 + Math.sin(a) * 0.15, pm, 1, 0.35, 0.6, 8); p.rotation.y = -a; }
+      sph(g, 0.09, 0.5, 1.17, 0.5, lm('#ffe066'), 1, 0.6, 1, 10);
+      r.top = 1.25;
+      return true;
+    }
+    case 'vending': { // 粉紅色的自動販賣機
+      box(g, 0.08, W - 0.08, 0, 1.9, 0.08, D - 0.08, lm('#f2a6c4'));
+      fb(g, f, side, 0.15, len - 0.55, 0.75, 1.75, 0, 0.02, ownLM('#bfe6ff', { emissive: 0x24404e }), false);
+      const cans = ['#e2394a', '#4da3ff', '#7ee081', '#ffd166', '#c38bff'];
+      for (let row = 0; row < 3; row++) for (let i = 0; i < 4; i++) fb(g, f, side, 0.22 + i * 0.27, 0.34 + i * 0.27, 0.85 + row * 0.3, 1.03 + row * 0.3, -0.02, 0, lm(cans[(row * 4 + i) % 5]), false);
+      fb(g, f, side, len - 0.45, len - 0.2, 1.1, 1.4, -0.02, 0, lm('#3a3040'), false);
+      fb(g, f, side, 0.2, len - 0.6, 0.18, 0.4, -0.02, 0, lm('#2a2226'), false);
+      r.top = 1.9;
+      return true;
+    }
+    case 'picnicbox': // 蓋著紅白格子布的野餐箱
+      box(g, 0.08, W - 0.08, 0, 0.62, 0.1, D - 0.1, lm('#a8784a'));
+      for (const u of [0.3, len - 0.3]) fb(g, f, side, u - 0.03, u + 0.03, 0.05, 0.6, -0.01, 0.01, dark, false);
+      box(g, 0.02, W - 0.02, 0.62, 0.66, 0.04, D - 0.04, ownCloth());
+      r.top = 0.66;
+      return true;
+    case 'grill': { // 烤肉架
+      const blk = lm('#2b2b30');
+      for (const x of [0.55, W - 0.55]) {
+        for (const [dx, dz] of [[-0.18, -0.15], [0.18, -0.15], [0, 0.2]]) limb(g, [x + dx, 0, D / 2 + dz], [x, 0.55, D / 2], 0.02, blk);
+        sph(g, 0.3, x, 0.68, D / 2, blk, 1, 0.5, 1, 12);
+        cyl(g, 0.29, 0.29, 0.02, x, 0.7, D / 2, lm('#77777c'), 14);
+      }
+      r.top = 0.8;
+      return true;
+    }
+    case 'baskets': { // 小桌子上放著野餐籃
+      box(g, 0.05, W - 0.05, 0.5, 0.56, 0.08, D - 0.08, wood);
+      for (const [x, z] of [[0.15, 0.15], [W - 0.15, 0.15], [0.15, D - 0.15], [W - 0.15, D - 0.15]]) box(g, x - 0.03, x + 0.03, 0, 0.5, z - 0.03, z + 0.03, wood);
+      const bm = lm('#c9965a');
+      for (let i = 0; i < Math.round(W); i++) {
+        box(g, 0.25 + i, 0.75 + i, 0.56, 0.84, 0.25, D - 0.25, bm);
+        const h = new THREE.Mesh(geo('bhandle', () => new THREE.TorusGeometry(0.2, 0.02, 6, 14, Math.PI)), bm); h.position.set(0.5 + i, 0.84, D / 2); g.add(h);
+      }
+      r.top = 1.05;
+      return true;
+    }
+    case 'tap': // 石頭洗手台
+      box(g, 0.15, W - 0.15, 0, 0.75, 0.15, D - 0.15, stone);
+      box(g, 0.3, W - 0.3, 0.7, 0.76, 0.3, D - 0.3, lm('#7fb8d6'), false);
+      fb(g, f, side, len / 2 - 0.04, len / 2 + 0.04, 0.75, 1.15, 0.72, 0.8, lm('#9aa5ab'));
+      fb(g, f, side, len / 2 - 0.04, len / 2 + 0.04, 1.08, 1.14, 0.52, 0.8, lm('#9aa5ab'));
+      r.top = 1.15;
+      return true;
+    case 'picnic': // 野餐桌和兩條長椅
+      box(g, 0.1, W - 0.1, 0.72, 0.78, 0.5, D - 0.5, wood);
+      for (const z of [0.15, D - 0.15]) box(g, 0.2, W - 0.2, 0.42, 0.47, z - 0.13, z + 0.13, wood);
+      for (const x of [0.5, W - 0.5]) { box(g, x - 0.05, x + 0.05, 0, 0.72, 0.6, D - 0.6, dark); box(g, x - 0.05, x + 0.05, 0, 0.42, 0.05, D - 0.05, dark); }
+      box(g, 0.9, W - 0.9, 0.78, 0.785, 0.55, D - 0.55, ownCloth(), false);
+      r.top = 0.8;
+      return true;
+    case 'pots': { // 放著花盆的木架
+      for (const y of [0.05, 0.6]) box(g, 0.05, W - 0.05, y, y + 0.05, 0.1, D - 0.1, wood);
+      for (const [x, z] of [[0.1, 0.15], [W - 0.1, 0.15], [0.1, D - 0.15], [W - 0.1, D - 0.15]]) box(g, x - 0.03, x + 0.03, 0, 1.0, z - 0.03, z + 0.03, wood);
+      const tc = lm('#c96a3a'), fl = ['#ff9ec8', '#fff3a8', '#c9a8ff'];
+      for (const y of [0.1, 0.65]) for (let x = 0.3; x < W - 0.15; x += 0.45) { cyl(g, 0.13, 0.1, 0.22, x, y, D / 2, tc, 10); sph(g, 0.12, x, y + 0.3, D / 2, rnd() < 0.5 ? leaf : lm(fl[(rnd() * 3) | 0]), 1, 0.8, 1, 8); }
+      r.top = 1.0;
+      return true;
+    }
+    case 'crate': { // 疊起來的木箱
+      const cw = lm('#a07a4e'), slat = lm('#7a5a36');
+      const crate = (x0, z0, s, y0) => { box(g, x0, x0 + s, y0, y0 + s * 0.85, z0, z0 + s, cw); box(g, x0 - 0.005, x0 + s + 0.005, y0 + s * 0.38, y0 + s * 0.47, z0 - 0.005, z0 + s + 0.005, slat, false); };
+      if (W >= 2 && D >= 2) { crate(0.1, 0.1, 0.85, 0); crate(1.05, 0.15, 0.8, 0); crate(0.3, 1.05, 0.8, 0); crate(0.2, 0.2, 0.6, 0.72); r.top = 1.25; }
+      else { crate(0.1, 0.1, Math.min(W, D) - 0.2, 0); if (Math.max(W, D) >= 2) crate(W >= 2 ? 1.05 : 0.15, W >= 2 ? 0.15 : 1.05, 0.7, 0); r.top = 0.75; }
+      return true;
+    }
+    case 'gardentools': // 綠色的園藝工具櫃，旁邊掛著鏟子
+      cabinet(1.7, '#5f8f5a');
+      fb(g, f, side, 0.3, 0.35, 0.3, 1.5, -0.04, -0.01, lm('#8a6a4a'), false);
+      fb(g, f, side, 0.2, 0.45, 0.15, 0.4, -0.05, -0.02, lm('#9aa5ab'), false);
+      return true;
+    case 'smallcab':
+      cabinet(f.id === 'dresser' ? 1.0 : 0.6, '#c9a27a');
+      return true;
+    case 'clothesline': { // 曬衣繩、掛著的衣服、地上的曬衣籃
+      for (const u of [0.15, len - 0.15]) fb(g, f, side, u - 0.04, u + 0.04, 0, 1.9, 0.5, 0.58, wood);
+      fb(g, f, side, 0.15, len - 0.15, 1.82, 1.84, 0.53, 0.55, lm('#eeeeee'), false);
+      const cl = ['#ff9ec8', '#8cc8ff', '#ffffff', '#ffe27a'];
+      for (let i = 0; i < 4; i++) { const u = 0.45 + i * (len - 0.9) / 3; fb(g, f, side, u - 0.17, u + 0.17, 1.3, 1.82, 0.52, 0.56, lm(cl[i]), false); }
+      fb(g, f, side, len / 2 - 0.35, len / 2 + 0.35, 0, 0.32, 0.12, 0.72, lm('#c9965a'));
+      r.top = 0.4;
+      return true;
+    }
+    case 'birdbath': // 鳥浴盆
+      cyl(g, 0.12, 0.16, 0.75, 0.5, 0, 0.5, stone, 10);
+      cyl(g, 0.38, 0.2, 0.12, 0.5, 0.75, 0.5, stone, 16);
+      cyl(g, 0.33, 0.33, 0.01, 0.5, 0.86, 0.5, lm('#8fc8e8'), 16);
+      r.top = 0.88;
+      return true;
+    case 'firstaid': // 掛在柱子上的白色急救箱
+      fb(g, f, side, len / 2 - 0.05, len / 2 + 0.05, 0, 1.1, 0.45, 0.55, wood);
+      fb(g, f, side, len / 2 - 0.4, len / 2 + 0.4, 1.0, 1.6, 0.3, 0.6, white);
+      fb(g, f, side, len / 2 - 0.05, len / 2 + 0.05, 1.12, 1.48, 0.27, 0.3, lm('#d7263d'), false);
+      fb(g, f, side, len / 2 - 0.18, len / 2 + 0.18, 1.25, 1.35, 0.27, 0.3, lm('#d7263d'), false);
+      r.top = 1.6;
+      return true;
+    case 'fountain': // 噴水池
+      box(g, 0.05, W - 0.05, 0, 0.45, 0.05, 0.25, stone); box(g, 0.05, W - 0.05, 0, 0.45, D - 0.25, D - 0.05, stone);
+      box(g, 0.05, 0.25, 0, 0.45, 0.25, D - 0.25, stone); box(g, W - 0.25, W - 0.05, 0, 0.45, 0.25, D - 0.25, stone);
+      box(g, 0.25, W - 0.25, 0.3, 0.36, 0.25, D - 0.25, ownLM('#8fd0f0', { emissive: 0x0a2a3a }), false);
+      cyl(g, 0.12, 0.16, 0.9, W / 2, 0.3, D / 2, stone2, 12);
+      cyl(g, 0.4, 0.15, 0.14, W / 2, 1.2, D / 2, stone2, 16);
+      cyl(g, 0.34, 0.34, 0.01, W / 2, 1.33, D / 2, lm('#8fd0f0'), 16);
+      r.top = 1.35;
+      return true;
+    case 'hollow': // 三棵靠在一起的大樹，中間那棵有樹洞
+      for (let i = 0; i < 3; i++) cyl(g, 0.4, 0.46, WALL_H, (i + 0.5) * W / 3, 0, D / 2, bark, 12);
+      fb(g, f, side, len / 2 - 0.22, len / 2 + 0.22, 0.5, 1.15, 0, 0.07, hole, false);
+      r.top = 1.2;
+      return true;
+    case 'stonetable': // 石桌，上面放著書
+      box(g, 0.05, W - 0.05, 0.68, 0.8, 0.05, D - 0.05, stone);
+      for (const x of [0.4, W - 0.4]) box(g, x - 0.2, x + 0.2, 0, 0.68, 0.2, D - 0.2, stone2);
+      box(g, 0.5, 0.85, 0.8, 0.86, 0.3, 0.6, lm('#eeeeee')); box(g, 1.3, 1.6, 0.8, 0.9, 0.3, 0.7, lm('#b0463c')); box(g, W - 0.9, W - 0.65, 0.8, 0.88, 0.3, 0.6, lm('#3a6ea5'));
+      r.top = 0.9;
+      return true;
+    case 'rootbox': { // 被樹根纏住的木箱
+      box(g, 0.1, W - 0.1, 0, 0.5, 0.12, D - 0.12, lm('#6b3f22'));
+      box(g, 0.08, W - 0.08, 0.5, 0.6, 0.1, D - 0.1, lm('#5a331b'));
+      for (let i = 0; i < 3; i++) { const x = 0.3 + i * (W - 0.6) / 2; limb(g, [x, 0, 0.04], [x + 0.08, 0.63, D / 2], 0.035, bark); limb(g, [x + 0.08, 0.63, D / 2], [x - 0.04, 0, D - 0.04], 0.03, bark); }
+      r.top = 0.66;
+      return true;
+    }
+    case 'scarecrow': { // 稻草人：頭會轉過來看你
+      limb(g, [0.5, 0, 0.5], [0.5, 1.7, 0.5], 0.035, wood);
+      limb(g, [0.05, 1.3, 0.5], [0.95, 1.3, 0.5], 0.03, wood);
+      const body = new THREE.Mesh(geo('scbody', () => new THREE.ConeGeometry(0.22, 0.75, 10)), lm('#4a6ea8')); body.position.set(0.5, 1.05, 0.5); body.castShadow = true; g.add(body);
+      for (const s of [-1, 1]) sph(g, 0.06, 0.5 + s * 0.45, 1.27, 0.5, lm('#e8c860'), 1.4, 0.6, 1, 6);
+      r.head = new THREE.Group(); r.head.position.set(0.5, 1.62, 0.5); g.add(r.head);
+      sph(r.head, 0.16, 0, 0, 0, lm('#d8c08a'));
+      for (const ex of [-0.055, 0.055]) sph(r.head, 0.026, ex, 0.02, 0.145, ownBasic({ color: 0x111111 }), 1, 1, 0.5, 6);
+      box(r.head, -0.07, 0.07, -0.06, -0.05, 0.13, 0.16, lm('#5a2a1a'), false);
+      cyl(r.head, 0.24, 0.24, 0.02, 0, 0.12, 0, lm('#a07a3a'), 14); cyl(r.head, 0.11, 0.13, 0.14, 0, 0.13, 0, lm('#a07a3a'), 12);
+      r.top = 1.8;
+      return true;
+    }
+    case 'roots': // 從天花板長下來的大樹根
+      cyl(g, 0.45, 0.6, WALL_H, W / 2, 0, D / 2, bark, 12);
+      for (let i = 0; i < 7; i++) { const a = i / 7 * Math.PI * 2; limb(g, [W / 2 + Math.cos(a) * 0.4, 0.8 + rnd() * 0.6, D / 2 + Math.sin(a) * 0.4], [W / 2 + Math.cos(a) * 0.95, 0.02, D / 2 + Math.sin(a) * 1.3], 0.08, bark); }
+      r.top = 1.5;
+      return true;
+    case 'toybox': // 玩具箱
+      box(g, 0.15, W - 0.15, 0, 0.5, 0.15, D - 0.15, lm('#5aa0e0'));
+      box(g, 0.12, W - 0.12, 0.5, 0.58, 0.12, D - 0.12, lm('#ffd166'));
+      sph(g, 0.12, 0.5, 0.7, D / 2, lm('#e2394a'), 1, 1, 1, 10); box(g, W - 0.9, W - 0.65, 0.58, 0.83, D / 2 - 0.12, D / 2 + 0.13, lm('#7ee081'));
+      r.top = 0.85;
+      return true;
+    case 'toyshelf': { // 放著積木和球的白色架子
+      for (const y of [0.05, 0.65, 1.25]) box(g, 0.05, W - 0.05, y, y + 0.05, 0.1, D - 0.1, white);
+      for (const [x, z] of [[0.1, 0.15], [W - 0.1, 0.15], [0.1, D - 0.15], [W - 0.1, D - 0.15]]) box(g, x - 0.03, x + 0.03, 0, 1.3, z - 0.03, z + 0.03, white);
+      const tc = ['#e2394a', '#4da3ff', '#ffd166', '#7ee081', '#c38bff'];
+      for (const y of [0.1, 0.7]) for (let x = 0.3; x < W - 0.15; x += 0.5) {
+        if (rnd() < 0.5) sph(g, 0.14, x, y + 0.14, D / 2, lm(tc[(rnd() * 5) | 0]), 1, 1, 1, 10);
+        else box(g, x - 0.14, x + 0.14, y, y + 0.28, D / 2 - 0.14, D / 2 + 0.14, lm(tc[(rnd() * 5) | 0]));
+      }
+      r.top = 1.3;
+      return true;
+    }
+    case 'slide': { // 沒有人的遊樂場：溜滑梯
+      const red = lm('#e2394a'), yel = lm('#ffd166'), blue = lm('#4da3ff'), metal = lm('#c9ced4');
+      box(g, 0.6, 1.6, 1.35, 1.45, 0.8, D - 0.8, yel);
+      for (const [x, z] of [[0.65, 0.85], [1.55, 0.85], [0.65, D - 0.85], [1.55, D - 0.85]]) box(g, x - 0.05, x + 0.05, 0, 2.1, z - 0.05, z + 0.05, blue);
+      box(g, 0.55, 1.65, 2.1, 2.2, 0.75, D - 0.75, red);
+      for (const z of [0.95, D - 0.95]) limb(g, [0.1, 0, z], [0.6, 1.4, z], 0.035, metal);
+      for (let k = 1; k < 6; k++) { const t = k / 6; limb(g, [0.1 + t * 0.5, t * 1.4, 0.95], [0.1 + t * 0.5, t * 1.4, D - 0.95], 0.025, metal); }
+      const sl = new THREE.Mesh(BOX, red); sl.scale.set(3.45, 0.06, 0.9); sl.position.set(3.2, 0.78, D / 2); sl.rotation.z = -0.386; sl.castShadow = true; g.add(sl);
+      for (const z of [D / 2 - 0.47, D / 2 + 0.47]) { const rl = new THREE.Mesh(BOX, yel); rl.scale.set(3.45, 0.15, 0.05); rl.position.set(3.2, 0.86, z); rl.rotation.z = -0.386; g.add(rl); }
+      r.top = 2.2;
+      return true;
+    }
+    case 'well': { // 石頭水井
+      const cx = W / 2, cz = D / 2;
+      cyl(g, 0.45, 0.48, 0.75, cx, 0, cz, stone, 16);
+      cyl(g, 0.38, 0.38, 0.01, cx, 0.75, cz, lm('#0a0f14'), 16);
+      for (const s of [-1, 1]) box(g, cx + s * 0.5 - 0.04, cx + s * 0.5 + 0.04, 0, 1.6, cz - 0.04, cz + 0.04, wood);
+      for (const s of [-1, 1]) { const rf = new THREE.Mesh(BOX, lm('#8a3a2a')); rf.scale.set(1.3, 0.05, 0.5); rf.position.set(cx, 1.68, cz + s * 0.2); rf.rotation.x = s * 0.6; g.add(rf); }
+      limb(g, [cx - 0.5, 1.35, cz], [cx + 0.5, 1.35, cz], 0.03, wood);
+      cyl(g, 0.1, 0.08, 0.15, cx, 1.0, cz, lm('#9aa5ab'), 10);
+      r.top = 0.8;
+      return true;
+    }
+    case 'buckets': // 水桶
+      for (const [x, z, s] of [[0.5, 0.5, 1], [1.35, 0.42, 0.85], [1.05, 0.72, 0.7]]) { cyl(g, 0.2 * s, 0.16 * s, 0.32 * s, x, 0, z, lm('#9aa5ab'), 12); cyl(g, 0.17 * s, 0.17 * s, 0.01, x, 0.31 * s, z, lm('#6fa8d6'), 12); }
+      r.top = 0.35;
+      return true;
+    case 'phone': { // 第二世界：紅色電話亭
+      const red = lm('#d4263a'), glass = ownLM('#cfe8ff', { transparent: true, opacity: 0.3, depthWrite: false });
+      for (const [x, z] of [[0.1, 0.1], [0.9, 0.1], [0.1, 0.9], [0.9, 0.9]]) box(g, x - 0.05, x + 0.05, 0, 2.3, z - 0.05, z + 0.05, red);
+      box(g, 0.02, 0.98, 2.3, 2.45, 0.02, 0.98, red);
+      for (const [x0, x1, z0, z1] of [[0.12, 0.88, 0.08, 0.1], [0.12, 0.88, 0.9, 0.92], [0.08, 0.1, 0.12, 0.88], [0.9, 0.92, 0.12, 0.88]]) box(g, x0, x1, 0.25, 2.2, z0, z1, glass, false);
+      box(g, 0.38, 0.62, 1.0, 1.35, 0.4, 0.6, lm('#2a2226'));
+      r.handset = ownLM('#8a2020');
+      box(g, 0.36, 0.64, 1.35, 1.41, 0.42, 0.58, r.handset, false);
+      r.top = 2.45;
+      return true;
+    }
+    case 'workbench': // 第二世界：石頭工作台
+      box(g, 0.02, W - 0.02, 0.78, 0.92, 0.05, D - 0.05, stone);
+      for (const x of [0.3, W - 0.3]) box(g, x - 0.18, x + 0.18, 0, 0.78, 0.2, D - 0.2, stone2);
+      box(g, 0.4, 0.75, 0.92, 0.95, 0.3, 0.6, lm('#8a6a4a')); sph(g, 0.06, 1.2, 0.98, 0.5, lm('#ffe7a8')); box(g, 1.5, 1.8, 0.92, 1.0, 0.35, 0.6, lm('#9aa5ab'));
+      r.top = 1.0;
+      return true;
+  }
+  return false;
+}
 function updateFurniture(t) {
   const ev = G.ev, p = G.p;
   const cl = furn3d.closet;
   const rattling = ev.closet > 0;
-  cl.gap.visible = rattling;
-  cl.doors.position.x = rattling ? Math.sin(t * 45) * 0.012 * (1 + (18 - ev.closet) / 6) : 0;
-  cl.g.rotation.z = rattling ? Math.sin(t * 38) * 0.004 : 0;
+  if (cl && cl.doors) {
+    cl.gap.visible = rattling;
+    cl.doors.position.x = rattling ? Math.sin(t * 45) * 0.012 * (1 + (18 - ev.closet) / 6) : 0;
+    cl.g.rotation.z = rattling ? Math.sin(t * 38) * 0.004 : 0;
+  }
   furn3d.bed.hand.visible = ev.bedTimer > 0.6;
   if (furn3d.bed.hand.visible) furn3d.bed.hand.position.z = Math.sin(t * 9) * 0.03;
   const ph = furn3d.phone.handset;
@@ -742,11 +1281,18 @@ function updateFurniture(t) {
     r.lid.rotation.x = open ? -1.15 : 0;
     r.lock.visible = !open;
   }
-  // 電視自己打開時顯示雜訊
-  const scr = furn3d.tvcab.screen.material;
-  if (G.ev.tvOn) { drawStatic(); scr.color.setRGB(1, 1, 1); } else scr.color.set(0x0a0d14);
-  // 敲門時門在震
-  if (frontDoorPanel) frontDoorPanel.position.x = ev.knock > 0 && ev.knockTick > 1.9 ? Math.sin(t * 60) * 0.015 : 0;
+  // 電視自己打開時顯示雜訊（第二世界沒有電視）
+  if (furn3d.tvcab && furn3d.tvcab.screen) {
+    const scr = furn3d.tvcab.screen.material;
+    if (G.ev.tvOn) { drawStatic(); scr.color.setRGB(1, 1, 1); } else scr.color.set(0x0a0d14);
+  }
+  // 敲門時門在震；破關動畫時門往外打開，門外透出光
+  if (frontDoorPanel) {
+    frontDoorPanel.position.x = ev.knock > 0 && ev.knockTick > 1.9 ? Math.sin(t * 60) * 0.015 : 0;
+    const k = mode === 'cutscene' && CUT && !CUT.switched ? CUT.doorK : 0;
+    frontDoorPanel.rotation.y = -k * 1.45;
+    if (doorGlow) { doorGlow.visible = k > 0.01; doorGlow.userData.sprite.material.opacity = 0.6 + 0.4 * k; }
+  }
   for (const f of FURN) {
     const r = furn3d[f.id];
     if (!r.glint) continue;
@@ -766,11 +1312,31 @@ const THEME = [
   { metal: '#ece2f5', edge: '#8a3fd6', gem: [190, 90, 255] }, { metal: '#ffffff', edge: '#dddddd', gem: 'rainbow' },
   { metal: '#3a2a22', edge: '#ff7a1a', gem: [255, 150, 40] },
   { metal: '#1c2350', edge: '#8fa6ff' }, { metal: '#fff8e8', edge: '#e8c060' }, { metal: '#3f7a3a', edge: '#8be070' },
+  { metal: '#e8fff0', edge: '#3fbf6a' },
 ];
 const fixMap = new Map();
 function setSRGB(color, c, k = 1) { color.setRGB(c[0] / 255 * k, c[1] / 255 * k, c[2] / 255 * k, SRGB); }
+// 第二世界的花燈泡（繡球花）、樹燈泡（楓樹）、水燈泡（水滴）：發光的部分放進 res.bulbs 一起變色
+function addGardenBulb(res, g, x, y, z, tier, s) {
+  const glow = () => ownBasic({ color: 0xffffff, fog: false });
+  const grp = new THREE.Group(); grp.position.set(x, y, z); grp.scale.setScalar(s); g.add(grp);
+  if (tier === 6) {
+    for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2, m = new THREE.Mesh(geo('petal', () => new THREE.SphereGeometry(0.045, 8, 6)), glow()); m.position.set(Math.cos(a) * 0.05, 0, Math.sin(a) * 0.05); m.scale.set(1, 0.45, 0.7); m.rotation.y = -a; grp.add(m); res.bulbs.push(m); }
+    const c = new THREE.Mesh(geo('pcenter', () => new THREE.SphereGeometry(0.03, 8, 6)), glow()); grp.add(c); res.bulbs.push(c);
+  } else if (tier === 7) {
+    const trunk = new THREE.Mesh(geo('btrunk', () => new THREE.CylinderGeometry(0.012, 0.018, 0.09, 6)), lm('#6b4a2e')); trunk.position.y = -0.06; grp.add(trunk);
+    for (const [px, py, pr] of [[0, 0.02, 0.055], [-0.04, -0.005, 0.04], [0.04, -0.005, 0.04]]) { const m = new THREE.Mesh(geo('bcan' + pr, () => new THREE.SphereGeometry(pr, 10, 8)), glow()); m.position.set(px, py, 0); grp.add(m); res.bulbs.push(m); }
+  } else {
+    const d = new THREE.Mesh(geo('drop', () => new THREE.SphereGeometry(0.055, 12, 10)), glow()); d.position.y = -0.01; grp.add(d); res.bulbs.push(d);
+    const tip = new THREE.Mesh(geo('droptip', () => new THREE.ConeGeometry(0.039, 0.07, 12)), glow()); tip.position.y = 0.055; grp.add(tip); res.bulbs.push(tip);
+  }
+  const halo = ownSprite(glowTex, 0xffffff);
+  halo.position.set(x, y, z); halo.scale.setScalar((0.45 + tier * 0.09) * s);
+  g.add(halo); res.halos.push(halo);
+}
 function addBulb(res, g, x, y, z, tier, s = 1) {
   if (!tier) { sph(g, 0.045 * s, x, y, z, lm('#2b2b2e'), 1, 1, 1, 8); return; }
+  if (isW2() && tier >= 6 && tier <= 8) { addGardenBulb(res, g, x, y, z, tier, s); return; }
   let gm;
   if (tier === FIRE_TIER) gm = geo('flame', () => new THREE.ConeGeometry(0.045, 0.15, 10));
   else if (tier === SLIME_TIER) gm = blobGeo;
@@ -797,11 +1363,15 @@ function addDecor(res, g, y, tier, th) {
   if (tier >= 6) {
     res.spin = new THREE.Group(); res.spin.position.y = y; g.add(res.spin);
     const n = tier === FIRE_TIER ? 8 : tier === 9 ? 7 : 6;
+    const garden = isW2() && tier <= 8; // 第二世界：繞著轉的是花瓣、紅葉、水滴
     res.gems = [];
     for (let i = 0; i < n; i++) {
       const a = i / n * Math.PI * 2;
       const m = ownBasic({ color: 0xffffff, fog: false });
-      const o = tier === FIRE_TIER ? sph(res.spin, 0.03, Math.cos(a) * 0.19, 0, Math.sin(a) * 0.19, m, 1, 1, 1, 8) : octa(res.spin, 0.034, Math.cos(a) * 0.23, 0, Math.sin(a) * 0.23, m);
+      let o;
+      if (tier === FIRE_TIER) o = sph(res.spin, 0.03, Math.cos(a) * 0.19, 0, Math.sin(a) * 0.19, m, 1, 1, 1, 8);
+      else if (garden) { o = sph(res.spin, 0.032, Math.cos(a) * 0.23, Math.sin(a * 3) * 0.02, Math.sin(a) * 0.23, m, tier === 8 ? 0.7 : 1, tier === 8 ? 1.5 : 0.35, tier === 8 ? 0.7 : 0.7, 8); o.rotation.y = -a; }
+      else o = octa(res.spin, 0.034, Math.cos(a) * 0.23, 0, Math.sin(a) * 0.23, m);
       if (tier !== 9) setSRGB(m.color, th.gem);
       res.gems.push(o);
     }
@@ -860,7 +1430,7 @@ function syncFixtures(t) {
   for (const o of [...G.sockets, ...G.lamps]) {
     seen.add(o);
     let f = fixMap.get(o);
-    const key = `${o.type}:${o.bulb}:${o.x},${o.y}`;
+    const key = `${curWorld}:${o.type}:${o.bulb}:${o.x},${o.y}`;
     if (!f || f.key !== key) {
       if (f) disposeGroup(f.g);
       f = buildFixture(o); f.key = key;
@@ -1116,7 +1686,71 @@ function buildClown(r, g) {
   r.face.position.set(0, 1.66, 0.04); g.add(r.face);
   r.mats.push(stripe, white, black, steel, str, faceMat);
 }
-const NEW_BUILD = { stick: buildStick, momo: buildMomo, crawler: buildCrawler, balloon: buildBalloon, clown: buildClown };
+// ---------- 第二世界：草叢人、大嘴觸角蟲、眼花女孩 ----------
+// 草叢人：平常只看得到一叢會動的長草；站起來時，長長的身體和臉從草裡升上來
+function buildGrass(r, g) {
+  const bm = ownLM('#ffffff', { map: bladeTex, alphaTest: 0.45, side: THREE.DoubleSide, transparent: true });
+  r.tuft = new THREE.Group(); g.add(r.tuft);
+  for (let i = 0; i < 3; i++) {
+    const pl = new THREE.Mesh(geo('gtuft', () => new THREE.PlaneGeometry(0.95, 0.85)), bm);
+    pl.position.y = 0.42; pl.rotation.y = i / 3 * Math.PI; r.tuft.add(pl);
+  }
+  r.body = new THREE.Group(); g.add(r.body);
+  const skin = ownLM('#8c8a6a', { transparent: true }), streak = ownLM('#a4323a', { transparent: true });
+  cyl(r.body, 0.11, 0.15, 1.25, 0, 0, 0, skin, 8);
+  limb(r.body, [0.06, 0.4, 0.13], [0.04, 1.1, 0.14], 0.02, streak);
+  for (const s of [-1, 1]) { limb(r.body, [s * 0.13, 1.1, 0.02], [s * 0.3, 0.75, 0.25], 0.03, skin); limb(r.body, [s * 0.3, 0.75, 0.25], [s * 0.22, 0.45, 0.45], 0.025, skin); }
+  const faceMat = ownBasic({ map: grassFaceTex, transparent: true, alphaTest: 0.3, color: 0xc9c3b0 });
+  r.face = new THREE.Mesh(geo('grassface', () => new THREE.PlaneGeometry(0.62, 0.62)), faceMat);
+  r.face.position.set(0, 1.5, 0.08); r.body.add(r.face);
+  r.mats.push(bm, skin, streak, faceMat);
+}
+// 大嘴觸角蟲：粉紅色的大肉團、4 根長著眼睛的觸角、滿口尖牙的大嘴、身體下面一排小芽
+function buildSnail(r, g) {
+  const skin = ownLM('#e8a2b2', { transparent: true }), skin2 = ownLM('#d98c9c', { transparent: true });
+  const eye = ownLM('#ffffff', { map: flowerEyeTex, emissive: 0x2a1a1a, transparent: true });
+  r.body = new THREE.Group(); g.add(r.body);
+  sph(r.body, 0.5, 0, 0.36, -0.1, skin, 0.85, 0.62, 1.25, 16);
+  sph(r.body, 0.36, 0, 0.42, 0.32, skin2, 0.95, 0.85, 0.75, 14);
+  const faceMat = ownBasic({ map: snailFaceTex, transparent: true, alphaTest: 0.3, color: 0xd9c9c9 });
+  r.face = new THREE.Mesh(geo('snailface', () => new THREE.PlaneGeometry(0.78, 0.68)), faceMat);
+  r.face.position.set(0, 0.42, 0.6); r.face.rotation.x = -0.1; r.body.add(r.face);
+  r.stalks = new THREE.Group(); r.stalks.position.set(0, 0.62, 0.12); r.body.add(r.stalks);
+  for (const [x, z] of [[-0.3, 0.1], [-0.12, 0.2], [0.12, 0.2], [0.3, 0.1]]) {
+    limb(r.stalks, [x * 0.5, 0, 0], [x, 0.45, z], 0.025, skin2);
+    const e = new THREE.Mesh(geo('stalkeye', () => new THREE.SphereGeometry(0.065, 10, 8)), eye); e.position.set(x, 0.48, z); r.stalks.add(e);
+  }
+  const sprout = ownLM('#efe6d6', { transparent: true }), stem = ownLM('#7a8a6a', { transparent: true });
+  for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2; limb(r.body, [Math.cos(a) * 0.55, 0, Math.sin(a) * 0.62 - 0.1], [Math.cos(a) * 0.58, 0.12, Math.sin(a) * 0.66 - 0.1], 0.01, stem); sph(r.body, 0.035, Math.cos(a) * 0.58, 0.14, Math.sin(a) * 0.66 - 0.1, sprout, 1, 1, 1, 6); }
+  r.mats.push(skin, skin2, eye, faceMat, sprout, stem);
+}
+// 眼花女孩：藍色上衣和百褶裙、流血的眼睛、眼睛裡長出開著眼球花的樹枝
+function buildGirl(r, g) {
+  const top = ownLM('#5f7fae', { transparent: true }), skirt = ownLM('#4a5f84', { transparent: true }), skin = ownLM('#d8cfc4', { transparent: true });
+  const blood = ownLM('#a3121c', { transparent: true }), branch = ownLM('#5c3a22', { transparent: true }), petal = ownLM('#e88aa8', { transparent: true });
+  const eye = ownLM('#ffffff', { map: flowerEyeTex, emissive: 0x2a1a1a, transparent: true });
+  for (const s of [-1, 1]) limb(g, [s * 0.08, 0, 0], [s * 0.08, 0.62, 0], 0.035, skin);
+  const sk = new THREE.Mesh(geo('gskirt', () => new THREE.ConeGeometry(0.3, 0.45, 14, 1, true)), skirt); sk.position.y = 0.72; g.add(sk);
+  cyl(g, 0.16, 0.2, 0.5, 0, 0.92, 0, top, 12);
+  for (const s of [-1, 1]) { limb(g, [s * 0.2, 1.36, 0], [s * 0.26, 0.92, 0.06], 0.03, top); limb(g, [s * 0.26, 0.92, 0.06], [s * 0.27, 0.68, 0.1], 0.025, skin); sph(g, 0.045, s * 0.27, 0.64, 0.11, blood, 1, 1, 1, 8); }
+  const hairMat = ownBasic({ map: hairTex, transparent: true, alphaTest: 0.35 });
+  const hair = new THREE.Mesh(geo('girlhair', () => new THREE.PlaneGeometry(0.6, 0.75)), hairMat); hair.position.set(0, 1.5, -0.06); g.add(hair);
+  const faceMat = ownBasic({ map: girlFaceTex, transparent: true, alphaTest: 0.3, color: 0xc9c3bd });
+  r.face = new THREE.Mesh(geo('girlface', () => new THREE.PlaneGeometry(0.62, 0.62)), faceMat);
+  r.face.position.set(0, 1.62, 0.05); g.add(r.face);
+  // 從右眼長出來的樹枝和兩顆眼球花（被手電筒照到會閉起來）
+  r.blooms = [];
+  limb(g, [0.06, 1.66, 0.1], [0.36, 1.9, 0.18], 0.018, branch);
+  limb(g, [0.24, 1.8, 0.15], [0.42, 1.72, 0.2], 0.014, branch);
+  for (const [x, y, z, s] of [[0.38, 1.94, 0.19, 1], [0.44, 1.71, 0.21, 0.8]]) {
+    const bl = new THREE.Group(); bl.position.set(x, y, z); bl.scale.setScalar(s); g.add(bl);
+    for (let i = 0; i < 7; i++) { const a = i / 7 * Math.PI * 2, p = sph(bl, 0.05, Math.cos(a) * 0.075, Math.sin(a) * 0.075, -0.01, petal, 1, 0.55, 0.4, 6); p.rotation.z = a; }
+    const e = new THREE.Mesh(geo('bloomeye', () => new THREE.SphereGeometry(0.055, 10, 8)), eye); bl.add(e);
+    r.blooms.push(bl);
+  }
+  r.mats.push(top, skirt, skin, blood, branch, petal, eye, hairMat, faceMat);
+}
+const NEW_BUILD = { stick: buildStick, momo: buildMomo, crawler: buildCrawler, balloon: buildBalloon, clown: buildClown, grass: buildGrass, snail: buildSnail, girl: buildGirl };
 
 function syncNewMonster(e, r, t) {
   const p = G.p, d = Math.hypot(e.x - p.x, e.y - p.y);
@@ -1163,13 +1797,88 @@ function syncNewMonster(e, r, t) {
       r.knife.rotation.x = d < 1.8 ? -1.4 * Math.pow(Math.abs(Math.sin(t * 7)), 2) : 0;
       r.balloon.position.y = 2.12 + Math.sin(e.wob * 1.3) * 0.06;
       break;
+    case 'grass': {
+      // 草叢一直在晃；站起來時身體和臉從草裡升上來
+      const k = e.rise || 0;
+      r.tuft.rotation.z = Math.sin(e.wob * (e.hidden ? 9 : 3)) * (e.hidden ? 0.12 : 0.05);
+      r.tuft.scale.set(1, e.hidden ? 0.9 + Math.abs(Math.sin(e.wob * 7)) * 0.2 : 1, 1);
+      r.body.visible = k > 0.02;
+      r.body.position.y = -1.6 * (1 - k);
+      r.body.rotation.x = e.state === 'lunge' ? 0.5 : e.state === 'grab' ? 0.12 + Math.sin(t * 20) * 0.04 : 0;
+      r.g.position.y = 0;
+      break;
+    }
+    case 'snail': {
+      // 一伸一縮地爬；手電筒照到時觸角縮起來；咬完在嚼
+      const crawl = e.retract > 0 || e.chew > 0 ? 0 : Math.sin(e.wob * 5) * 0.06;
+      r.body.scale.set(1 - crawl * 0.5, 1 + crawl * 0.3, 1 + crawl);
+      const st = e.retract > 0 ? 0.25 : 1;
+      r.stalks.scale.y += (st - r.stalks.scale.y) * 0.2;
+      r.stalks.rotation.z = Math.sin(t * 1.3) * 0.08;
+      r.face.scale.y = e.chew > 0 ? 0.85 + Math.abs(Math.sin(t * 14)) * 0.25 : 1;
+      r.g.position.y = 0;
+      break;
+    }
+    case 'girl': {
+      // 被手電筒照到時，樹枝上的眼球花會閉起來
+      const shut = e.blind > 0 ? 0.15 : 1;
+      for (const bl of r.blooms) bl.scale.y += (shut * bl.scale.x - bl.scale.y) * 0.25;
+      r.face.rotation.z = e.blind > 0 ? Math.sin(t * 6) * 0.15 : Math.sin(e.wob * 0.9) * 0.06;
+      r.g.position.y = Math.sin(e.wob * 1.5) * 0.03;
+      break;
+    }
   }
 }
 
+// 向日葵眼：粗粗的莖、一圈黃色花瓣，中間是一顆布滿血絲的大眼睛
+function buildSunflower(f, g) {
+  const stem = lm('#4f8a3a');
+  limb(g, [0, 0, 0], [0.05, 0.6, 0], 0.035, stem);
+  limb(g, [0.05, 0.6, 0], [0, 1.18, 0], 0.032, stem);
+  for (const s of [-1, 1]) {
+    const leaf = new THREE.Mesh(geo('leaf', () => new THREE.SphereGeometry(1, 14, 8)), leafMat);
+    leaf.scale.set(0.24, 0.016, 0.1); leaf.position.set(s * 0.2, 0.55, 0); leaf.rotation.z = s * 0.45;
+    g.add(leaf);
+  }
+  const eyeG = new THREE.Group(); eyeG.position.y = 1.32; eyeG.rotation.order = 'YXZ'; g.add(eyeG);
+  const disc = new THREE.Mesh(geo('sundisc', () => new THREE.CylinderGeometry(0.25, 0.25, 0.06, 20)), lm('#6a4a1a'));
+  disc.rotation.x = Math.PI / 2; eyeG.add(disc);
+  const pm = ownLM('#ffffff', { map: sunPetalTex, alphaTest: 0.3, side: THREE.DoubleSide, emissive: 0x2a2205 });
+  for (let i = 0; i < 14; i++) {
+    const a = i / 14 * Math.PI * 2, p = new THREE.Mesh(geo('sunpetal', () => new THREE.PlaneGeometry(0.26, 0.11)), pm);
+    p.position.set(Math.cos(a) * 0.33, Math.sin(a) * 0.33, -0.01); p.rotation.z = a; eyeG.add(p);
+  }
+  const eyeMat = ownLM('#ffffff', { map: eyeballTex, emissive: 0x1a1414 });
+  const ball = new THREE.Mesh(geo('suneye', () => new THREE.SphereGeometry(0.19, 24, 16)), eyeMat);
+  ball.position.z = 0.02; eyeG.add(ball);
+  const irisMat = ownLM('#ffffff', { map: irisTex, emissive: 0x141010 });
+  const iris = new THREE.Mesh(geo('suniris', () => new THREE.CircleGeometry(0.085, 24)), irisMat);
+  iris.position.z = 0.206; eyeG.add(iris);
+  return { g, eyeG, ball, iris, eyeMat, irisMat, pm };
+}
+// 千眼菇：奶油色的粗菇柄、長滿眼睛的紅色菇傘，邊緣滴下藍色和紅色的水
+function buildShroom(f, g) {
+  cyl(g, 0.17, 0.22, 1.12, 0, 0, 0, lm('#efe6c8'), 12);
+  const capMat = ownLM('#ffffff', { map: capTex, emissive: 0x200508 });
+  const cap = new THREE.Mesh(geo('shcap', () => new THREE.SphereGeometry(0.72, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2)), capMat);
+  cap.scale.y = 0.72; cap.position.y = 1.08; cap.castShadow = true; g.add(cap);
+  const under = new THREE.Mesh(geo('shunder', () => new THREE.CircleGeometry(0.72, 24)), lm('#8a3a3a'));
+  under.rotation.x = Math.PI / 2; under.position.y = 1.08; g.add(under);
+  const drips = [];
+  for (let i = 0; i < 9; i++) {
+    const a = i / 9 * Math.PI * 2 + 0.2, dm = ownBasic({ color: i % 2 ? 0x4a7ae0 : 0xd43a4a, transparent: true, opacity: 0.85 });
+    const d = new THREE.Mesh(geo('drip', () => new THREE.CylinderGeometry(0.012, 0.018, 1, 5)), dm);
+    d.position.set(Math.cos(a) * 0.66, 1.0, Math.sin(a) * 0.66); g.add(d);
+    drips.push({ d, ph: Math.random() * 6 });
+  }
+  return { g, capMat, drips };
+}
 // 眼球花：綠色的莖和兩片葉子，花是一顆會轉過來盯著你的大眼球
 const flowerMap = new Map();
 function buildFlower(f) {
   const g = new THREE.Group(); g.position.set(f.x, 0, f.y); scene.add(g);
+  if (f.ptype === 'sunflower') return buildSunflower(f, g);
+  if (f.ptype === 'shroom') return buildShroom(f, g);
   const stem = lm('#4f8a4a');
   limb(g, [0, 0, 0], [0.04, 0.55, 0], 0.024, stem);
   limb(g, [0.04, 0.55, 0], [0, 1.08, 0], 0.022, stem);
@@ -1196,6 +1905,29 @@ function syncFlowers(t) {
     if (!r) { r = buildFlower(f); flowerMap.set(f, r); }
     r.g.scale.setScalar(Math.max(0.05, f.grow));
     const dx = p.x - f.x, dz = p.y - f.y, dist = Math.hypot(dx, dz);
+    if (f.ptype === 'sunflower') {
+      // 轉向最亮的光（看到你的手電筒時就盯著你）；白天垂著頭睡覺
+      const yaw = Math.PI / 2 - f.face;
+      let dy = yaw - (r.yaw === undefined ? yaw : r.yaw);
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      r.yaw = (r.yaw === undefined ? yaw : r.yaw) + dy * 0.08;
+      if (awake) { r.eyeG.rotation.y = r.yaw; r.eyeG.rotation.x = f.lock >= SUN_LOCK ? -Math.atan2(EYE - 1.32, Math.max(0.5, dist)) : -0.1; }
+      else { r.eyeG.rotation.y = Math.sin(t * 0.3 + f.x); r.eyeG.rotation.x = 0.9; }
+      const glare = f.lock >= SUN_LOCK ? 0.25 + 0.2 * Math.sin(t * 12) : 0;
+      r.eyeMat.emissive.setRGB(0.1 + glare, 0.08, 0.08);
+      const squint = 1 - Math.min(1, (f.burn || 0)) * 0.5;
+      r.ball.scale.y = squint; r.iris.scale.y = squint;
+      continue;
+    }
+    if (f.ptype === 'shroom') {
+      // 被手電筒照到時，菇傘上的眼睛全部閉起來（變暗）；撒孢子時發亮
+      const shut = f.shut > 0 || !awake;
+      r.capMat.emissive.setRGB(shut ? 0.03 : f.spore ? 0.35 + 0.15 * Math.sin(t * 10) : 0.12, shut ? 0.0 : 0.04, shut ? 0.01 : 0.06);
+      r.capMat.color.setRGB(shut ? 0.55 : 1, shut ? 0.45 : 1, shut ? 0.45 : 1);
+      for (const dr of r.drips) { const len = 0.12 + 0.18 * Math.abs(Math.sin(t * 1.5 + dr.ph)); dr.d.scale.y = len; dr.d.position.y = 1.0 - len / 2; }
+      continue;
+    }
     if (awake) {
       r.eyeG.rotation.y = Math.atan2(dx, dz) + Math.sin(t * 7 + f.x) * 0.02;
       r.eyeG.rotation.x = -Math.atan2(EYE - 1.28, Math.max(0.5, dist));
@@ -1212,8 +1944,15 @@ function syncFlowers(t) {
 // ====================================================================
 // 新燈泡（星空、天使、粘液）與取得物品的東西（商人、禮物、星星、掉落物、天使）
 // ====================================================================
-let starBulbTex, starShapeTex, moonTex, featherTex, slimeTex;
+let starBulbTex, starShapeTex, moonTex, featherTex, slimeTex, plusTex;
 function makeExtraTextures() {
+  plusTex = canvasTex(64, 64, (c) => {
+    const g = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, 'rgba(160,255,190,.6)'); g.addColorStop(1, 'rgba(160,255,190,0)');
+    c.fillStyle = g; c.fillRect(0, 0, 64, 64);
+    c.fillStyle = '#fff'; c.fillRect(27, 12, 10, 40); c.fillRect(12, 27, 40, 10);
+  });
+  plusTex.wrapS = plusTex.wrapT = THREE.ClampToEdgeWrapping;
   starBulbTex = canvasTex(128, 64, (c) => {
     const g = c.createLinearGradient(0, 0, 0, 64);
     g.addColorStop(0, '#0e1540'); g.addColorStop(0.5, '#23307a'); g.addColorStop(1, '#0e1540');
@@ -1280,6 +2019,14 @@ function addSpecialDecor(res, g, y, tier) {
     for (let i = 0; i < 5; i++) {
       const a = i / 5 * Math.PI * 2, d = sph(g, 0.02, Math.cos(a) * 0.06, y - 0.08 - (i % 2) * 0.05, Math.sin(a) * 0.06, dm, 1, 2.2, 1, 8);
       d.castShadow = false;
+    }
+  } else if (tier === HEAL_TIER) {
+    // 回血燈泡：繞著轉的綠色「+」
+    res.spin = new THREE.Group(); res.spin.position.y = y; g.add(res.spin);
+    for (let i = 0; i < 3; i++) {
+      const a = i / 3 * Math.PI * 2, pl = ownSprite(plusTex, 0xa8ffc4);
+      pl.position.set(Math.cos(a) * 0.24, 0.02, Math.sin(a) * 0.24); pl.scale.setScalar(0.12);
+      res.spin.add(pl);
     }
   }
 }
@@ -1436,8 +2183,11 @@ function syncExtras(t) {
 // 怪物頭上的等級與血條、火焰燈泡的火球
 // ====================================================================
 function barH(t) {
-  if (!t.kind) return 1.72;
+  if (!t.kind) return t.ptype === 'shroom' ? 1.95 : t.ptype === 'sunflower' ? 1.82 : 1.72;
   switch (t.kind) {
+    case 'grass': return 0.95 + (t.rise || 0) * 1.0;
+    case 'snail': return 1.45;
+    case 'girl': return 2.12;
     case 'tall': return 2.85;
     case 'fast': return 1.45;
     case 'blob': return (t.h || 0.4) + 0.4 * (t.size || 1) + 0.3;
@@ -1479,7 +2229,7 @@ function syncHpBars() {
     const ratio = clamp(t.hp / t.maxHp, 0, 1), d = Math.hypot(t.x - p.x, t.y - p.y);
     const key = t.lv + ':' + Math.ceil(ratio * 40);
     if (key !== b.key) { b.key = key; drawHpBar(b.ctx, t, ratio); b.tex.needsUpdate = true; }
-    b.sp.visible = !t.dead && d < 11 && (ratio < 1 || d < 7) && (t.kind ? enemyAlpha(t) > 0.1 : t.grow >= 1);
+    b.sp.visible = !t.dead && !t.hidden && d < 11 && (ratio < 1 || d < 7) && (t.kind ? enemyAlpha(t) > 0.1 : t.grow >= 1);
     b.sp.position.set(t.x, barH(t), t.y);
   }
   for (const [t, b] of hpMap) if (!seen.has(t)) { scene.remove(b.sp); b.sp.material.dispose(); b.tex.dispose(); hpMap.delete(t); }
@@ -1729,6 +2479,66 @@ function updateViewWeapon() {
     m.position.set(0.02 + ph * 0.06, 0.02 + ph * 0.1, -ph * 0.14);
   }
 }
+// ---------- 第二世界：向日葵眼吐的種子、眼睛種子、大嘴觸角蟲的黏液 ----------
+const seedMap = new Map(), seedlingMap = new Map();
+let trailMesh = null;
+const TRAIL_MAX = 160;
+function syncWorld2(t) {
+  let seen = new Set();
+  for (const s of G.seeds || []) {
+    seen.add(s);
+    let g = seedMap.get(s);
+    if (!g) {
+      g = new THREE.Group();
+      const sd = sph(g, 0.05, 0, 0, 0, ownBasic({ color: 0x3a3226 }), 1.5, 0.8, 1, 8); sd.castShadow = false;
+      sph(g, 0.052, 0, 0.01, 0, ownBasic({ color: 0xd8d0b8 }), 1.2, 0.3, 0.3, 6).castShadow = false;
+      const gl = ownSprite(glowTex, 0xffe080); gl.scale.setScalar(0.22); g.add(gl);
+      scene.add(g); seedMap.set(s, g);
+    }
+    g.position.set(s.x, s.h, s.y);
+    g.rotation.set(s.spin, s.spin * 0.7, 0);
+  }
+  for (const [s, g] of seedMap) if (!seen.has(s)) { disposeGroup(g); seedMap.delete(s); }
+  seen = new Set();
+  for (const s of G.seedlings || []) {
+    seen.add(s);
+    let r = seedlingMap.get(s);
+    if (!r) {
+      const g = new THREE.Group(); g.position.set(s.x, 0, s.y); scene.add(g);
+      const em = ownLM('#ffffff', { map: flowerEyeTex, emissive: 0x3a2a2a });
+      const eye = new THREE.Mesh(geo('seedeye', () => new THREE.SphereGeometry(0.1, 12, 10)), em); eye.rotation.x = -Math.PI / 2; g.add(eye);
+      const sprout = new THREE.Group(); g.add(sprout);
+      limb(sprout, [0, 0.05, 0], [0.02, 0.3, 0], 0.012, lm('#5fae4a'));
+      for (const sd of [-1, 1]) { const lf = sph(sprout, 0.05, sd * 0.05, 0.28, 0, lm('#6fbf4a'), 1, 0.3, 0.6, 6); lf.rotation.z = sd * 0.6; }
+      const gl = ownSprite(glowTex, 0xff9ec8); gl.position.y = 0.1; gl.scale.setScalar(0.35); g.add(gl);
+      r = { g, eye, sprout, gl }; seedlingMap.set(s, r);
+    }
+    const k = 1 - clamp(s.t / (s.max || 15), 0, 1);
+    r.eye.position.y = 0.02 + k * 0.05;
+    r.sprout.scale.setScalar(0.4 + k * 1.2);
+    r.gl.material.opacity = 0.4 + 0.3 * Math.sin(t * 6);
+  }
+  for (const [s, r] of seedlingMap) if (!seen.has(s)) { disposeGroup(r.g); seedlingMap.delete(s); }
+  // 黏液：地上一灘一灘發亮的痕跡
+  const trails = G.trails || [];
+  if (!trailMesh && trails.length) {
+    trailMesh = new THREE.InstancedMesh(geo('trail', () => new THREE.CircleGeometry(1, 14)), new THREE.MeshBasicMaterial({ color: 0xd8f0a8, transparent: true, opacity: 0.38, depthWrite: false }), TRAIL_MAX);
+    trailMesh.frustumCulled = false; trailMesh.count = 0;
+    scene.add(trailMesh);
+  }
+  if (trailMesh) {
+    const n = Math.min(TRAIL_MAX, trails.length);
+    for (let i = 0; i < n; i++) {
+      const tr = trails[trails.length - n + i], k = Math.min(1, tr.life / 4);
+      _q.setFromEuler(_e.set(-Math.PI / 2, 0, tr.a, 'XYZ'));
+      _m4.compose(_v.set(tr.x, 0.013 + i * 0.00005, tr.y), _q, _sc.set(tr.r * k, tr.r * k * 0.8, 1));
+      trailMesh.setMatrixAt(i, _m4);
+    }
+    trailMesh.count = n;
+    trailMesh.instanceMatrix.needsUpdate = true;
+  }
+}
+const _sc = new THREE.Vector3();
 const shotMap = new Map(), bombMap = new Map();
 function syncProjectiles(t) {
   let seen = new Set();
@@ -1804,7 +2614,7 @@ function buildFlashlight() {
   const head = cyl(viewFlash, 0.022, 0.016, 0.035, 0, -0.0175, 0, lm('#3a3a40'), 12);
   head.rotation.x = Math.PI / 2; head.position.set(0, 0, -0.055);
   head.castShadow = false;
-  strongRing = cyl(viewFlash, 0.025, 0.025, 0.014, 0, 0, 0, lm('#e0b43a'), 12);
+  strongRing = cyl(viewFlash, 0.025, 0.025, 0.014, 0, 0, 0, ownLM('#e0b43a'), 12);
   strongRing.rotation.x = Math.PI / 2; strongRing.position.set(0, 0, -0.05); strongRing.castShadow = false;
   lensMat = ownBasic({ color: 0x333333 });
   const lens = new THREE.Mesh(geo('lens', () => new THREE.CircleGeometry(0.021, 14)), lensMat);
@@ -1817,34 +2627,48 @@ function buildFlashlight() {
 let bobPh = 0, bobAmt = 0, baseFov = 72;
 const yawOf = f => Math.atan2(-Math.cos(f), -Math.sin(f));
 function updateCamera(dt, t) {
-  let x, y, z, face, pitch;
+  let x, y, z, face, pitch, roll = 0;
+  const cut = mode === 'cutscene' && CUT && CUT.cam;
   if (mode === 'title') {
     x = 16.3 + Math.sin(t * 0.12) * 0.8; y = 1.6; z = 23.2;
     face = Math.atan2(12.4 - z, 19.7 - x) + Math.sin(t * 0.21) * 0.05; pitch = 0.04;
+  } else if (cut) {
+    // 破關動畫：鏡頭照著設定好的路線走
+    const c = CUT.cam;
+    x = c.x; z = c.y; y = EYE + (c.h || 0) + Math.sin(t * 2.2) * 0.01; face = c.face; pitch = c.pitch;
   } else {
     const p = G.p;
-    const moving = (p.moved || 0) > 0.001;
-    bobPh += (p.moved || 0) * 6.5;
+    const moving = (p.moved || 0) > 0.001 && !(p.z > 0);
+    bobPh += moving ? (p.moved || 0) * 6.5 : 0;
     bobAmt += ((moving ? 1 : 0) - bobAmt) * Math.min(1, dt * 8);
-    x = p.x; z = p.y; y = EYE + Math.sin(bobPh) * 0.035 * bobAmt;
+    x = p.x; z = p.y; y = EYE + (p.z || 0) + Math.sin(bobPh) * 0.035 * bobAmt;
     face = p.face; pitch = p.pitch;
+    // 被草叢人抓住：鏡頭往下看、抖動
+    if (p.grabbed) { pitch -= 0.1; y -= 0.12; x += (Math.random() - 0.5) * 0.02; }
+    // 眼花：畫面左右晃、歪一邊
+    const dz = mode === 'play' ? (G.dizzy || 0) + (G.spore || 0) * 0.5 : 0;
+    if (dz > 0) { face += Math.sin(t * 1.7) * 0.06 * dz; roll += Math.sin(t * 1.3) * 0.1 * dz; pitch += Math.sin(t * 2.1) * 0.03 * dz; }
     if (G.shake > 0) { x += (Math.random() - 0.5) * G.shake * 0.12; y += (Math.random() - 0.5) * G.shake * 0.12; }
     viewFlash.position.set(0.17 + Math.cos(bobPh * 0.5) * 0.006 * bobAmt, -0.16 + Math.abs(Math.sin(bobPh * 0.5)) * 0.008 * bobAmt, -0.32);
   }
   camera.position.set(x, y, z);
   const stare = mode === 'play' ? (G.stare || 0) : 0;
-  camera.rotation.set(pitch, yawOf(face), Math.sin(t * 2.3) * 0.05 * stare);
-  const fov = baseFov - stare * 8;
+  camera.rotation.set(pitch, yawOf(face), Math.sin(t * 2.3) * 0.05 * stare + roll);
+  const dizzy = mode === 'play' ? (G.dizzy || 0) : 0;
+  const fov = baseFov - stare * 8 + Math.sin(t * 1.9) * 4 * dizzy;
   if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
-  viewFlash.visible = mode !== 'title';
-  const on = mode !== 'title' && flashOn();
+  viewFlash.visible = mode !== 'title' && mode !== 'cutscene';
+  const on = mode !== 'title' && mode !== 'cutscene' && flashOn();
   let k = on ? 1 : 0;
   if (on && G.p.bat < 15 && Math.random() < 0.15) k = 0.3;
-  const strong = mode !== 'title' && strongFlash(); // 強力手電筒：更亮、照更遠
-  spot.intensity = 3.2 * k * (strong ? 1.3 : 1);
+  // 手電筒等級：稀有更亮、巨光更亮更寬
+  const lv = mode === 'title' ? 1 : clamp(G.p.flashLv || 1, 1, 3);
+  spot.intensity = 3.2 * k * [1, 1, 1.3, 1.6][lv];
   spot.distance = flRange() + 1.5;
-  strongRing.visible = strong;
-  lensMat.color.set(on ? 0xfff6dd : 0x333333);
+  spot.angle = flHalf() * 1.1;
+  strongRing.visible = lv >= 2;
+  if (lv >= 2) strongRing.material.color.set(lv === 3 ? 0xffc23a : 0x4da3ff);
+  lensMat.color.set(on ? (lv === 3 ? 0xfff2c0 : 0xfff6dd) : 0x333333);
 }
 function updatePlaceGhost() {
   const it = mode === 'play' && G.selId && ITEMS[G.selId];
@@ -1864,9 +2688,19 @@ function updatePlaceGhost() {
 // ====================================================================
 const cDayFog = new THREE.Color('#1b1720'), cNightFog = new THREE.Color('#020104'), cBloodFog = new THREE.Color('#160205');
 const cWinDay = new THREE.Color('#dcebf5'), cWinDusk = new THREE.Color('#e89a5a'), cWinNight = new THREE.Color('#0a1022'), cWinBlood = new THREE.Color('#4a0610');
-const tmpC = new THREE.Color();
-function updateAtmosphere(dark) {
+// 第二世界：白天是淡淡的粉紫色霧，晚上深藍紫色；萬物甦醒時在紫色和綠色之間變來變去
+const cW2Day = new THREE.Color('#cdbfe0'), cW2Night = new THREE.Color('#05041a'), cAwakeA = new THREE.Color('#1c0a2c'), cAwakeB = new THREE.Color('#06221a');
+const tmpC = new THREE.Color(), tmpC2 = new THREE.Color();
+function updateAtmosphere(dark, t) {
   const k = dark / NIGHT_DARK;
+  if (isW2()) {
+    const awake = G.ev.blood && G.phase === 'night';
+    const night = awake ? tmpC2.copy(cAwakeA).lerp(cAwakeB, 0.5 + 0.5 * Math.sin(t * 0.5)) : cW2Night;
+    tmpC.copy(cW2Day).lerp(night, k);
+    scene.fog.color.copy(tmpC); scene.background.copy(tmpC);
+    scene.fog.near = 10 - 8.5 * k; scene.fog.far = 45 - 32 * k;
+    return;
+  }
   const night = G.ev.blood && G.phase === 'night' ? cBloodFog : cNightFog;
   tmpC.copy(cDayFog).lerp(night, k);
   scene.fog.color.copy(tmpC); scene.background.copy(tmpC);
@@ -1886,13 +2720,15 @@ function render(dt) {
   syncExtras(t);
   syncFireballs(t);
   syncProjectiles(t);
+  syncWorld2(t);
   syncStun(t);
   syncHpBars();
   syncGhosts();
   syncParticles();
   updateFurniture(t);
+  updateAwaken(t, dark);
   updateLightmap(dark);
-  updateAtmosphere(dark);
+  updateAtmosphere(dark, t);
   updateCamera(dt, t);
   updateViewWeapon();
   updatePlaceGhost();
@@ -1934,6 +2770,7 @@ function init() {
   makeTextures();
   makeMonsterTextures();
   makeExtraTextures();
+  makeGardenTextures();
   buildHouse();
   buildFurniture();
   buildFlashlight();
@@ -1941,7 +2778,7 @@ function init() {
   buildExtras();
   glowPts = makePoints(0.07, THREE.AdditiveBlending);
   smokePts = makePoints(0.3, THREE.NormalBlending);
-  window.Renderer = { render, resize };
+  window.Renderer = { render, resize, setWorld };
   resize();
 }
 init();
