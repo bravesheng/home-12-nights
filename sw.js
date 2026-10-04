@@ -1,7 +1,7 @@
 // 在家生存 12 夜 — 離線快取
 // 第一次打開時把整個遊戲存到平板裡，之後沒有網路也能玩。
 // 每次更新遊戲都要改 VERSION，平板連上網路時就會自動下載新版本。
-const VERSION = 'home12-v12';
+const VERSION = 'home12-v13';
 const ASSETS = [
   './', './index.html', './style.css', './manifest.webmanifest',
   './js/version.js', './js/data.js', './js/audio.js', './js/world2.js', './js/game.js', './js/render3d.js',

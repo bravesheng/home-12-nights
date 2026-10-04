@@ -194,6 +194,34 @@ await scenario('w2', '第二世界第 6 夜＋全套裝備（?world=2&night=6&ki
   await shot('2-night');
 });
 
+await scenario('monsters', '怪物模型（火柴人、鳥腳女和爬行女會動的頭髮、眼球花，手電筒開關各拍一張）', {}, async ({ page, shot, check }) => {
+  await page.goto(BASE + '?world=1&night=6&kit=1', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play');
+  await skipToDusk(page);
+  await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
+  // 在客廳排一排怪物；讓牠們不追、不咬人，才拍得到（頭髮、火柴人的動作照樣會動）
+  const n = await page.evaluate(() => {
+    G.enemies = []; G.flowers = [];
+    Object.assign(G.p, { x: 20.5, y: 23.2, face: -Math.PI / 2, pitch: -0.12, inv: 999 });
+    const put = (kind, x, y, extra) => Object.assign(spawnEnemy(kind, { x, y }), { spawn: 0 }, extra);
+    put('stick', 18.6, 19.6);
+    put('momo', 19.9, 19.4, { cd: 999 });
+    put('crawler', 21.1, 20.6, { pauseT: 999 });
+    const f = newFlower(22.4, 19.8);
+    Object.assign(f, { grow: 1, watch: -999 });
+    G.flowers.push(f);
+    return G.enemies.length + G.flowers.length;
+  });
+  check(n === 4, `要放好 4 隻怪物（現在 ${n} 隻）`);
+  await page.evaluate(() => { document.getElementById('hud').style.opacity = '0'; }); // 道具列會擋到地上的爬行女
+  await sleep(1500);
+  await shot('1-lamp');
+  await page.keyboard.press('f');
+  await sleep(1500);
+  check((await state(page)).flash === true, '按 F 要打開手電筒');
+  await shot('2-flashlight');
+});
+
 await scenario('tablet', '平板觸控（Android 平板尺寸，用點的開新遊戲）', { isMobile: true, hasTouch: true }, async ({ page, shot, check }) => {
   await startFromMenu(page, 1, 'normal', true);
   const s = await state(page);
