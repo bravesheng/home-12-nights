@@ -1216,19 +1216,152 @@ const SPECIAL_AI = {
 // ====================================================================
 function seeded(seed) { let s = seed; return () => ((s = (s * 16807) % 2147483647) / 2147483647); }
 
-// 火柴人：白色圓臉、紅色直線眼睛、紅色笑臉
+// 眼白上的血絲（眼球花、向日葵眼的 3D 貼圖和圖鑑共用）：從外圍往瞳孔長，彎彎曲曲、越長越細、會分岔；
+// 粗的暗紅、細的鮮紅，底下還有一層糊糊的深層血管，外圍再撒一些很短的微血管
+// (cx, cy) 瞳孔中心、r0 長到這裡就停（虹膜外面一點）、r1 從這一圈開始長、n 幾條、sc 線條粗細倍數
+// wrap：球面貼圖的寬度，畫到左右邊緣時從另一邊接回來
+// 一小段一小段先收集起來，同顏色同粗細的合成一筆畫（幾千小段分開畫很慢；模糊也只做一次）
+function drawVeins(c, cx, cy, r0, r1, n, seed, sc = 1, wrap = 0) {
+  const r = seeded(seed), groups = new Map();
+  const add = (style, w, x0, y0, x1, y1) => {
+    const key = style + '|' + Math.max(0.25, Math.round(w * 4) / 4);
+    let b = groups.get(key);
+    if (!b) groups.set(key, b = []);
+    for (const o of wrap ? [0, wrap, -wrap] : [0]) {
+      if (o > 0 && Math.min(x0, x1) > 12 * sc) continue;
+      if (o < 0 && Math.max(x0, x1) < wrap - 12 * sc) continue;
+      b.push(x0 + o, y0, x1 + o, y1);
+    }
+  };
+  // 粗的先畫、細的畫在上面
+  const flush = ctx => {
+    ctx.lineCap = 'round';
+    for (const [key, b] of [...groups].sort((p, q) => q[0].split('|')[1] - p[0].split('|')[1])) {
+      const [style, w] = key.split('|');
+      ctx.strokeStyle = style; ctx.lineWidth = +w; ctx.beginPath();
+      for (let i = 0; i < b.length; i += 4) { ctx.moveTo(b[i], b[i + 1]); ctx.lineTo(b[i + 2], b[i + 3]); }
+      ctx.stroke();
+    }
+    groups.clear();
+  };
+  const grow = (x, y, a, w, life, depth, deep) => {
+    for (let s = 0; s < life; s++) {
+      let da = Math.atan2(cy - y, cx - x) - a;
+      while (da > Math.PI) da -= Math.PI * 2;
+      while (da < -Math.PI) da += Math.PI * 2;
+      a += da * 0.08 + (r() - 0.5) * 0.75;
+      const st = (2.6 + r() * 2.6) * sc, nx = x + Math.cos(a) * st, ny = y + Math.sin(a) * st;
+      if (Math.hypot(nx - cx, ny - cy) < r0 + r() * 8 * sc) break;
+      const k = Math.round(Math.min(1, w / (3 * sc)) * 5) / 5;
+      if (deep) add(`rgba(120,30,60,${(0.16 + 0.1 * k).toFixed(2)})`, w * 2.6, x, y, nx, ny);
+      else add(`rgba(${150 + (1 - k) * 60 | 0},${18 + (1 - k) * 30 | 0},${30 + (1 - k) * 22 | 0},${(0.65 + 0.3 * k).toFixed(2)})`, w, x, y, nx, ny);
+      if (depth < 3 && r() < 0.11 + depth * 0.05) grow(nx, ny, a + (r() < 0.5 ? -1 : 1) * (0.45 + r() * 0.7), w * (0.5 + r() * 0.2), (life - s) * (0.4 + r() * 0.3) | 0, depth + 1, deep);
+      x = nx; y = ny; w = Math.max(0.5 * sc, w * (0.95 - r() * 0.03));
+    }
+  };
+  const roots = [];
+  for (let i = 0; i < n; i++) {
+    const a = r() * Math.PI * 2, rr = r1 * (0.82 + r() * 0.2);
+    roots.push([cx + Math.cos(a) * rr, cy + Math.sin(a) * rr, a + Math.PI + (r() - 0.5) * 0.9, (2.2 + r() * 2.8) * sc, 26 + r() * 22 | 0]);
+  }
+  // 深層血管：畫在另一張畫布上，整張模糊一次再貼回來
+  for (const v of roots.slice(0, n / 2 | 0)) grow(v[0] + (r() - 0.5) * 10 * sc, v[1] + (r() - 0.5) * 10 * sc, v[2] + 0.4, v[3], v[4] * 0.7 | 0, 1, true);
+  const off = document.createElement('canvas'), m = c.getTransform();
+  off.width = c.canvas.width; off.height = c.canvas.height;
+  const oc = off.getContext('2d', { willReadFrequently: true }); // 用 CPU 畫：在 GPU 畫布上畫幾千小段再讀回來很慢
+  oc.setTransform(m); flush(oc);
+  c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.filter = `blur(${(1.5 * sc * Math.hypot(m.a, m.b)).toFixed(2)}px)`; c.drawImage(off, 0, 0); c.restore();
+  for (const v of roots) grow(...v, 0, false);
+  for (let i = 0; i < n * 3; i++) {
+    const a = r() * Math.PI * 2, rr = r1 * (0.7 + r() * 0.35);
+    grow(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr, a + Math.PI + (r() - 0.5) * 2, 0.8 * sc, 4 + r() * 6 | 0, 3, false);
+  }
+  c.save(); flush(c); c.restore();
+}
+
+// 火柴人：皺皺髒髒、畫歪了的紙臉；塗得黑黑的空洞眼眶裡是紅色直線眼睛，流下紅色的蠟筆淚；
+// 咧到耳朵的大笑臉，嘴裡兩排歪歪的尖牙（越開心越可怕）
 function drawStickFace(c, S) {
-  c.save(); c.scale(S / 512, S / 512); c.lineCap = 'round';
-  c.fillStyle = '#f2efe8'; c.beginPath(); c.arc(256, 256, 236, 0, Math.PI * 2); c.fill();
-  c.strokeStyle = '#2a2a2a'; c.lineWidth = 14; c.stroke();
-  c.lineWidth = 5; c.beginPath(); c.arc(256, 256, 206, 0, Math.PI * 2); c.stroke();
-  c.strokeStyle = '#d0201e'; c.lineWidth = 24;
-  c.beginPath(); c.moveTo(190, 150); c.lineTo(194, 234); c.moveTo(322, 150); c.lineTo(318, 234); c.stroke();
-  c.lineWidth = 26; c.beginPath(); c.moveTo(126, 292); c.quadraticCurveTo(256, 440, 392, 282); c.stroke();
+  const r = seeded(913);
+  c.save(); c.scale(S / 512, S / 512); c.lineCap = 'round'; c.lineJoin = 'round';
+  const cx = 256, cy = 236, rad = a => 212 + Math.sin(a * 3 + 1) * 7 + Math.sin(a * 7 + 2) * 3;
+  const face = (j = 0) => {
+    c.beginPath();
+    for (let i = 0; i <= 72; i++) { const a = i / 72 * Math.PI * 2, rr = rad(a) + (r() - 0.5) * j; c.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); }
+    c.closePath();
+  };
+  // 往下流的紅色蠟筆痕
+  const drip = (x, y, len, w, col = '#b3141b') => {
+    c.strokeStyle = col; c.fillStyle = col; c.lineWidth = w;
+    c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + (r() - 0.5) * 6, y + len * 0.6, x + (r() - 0.5) * 4, y + len); c.stroke();
+    c.beginPath(); c.ellipse(x, y + len + w * 0.3, w * 0.75, w, 0, 0, 7); c.fill();
+  };
+  // 髒髒的紙
+  const pg = c.createRadialGradient(cx - 30, cy - 40, 30, cx, cy, 230);
+  pg.addColorStop(0, '#efeadd'); pg.addColorStop(0.7, '#d9d1bf'); pg.addColorStop(1, '#b9ae97');
+  face(); c.fillStyle = pg; c.fill();
+  c.save(); face(); c.clip();
+  for (let i = 0; i < 9; i++) {
+    const x = 80 + r() * 352, y = 70 + r() * 340, rr = 20 + r() * 60, g = c.createRadialGradient(x, y, 0, x, y, rr);
+    g.addColorStop(0, `rgba(${110 + r() * 40 | 0},${90 + r() * 30 | 0},60,${0.1 + r() * 0.16})`); g.addColorStop(1, 'rgba(110,90,60,0)');
+    c.fillStyle = g; c.fillRect(x - rr, y - rr, rr * 2, rr * 2);
+  }
+  // 摺過的痕跡
+  c.strokeStyle = 'rgba(95,85,70,.35)'; c.lineWidth = 2;
+  for (let i = 0; i < 3; i++) {
+    let x = 40, y = 120 + i * 120 + r() * 40;
+    c.beginPath(); c.moveTo(x, y);
+    while (x < 480) { x += 30 + r() * 40; y += (r() - 0.5) * 40; c.lineTo(x, y); }
+    c.stroke();
+  }
+  c.restore();
+  // 用黑筆描了好幾次的歪輪廓
+  for (let k = 0; k < 3; k++) { face(9); c.strokeStyle = `rgba(18,16,16,${0.9 - k * 0.2})`; c.lineWidth = 8 - k * 2.5; c.stroke(); }
+  // 眼睛：黑黑的空洞眼眶，被原子筆一圈一圈塗過，中間是紅色直線眼睛
+  for (const [ex, ey] of [[180, 168], [334, 164]]) {
+    const g = c.createRadialGradient(ex, ey, 6, ex, ey, 64);
+    g.addColorStop(0, 'rgba(6,4,4,1)'); g.addColorStop(0.5, 'rgba(8,6,6,.95)'); g.addColorStop(1, 'rgba(14,10,10,0)');
+    c.fillStyle = g; c.beginPath(); c.ellipse(ex, ey, 60, 70, 0, 0, 7); c.fill();
+    c.strokeStyle = 'rgba(10,8,8,.75)'; c.lineWidth = 2.5;
+    c.beginPath();
+    for (let a = 0; a < Math.PI * 12; a += 0.3) { const rr = 14 + r() * 30; c.lineTo(ex + Math.cos(a) * rr, ey + Math.sin(a) * rr * 1.2); }
+    c.stroke();
+    c.strokeStyle = '#d4201e';
+    for (let k = 0; k < 3; k++) { c.lineWidth = 11 - k * 3; c.beginPath(); c.moveTo(ex + (r() - 0.5) * 7, ey - 46 + r() * 8); c.lineTo(ex + (r() - 0.5) * 7, ey + 38 + r() * 8); c.stroke(); }
+    drip(ex + (r() - 0.5) * 6, ey + 42, 70 + r() * 70, 7, '#c41a1c');
+    drip(ex + 6 + r() * 6, ey + 40, 30 + r() * 30, 5, '#c41a1c');
+  }
+  // 咧到耳朵的大嘴
+  const P0 = [92, 262], P1 = [256, 318], P2 = [420, 254], B1 = [380, 446], B0 = [256, 452], B2 = [132, 446];
+  const mouth = () => { c.beginPath(); c.moveTo(...P0); c.quadraticCurveTo(...P1, ...P2); c.quadraticCurveTo(...B1, ...B0); c.quadraticCurveTo(...B2, ...P0); c.closePath(); };
+  const q = (a, b, d, t) => [(1 - t) * (1 - t) * a[0] + 2 * (1 - t) * t * b[0] + t * t * d[0], (1 - t) * (1 - t) * a[1] + 2 * (1 - t) * t * b[1] + t * t * d[1]];
+  mouth(); c.fillStyle = '#120507'; c.fill();
+  c.save(); mouth(); c.clip();
+  const g = c.createRadialGradient(256, 380, 10, 256, 380, 140);
+  g.addColorStop(0, 'rgba(90,0,8,.7)'); g.addColorStop(1, 'rgba(90,0,8,0)');
+  c.fillStyle = g; c.fillRect(100, 260, 320, 200);
+  c.fillStyle = '#e6dfc8'; c.strokeStyle = '#2a2018'; c.lineWidth = 2.5;
+  const tooth = (x, y, w, h) => { c.beginPath(); c.moveTo(x - w / 2, y); c.lineTo(x + (r() - 0.5) * w * 0.5, y + h); c.lineTo(x + w / 2, y); c.closePath(); c.fill(); c.stroke(); };
+  for (let i = 0; i < 15; i++) { const [x, y] = q(P0, P1, P2, 0.04 + i / 14 * 0.92); tooth(x, y - 6, 20 + r() * 8, 26 + r() * 30); }
+  for (let i = 0; i < 12; i++) {
+    const t = 0.08 + i / 11 * 0.84, [x, y] = t < 0.5 ? q(P2, B1, B0, t * 2) : q(B0, B2, P0, t * 2 - 1);
+    tooth(x, y + 6, 20 + r() * 8, -(22 + r() * 26));
+  }
+  c.restore();
+  // 紅蠟筆塗了兩次的嘴唇，嘴角裂到臉頰
+  for (let k = 0; k < 2; k++) {
+    c.save(); c.translate((r() - 0.5) * 5, (r() - 0.5) * 5);
+    mouth(); c.strokeStyle = `rgba(${178 + k * 20},${18 + k * 6},24,.9)`; c.lineWidth = 9 - k * 3; c.stroke();
+    c.restore();
+  }
+  c.strokeStyle = '#a8141a'; c.lineWidth = 6;
+  c.beginPath(); c.moveTo(...P0); c.quadraticCurveTo(76, 236, 88, 206); c.moveTo(...P2); c.quadraticCurveTo(438, 228, 428, 198); c.stroke();
+  drip(124, 420, 60, 6); drip(330, 448, 44, 7); drip(408, 300, 54, 5);
   c.restore();
 }
 // 鳥腳女：直直的長黑髮、方框眼鏡後面凸出的大眼睛、長鼻子、裂到兩頰的 V 字嘴
-function drawMomoFace(c, S) {
+// bare：3D 用的臉，頭髮只畫到太陽穴（垂下來的長髮另外用會飄的 3D 髮束做）
+function drawMomoFace(c, S, bare = false) {
   const r = seeded(777);
   c.save(); c.scale(S / 512, S / 512); c.lineCap = 'round'; c.lineJoin = 'round';
   c.fillStyle = '#111013';
@@ -1240,6 +1373,13 @@ function drawMomoFace(c, S) {
     c.strokeStyle = `rgba(${g},${g - 3},${g + 5},.7)`; c.lineWidth = 1.5 + r() * 2;
     c.beginPath(); c.moveTo(256 + (x - 256) * 0.5, 44 + Math.abs(x - 256) * 0.25);
     c.quadraticCurveTo(x, 200, x + (x - 256) * 0.05, 512); c.stroke();
+  }
+  if (bare) {
+    c.globalCompositeOperation = 'destination-out';
+    const fade = c.createLinearGradient(0, 190, 0, 270);
+    fade.addColorStop(0, 'rgba(0,0,0,0)'); fade.addColorStop(1, 'rgba(0,0,0,1)');
+    c.fillStyle = fade; c.fillRect(0, 190, 512, 322);
+    c.globalCompositeOperation = 'source-over';
   }
   const fg = c.createRadialGradient(256, 270, 30, 256, 290, 190);
   fg.addColorStop(0, '#ebe3d6'); fg.addColorStop(0.8, '#d4cabb'); fg.addColorStop(1, '#a99f92');
@@ -1274,12 +1414,23 @@ function drawMomoFace(c, S) {
   c.restore();
 }
 // 爬行女：灰藍色的臉被長髮蓋住，只露出一隻眼睛和紅色的嘴
-function drawCrawlerFace(c, S) {
+// bare：3D 用的臉（蓋在臉上的長髮另外用會動的 3D 髮束做）：只畫頭頂的頭髮，
+// 臉兩邊被頭髮擋住的地方暗一點，另一隻眼睛是黑黑的眼窩（頭髮晃開時才看得到）
+function drawCrawlerFace(c, S, bare = false) {
   const r = seeded(4321);
   c.save(); c.scale(S / 512, S / 512); c.lineCap = 'round';
   const fg = c.createRadialGradient(270, 250, 30, 256, 270, 200);
   fg.addColorStop(0, '#a3afb8'); fg.addColorStop(0.8, '#7e8b95'); fg.addColorStop(1, '#56626c');
   c.fillStyle = fg; c.beginPath(); c.ellipse(256, 270, 140, 175, 0, 0, Math.PI * 2); c.fill();
+  if (bare) {
+    c.save(); c.clip();
+    const sg = c.createLinearGradient(116, 0, 396, 0);
+    sg.addColorStop(0, 'rgba(12,16,22,.8)'); sg.addColorStop(0.4, 'rgba(12,16,22,.3)'); sg.addColorStop(0.5, 'rgba(12,16,22,0)');
+    sg.addColorStop(0.78, 'rgba(12,16,22,0)'); sg.addColorStop(1, 'rgba(12,16,22,.75)');
+    c.fillStyle = sg; c.fillRect(0, 0, 512, 512);
+    c.fillStyle = 'rgba(10,10,16,.85)'; c.beginPath(); c.ellipse(204, 238, 40, 26, -0.1, 0, 7); c.fill();
+    c.restore();
+  }
   c.fillStyle = 'rgba(20,20,30,.55)'; c.beginPath(); c.ellipse(304, 232, 46, 30, 0.1, 0, 7); c.fill();
   c.fillStyle = '#ecebe6'; c.beginPath(); c.ellipse(304, 232, 30, 17, 0.1, 0, 7); c.fill();
   c.strokeStyle = 'rgba(180,40,40,.6)'; c.lineWidth = 1.2;
@@ -1287,6 +1438,22 @@ function drawCrawlerFace(c, S) {
   c.fillStyle = '#111'; c.beginPath(); c.arc(300, 232, 7, 0, 7); c.fill();
   c.fillStyle = '#2a0406'; c.beginPath(); c.ellipse(272, 366, 44, 20, -0.08, 0, 7); c.fill();
   c.strokeStyle = '#b01520'; c.lineWidth = 7; c.beginPath(); c.ellipse(272, 366, 46, 22, -0.08, 0, 7); c.stroke();
+  if (bare) {
+    // 頭頂的頭髮，髮際線參差不齊；幾根細細的頭髮飄過臉上
+    c.fillStyle = '#121014';
+    c.beginPath(); c.moveTo(110, 210); c.bezierCurveTo(100, 30, 412, 30, 402, 210);
+    for (let x = 402; x >= 110; x -= 12) c.lineTo(x, 132 + Math.abs(x - 256) * 0.32 + Math.sin(x * 0.11) * 8 + r() * 14);
+    c.closePath(); c.fill();
+    for (let i = 0; i < 70; i++) {
+      const x = 120 + r() * 272, g = 14 + r() * 30 | 0, y1 = 150 + Math.abs(x - 256) * 0.3 + r() * 40;
+      c.strokeStyle = `rgba(${g},${g - 2},${g + 4},.85)`; c.lineWidth = 1.5 + r() * 2.5;
+      c.beginPath(); c.moveTo(256 + (x - 256) * 0.5, 50 + r() * 20); c.quadraticCurveTo(x, 110, x + (r() - 0.5) * 10, y1); c.stroke();
+    }
+    c.strokeStyle = 'rgba(15,14,18,.8)'; c.lineWidth = 1.6;
+    for (let i = 0; i < 4; i++) { const x = 252 + r() * 80; c.beginPath(); c.moveTo(x, 140); c.bezierCurveTo(x + 10, 240, x - 12, 320, x + 4, 400 + r() * 80); c.stroke(); }
+    c.restore();
+    return;
+  }
   c.save();
   c.beginPath(); c.rect(0, 0, 512, 512);
   c.ellipse(304, 232, 40, 26, 0.1, 0, Math.PI * 2);
@@ -1383,12 +1550,17 @@ function thumbBlob(c, S) {
 }
 function thumbStick(c, S) {
   c.save(); c.scale(S / 200, S / 200);
-  c.strokeStyle = '#e8e4dc'; c.lineWidth = 4; c.lineCap = 'round';
+  c.strokeStyle = '#e8e4dc'; c.lineWidth = 3.5; c.lineCap = 'round'; c.lineJoin = 'round';
   c.beginPath();
-  c.moveTo(100, 80); c.lineTo(100, 140); c.lineTo(78, 192); c.moveTo(100, 140); c.lineTo(124, 192);
-  c.moveTo(100, 96); c.lineTo(58, 100); c.moveTo(100, 96); c.lineTo(134, 88); c.lineTo(142, 50);
+  c.moveTo(100, 64); c.lineTo(100, 128);
+  c.moveTo(100, 128); c.lineTo(88, 162); c.lineTo(80, 196);
+  c.moveTo(100, 128); c.lineTo(116, 160); c.lineTo(126, 194);
+  c.moveTo(100, 82); c.lineTo(80, 114); c.lineTo(72, 156);
+  c.moveTo(72, 156); c.lineTo(64, 172); c.moveTo(72, 156); c.lineTo(71, 174); c.moveTo(72, 156); c.lineTo(78, 171);
+  c.moveTo(100, 82); c.lineTo(134, 74); c.lineTo(148, 38);
+  c.moveTo(148, 38); c.lineTo(140, 20); c.moveTo(148, 38); c.lineTo(151, 18); c.moveTo(148, 38); c.lineTo(160, 24);
   c.stroke();
-  c.translate(76, 12); drawStickFace(c, 48);
+  c.translate(96, 36); c.rotate(-0.28); c.translate(-32, -32); drawStickFace(c, 64);
   c.restore();
 }
 function thumbFlower(c, S) {
@@ -1396,9 +1568,10 @@ function thumbFlower(c, S) {
   c.strokeStyle = '#4f8a4a'; c.lineWidth = 5; c.beginPath(); c.moveTo(100, 196); c.quadraticCurveTo(108, 140, 100, 92); c.stroke();
   c.fillStyle = '#9fd4a8'; c.strokeStyle = '#3f8f5a'; c.lineWidth = 2;
   for (const s of [-1, 1]) { c.beginPath(); c.ellipse(100 + s * 34, 138, 34, 12, s * -0.45, 0, 7); c.fill(); c.stroke(); }
-  c.fillStyle = '#f6efe8'; c.beginPath(); c.arc(100, 58, 44, 0, 7); c.fill();
-  c.strokeStyle = '#b3303a'; c.lineWidth = 1.5;
-  for (let k = 0; k < 12; k++) { const a = k / 12 * Math.PI * 2; c.beginPath(); c.moveTo(100 + Math.cos(a) * 12, 58 + Math.sin(a) * 12); c.quadraticCurveTo(100 + Math.cos(a + 0.3) * 28, 58 + Math.sin(a + 0.3) * 28, 100 + Math.cos(a) * 42, 58 + Math.sin(a) * 42); c.stroke(); }
+  const eg = c.createRadialGradient(100, 58, 18, 100, 58, 44);
+  eg.addColorStop(0, '#f6efe8'); eg.addColorStop(1, '#e3b4ab');
+  c.fillStyle = eg; c.beginPath(); c.arc(100, 58, 44, 0, 7); c.fill();
+  c.save(); c.clip(); drawVeins(c, 100, 58, 15, 46, 14, 2468, 0.45); c.restore();
   c.fillStyle = '#6b6560'; c.beginPath(); c.arc(100, 58, 12, 0, 7); c.fill();
   c.strokeStyle = '#1a1614'; c.lineWidth = 1.5; c.beginPath();
   for (let a = 0; a < Math.PI * 5; a += 0.2) { const rr = 1 + a * 0.6; c.lineTo(100 + Math.cos(a) * rr, 58 + Math.sin(a) * rr); }
