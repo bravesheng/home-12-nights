@@ -19,13 +19,14 @@ const ROOMS = [
   { id: 'laundry',  name: '洗衣間', x: 32, y: 26, w: 11, h: 6,  floor: 'tile',      level: 1 },
 ];
 
-// 門（放在牆上的格子）
-const DOORS = [
+// 門（放在牆上的格子）。DOORS 是現在這個世界用的清單，換世界時由 doorsForWorld 重新填
+const DOORS_BASE = [
   { x: 5, y: 10 }, { x: 16, y: 10 }, { x: 27, y: 10 }, { x: 38, y: 10 },
   { x: 5, y: 14 }, { x: 19, y: 14 }, { x: 20, y: 14 }, { x: 35, y: 14 },
-  { x: 5, y: 25 }, { x: 22, y: 25 }, { x: 37, y: 25 },
+  { x: 5, y: 25, station: true }, { x: 22, y: 25, station: true }, { x: 37, y: 25, station: true },
   { x: 0, y: 12, front: true },
 ];
+const DOORS = [...DOORS_BASE];
 
 // 家具。loot = 可搜索的物資表；solid 預設為 true
 const FURN = [
@@ -235,7 +236,7 @@ const DIFFS = {
 // ====================================================================
 // 第二世界：夢核花園。房間和門的位置都跟第一世界一樣，只換名字、地板和家具
 // ====================================================================
-const WORLD_NAMES = { 1: '第一世界：家', 2: '第二世界：夢核花園' };
+const WORLD_NAMES = { 1: '第一世界：家', 2: '第二世界：夢核花園', 3: '第三世界：末班列車' };
 const ROOMS_W2 = {
   attic:    { name: '紫藤花架', floor: 'grass2', dayDark: 0.25 },
   study:    { name: '樹洞書屋', floor: 'grass' },
@@ -249,11 +250,28 @@ const ROOMS_W2 = {
   garage:   { name: '遊樂場',   floor: 'sand' },
   laundry:  { name: '水井邊',   floor: 'grass' },
 };
+// 第三世界：上面一排和走道是列車的車廂，最下面一排是車站（白天才能去，晚上列車開走就鎖門）
+const ROOMS_W3 = {
+  attic:    { name: '機車室',   floor: 'iron',     dayDark: 0.5 },
+  study:    { name: '頭等包廂', floor: 'carpet3' },
+  bedroom:  { name: '臥鋪車廂', floor: 'carpet3' },
+  bathroom: { name: '盥洗室',   floor: 'tile3' },
+  hall:     { name: '車廂走道', floor: 'runner' },
+  storage:  { name: '行李車',   floor: 'plank3' },
+  living:   { name: '交誼車廂', floor: 'carpet3' },
+  kitchen:  { name: '餐車',     floor: 'tile3' },
+  basement: { name: '月台',     floor: 'platform', dayDark: 0.15 },
+  garage:   { name: '候車室',   floor: 'wood3',    dayDark: 0.3 },
+  laundry:  { name: '站務室',   floor: 'plank3',   dayDark: 0.3 },
+};
 for (const r of ROOMS) {
-  const w2 = ROOMS_W2[r.id];
+  const w2 = ROOMS_W2[r.id], w3 = ROOMS_W3[r.id];
   r.w1 = { name: r.name, floor: r.floor, dayDark: r.dayDark };
   r.w2 = { name: w2.name, floor: w2.floor, dayDark: w2.dayDark };
+  r.w3 = { name: w3.name, floor: w3.floor, dayDark: w3.dayDark };
 }
+const STATION_ROOMS = ['basement', 'garage', 'laundry'];   // 車站的三間（最下面一排）
+const isStationRoom = r => !!r && STATION_ROOMS.includes(r.id);
 // 第二世界的家具：同一個位置、同樣大小，換成花園裡的東西（沒有電視、沒有衣櫃）
 const FURN_W2 = {
   rug1: { type: 'flowerbed', color: '#f08cc0' },
@@ -298,5 +316,103 @@ const FURN_W2 = {
   washer: { type: 'well', name: '水井' },
   basket: { type: 'buckets', name: '水桶' },
 };
+// ====================================================================
+// 第三世界：末班列車（鍍金年代的豪華特快車，老舊、積灰、沒有人）
+// 家具可以換種類、換位置、增減（remove: true 就拿掉）；pax: true 的座位上坐著蓋白布的乘客
+// ====================================================================
+const FURN_W3 = {
+  // 交誼車廂（客廳）
+  rug1: { type: 'rug', color: '#1f3d2e', deco: true },
+  tvcab: { type: 'gramocab', name: '留聲機櫃' },
+  sofa: { type: 'seat3', name: '絨布沙發', loot: 'cushions', pax: true },
+  ctable: { type: 'table3' },
+  bookshelf: { type: 'rack', name: '雜誌架' },
+  phone: { name: '對講機' },
+  plant1: { type: 'passenger', name: '扶手椅' },
+  // 餐車（廚房）
+  fridge: { type: 'icebox', name: '冰櫃' },
+  kdrawer: { type: 'counter', name: '餐車抽屜' },
+  kcab: { type: 'cabinet', name: '餐具櫃' },
+  dtable: { type: 'dining', name: '餐桌', pax: true },
+  // 行李車（儲藏室）
+  sshelf: { type: 'rack', name: '行李架', loot: 'luggage' },
+  boxA: { type: 'crates3', name: '木箱', loot: 'fuel' },
+  boxB: { type: 'trunks', name: '行李箱堆', loot: 'luggage' },
+  toolcab: { type: 'cabinet', name: '工具櫃' },
+  workbench: { name: '修車工具台' },
+  // 車廂走道
+  shoecab: { type: 'trunks', name: '行李箱', loot: 'luggage' },
+  plant2: { type: 'trunks', name: '行李箱', loot: 'luggage' },
+  // 臥鋪車廂（臥室）
+  rug2: { type: 'rug', color: '#5a2c2c', deco: true },
+  bed: { name: '臥鋪' },
+  nightstand: { type: 'cabinet', name: '床頭櫃', loot: 'luggage' },
+  dresser: { type: 'rack', name: '行李架', loot: 'luggage' },
+  // 盥洗室（浴室）
+  bathtub: { type: 'washstand' },
+  // 頭等包廂（書房）
+  sbook: { type: 'liquor', name: '酒櫃', loot: 'bar' },
+  desk: { type: 'seat3', name: '絨布長椅', loot: null, pax: true },
+  filecab: { type: 'minibar', name: '小吧台', loot: 'bar' },
+  tchest3: { type: 'gramophone', name: '留聲機', w: 1, h: 1 },
+  // 機車室（閣樓）：火爐、煤堆、鍋爐管線；電箱從站務室搬到這裡
+  chest1: { type: 'coalpile', name: '煤堆', loot: 'coal' },
+  chest2: { type: 'pipes' },
+  chest3: { type: 'coalpile', name: '煤堆', loot: 'coal' },
+  doll: { remove: true },
+  tchest1: { remove: true },
+  breaker: { name: '發電機', x: 1, y: 9, w: 1, h: 1 },
+  // 月台（地下室）
+  oldbox1: { type: 'woodpile', name: '木堆', loot: 'fuel' },
+  oldbox2: { type: 'bench3', name: '長椅', loot: 'station' },
+  boiler: { type: 'cart', name: '行李推車', loot: 'luggage', x: 15, y: 30, w: 2, h: 2 },
+  tchest2: { remove: true },
+  // 候車室（車庫）
+  toolbox: { type: 'bench3', name: '長椅', loot: 'station' },
+  gshelf: { type: 'ticket', name: '售票口', loot: 'station' },
+  car: { type: 'benches', name: '候車長椅', loot: 'cushions', pax: true, x: 23, y: 28, w: 5, h: 1 },
+  gacha: { name: '幸運機' },
+  // 站務室（洗衣間）
+  washer: { type: 'telegraph', name: '電報機', loot: 'general' },
+  basket: { type: 'coalsack', name: '煤袋', loot: 'coal' },
+};
+const FURN_W3_ADD = [
+  { id: 'firebox', type: 'firebox', name: '火爐', x: 8, y: 4, w: 2, h: 2 },
+  { id: 'sign', type: 'sign', name: '站牌', x: 6, y: 31, w: 2, h: 1 },
+  { id: 'gaslamp1', type: 'gaslamp', x: 2, y: 26, w: 1, h: 1 },
+  { id: 'gaslamp2', type: 'gaslamp', x: 14, y: 31, w: 1, h: 1 },
+  { id: 'timetable', type: 'timetable', x: 36, y: 26, w: 2, h: 1 },
+  { id: 'srack', type: 'rack', name: '行李架', x: 42, y: 27, w: 1, h: 2, loot: 'luggage' },
+];
 const FURN_W1 = FURN.map(f => ({ ...f }));
-const furnForWorld = w => FURN_W1.map(f => ({ ...f, ...(w === 2 ? FURN_W2[f.id] || {} : {}) }));
+function furnForWorld(w) {
+  if (w === 3) {
+    const list = [];
+    for (const f of FURN_W1) {
+      const o = FURN_W3[f.id];
+      if (o && o.remove) continue;
+      list.push({ ...f, ...(o || {}) });
+    }
+    return [...list, ...FURN_W3_ADD.map(f => ({ ...f }))];
+  }
+  return FURN_W1.map(f => ({ ...f, ...(w === 2 ? FURN_W2[f.id] || {} : {}) }));
+}
+// 第三世界多兩扇門（月台↔候車室、候車室↔站務室），車站才像車站
+const DOORS_W3 = [{ x: 17, y: 28 }, { x: 31, y: 28 }];
+const doorsForWorld = w => [...DOORS_BASE, ...(w === 3 ? DOORS_W3 : [])];
+
+// 寶箱四級：每天早上在車站三間重新放；打開是賭：可能是物資，也可能跳出怪物（等級越高東西越好、怪物越強）
+const CHESTS3 = [null,
+  { name: '櫃箱',   hold: 1, keys: 0, monster: 0.10 },
+  { name: '鐵寶箱', hold: 2, keys: 0, monster: 0.20 },
+  { name: '銀寶箱', hold: 2, keys: 1, monster: 0.30 },
+  { name: '鉑寶箱', hold: 3, keys: 2, monster: 0.40 },
+];
+// 火爐一次最多放幾份燃料；火熄了幾秒後列車停下來；補燃料後幾秒重新開動
+const FUEL_SLOTS = 4, TRAIN_STOP_DELAY = 5, TRAIN_RESTART = 4;
+// 12 夜裡：第 6 夜紅月；第 3、7、10、12 天是寒寂之境（整天下雪、零下 100 度，多了體溫）
+const RED_MOON_NIGHT = 6, COLD_DAYS = [3, 7, 10, 12];
+// 每天停靠的車站名字，最後一站是終點站；晚上窗外的風景照天數換
+const STATIONS_W3 = ['霧濱', '鐵橋頭', '白樺站', '凍湖', '舊礦坑', '黑森林', '雪嶺', '廢棄驛站', '長隧道口', '冰河', '燈火鎮', '終點站'];
+const SCENERY_W3 = ['plain', 'plain', 'snow', 'trees', 'bridge', 'trees', 'snow', 'plain', 'tunnel', 'snow', 'city', 'snow'];
+const BAYMAX_MAX = 2;   // 整個遊戲最多拿到幾顆大白燈

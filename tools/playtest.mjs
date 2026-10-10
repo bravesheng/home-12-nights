@@ -206,6 +206,35 @@ await scenario('w2', '第二世界第 6 夜＋全套裝備（?world=2&night=6&ki
   await shot('2-night');
 });
 
+await scenario('w3', '第三世界第 1 天（下車到月台、天黑前車站鎖門、留在車站會被拉回車上）', {}, async ({ page, shot, check }) => {
+  await page.goto(BASE + '?world=3&diff=normal', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play');
+  await sleep(2500);
+  let s = await state(page);
+  check(s.hud && s.day === 1, `要從第 1 天開始（現在：${s.label}）`);
+  check(await page.evaluate(() => ROOMS.find(r => r.id === 'attic').name === '機車室' && DOORS.length === 14 && document.body.classList.contains('w3')), '第三世界要換成列車的房間名字，多兩扇車站的門');
+  await shot('1-start');
+  // 下車：站在車站門的北邊往南走，白天要走得下月台
+  await page.evaluate(() => { Object.assign(G.p, { x: 5.5, y: 24.3, face: Math.PI / 2, pitch: 0.05 }); });
+  await page.keyboard.down('w');
+  await page.waitForFunction(() => G.p.y > 25.6, null, { timeout: 20000 }).catch(() => {});
+  await page.keyboard.up('w');
+  s = await state(page);
+  check(s.y > 25.6, `白天要能從車站的門走下月台（現在 y=${s.y.toFixed(1)}）`);
+  await shot('2-platform');
+  // 天黑前 3 秒車站鎖門：門變成牆，還留在車站的人會被拉回車上
+  await page.evaluate(() => { Object.assign(G.p, { x: 8.5, y: 29.5 }); G.t = DAY_LEN - 3.2; });
+  await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
+  await sleep(400);
+  const d = await page.evaluate(() => ({ locked: DOORS.filter(d => d.locked).length, y: G.p.y, solid: isSolid(5, 25), wall: isWall(22, 25) }));
+  check(d.locked === 3 && d.solid && d.wall, `天黑時車站的三扇門要鎖住、變成牆（鎖了 ${d.locked} 扇）`);
+  check(d.y < 25, `留在車站的玩家要被拉回車上（現在 y=${d.y.toFixed(1)}）`);
+  const lay = await overlaps(page);
+  check(lay.length === 0, '天黑時版面重疊：' + lay.join('、'));
+  await sleep(1200);
+  await shot('3-night');
+});
+
 await scenario('monsters', '怪物模型（火柴人、鳥腳女和爬行女會動的頭髮、眼球花，手電筒開關各拍一張）', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=1&night=6&kit=1', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');

@@ -154,6 +154,37 @@ const Sound = (() => {
       tone(170, 1.3, 'sawtooth', 0.05, 110); noise(1.1, 0.12, 900, 0, 6);
       [1046, 1318, 1568, 2093].forEach((f, i) => tone(f, 1.4, 'sine', 0.05, null, 0.7 + i * 0.16));
     },
+    // ---------- 第三世界：列車 ----------
+    clack() { noise(0.05, 0.5, 700, 0, 1.2); noise(0.04, 0.4, 500, 0.11, 1.2); tone(70, 0.08, 'sine', 0.25, 50); },
+    whistle() { for (const f of [392, 466]) { tone(f, 1.6, 'sawtooth', 0.06, f * 1.01, 0.05); tone(f * 2, 1.6, 'sine', 0.03, f * 2, 0.05); } noise(1.8, 0.12, 3000, 0, 0.8); },
+    steam() { noise(1.4, 0.2, 2500, 0, 0.5); noise(0.9, 0.12, 900, 0.1, 0.8); },
+    doorSlam() { noise(0.1, 0.6, 400, 0, 1); tone(60, 0.25, 'sine', 0.5, 35); noise(0.3, 0.3, 1800, 0.05, 2); },
+    fuelIn() { noise(0.25, 0.4, 600, 0, 1); for (let i = 0; i < 6; i++) noise(0.05, 0.3, 2500 + Math.random() * 2500, 0.1 + i * 0.08, 2); tone(90, 0.3, 'sine', 0.2, 60, 0.05); },
+    trainSlow() { tone(120, 2.5, 'sawtooth', 0.08, 30); noise(2.5, 0.25, 1200, 0, 0.6); },
+    trainStop() { tone(45, 1.8, 'sine', 0.5, 25); noise(1.2, 0.5, 300, 0, 1); for (let i = 0; i < 4; i++) noise(0.08, 0.4, 2200, 0.5 + i * 0.12, 2); },
+    trainStart() { for (let i = 0; i < 6; i++) { noise(0.3, 0.35, 2000, i * 0.55 * (1 - i * 0.08), 0.6); tone(60, 0.2, 'sine', 0.3, 40, i * 0.55 * (1 - i * 0.08)); } },
+    pound() { tone(55, 0.3, 'sine', 0.6, 35); noise(0.15, 0.5, 250, 0, 1.5); noise(0.4, 0.2, 90, 0.05, 1); },
+    wind() { noise(2.5, 0.14, 500, 0, 0.4); noise(2.0, 0.08, 1500, 0.6, 0.6); },
+    // 時鐘倒轉（蕈裂衣刺中你）
+    clockBack() { for (let i = 0; i < 8; i++) tone(1800 - i * 150, 0.05, 'square', 0.05, 2400 - i * 150, i * 0.07); tone(300, 0.6, 'sawtooth', 0.06, 900); noise(0.5, 0.15, 4000, 0, 1); },
+    // 蕈裂衣：咯咯笑、長矛刺、孢子
+    kcackle() { for (let i = 0; i < 6; i++) { tone(260 + i * 25, 0.08, 'square', 0.06, 200 + i * 20, i * 0.1); noise(0.06, 0.1, 1400, i * 0.1, 3); } },
+    spear() { noise(0.12, 0.4, 2600, 0, 1.5); tone(180, 0.2, 'sawtooth', 0.12, 70); },
+    // 熔岩暴君：跺腳、熔岩嘶聲、岩石碎掉
+    stompBig() { tone(40, 0.6, 'sine', 0.8, 25); noise(0.4, 0.6, 180, 0, 1); noise(0.2, 0.3, 900, 0.05, 1.5); },
+    hiss() { noise(1.2, 0.4, 5000, 0, 0.7); noise(0.8, 0.2, 2000, 0.2, 1); tone(400, 0.8, 'sine', 0.03, 120); },
+    crack() { noise(0.08, 0.6, 1800, 0, 1); for (let i = 0; i < 5; i++) noise(0.04, 0.4, 2800 + Math.random() * 2000, 0.08 + i * 0.05, 2); tone(110, 0.25, 'sine', 0.3, 50); },
+    // 墮落戰神：鐵甲、劍磨地、揮劍
+    armor() { noise(0.06, 0.35, 2500, 0, 3); noise(0.05, 0.3, 1800, 0.08, 3); tone(90, 0.15, 'sine', 0.25, 60); },
+    swordDrag() { noise(0.7, 0.14, 3600, 0, 1.2); for (let i = 0; i < 4; i++) noise(0.03, 0.2, 5000 + Math.random() * 3000, 0.1 + i * 0.15, 3); },
+    swordSwing() { noise(0.25, 0.5, 1400, 0, 0.7); noise(0.2, 0.35, 3000, 0.05, 1); tone(200, 0.3, 'sawtooth', 0.1, 60); },
+    // 檮杌：咆哮加上很多人在低語
+    roar() { tone(70, 1.6, 'sawtooth', 0.25, 45); tone(73, 1.6, 'square', 0.1, 48); noise(1.4, 0.4, 350, 0, 0.8); for (let i = 0; i < 6; i++) noise(0.5, 0.08, 2200 + Math.random() * 2500, 0.3 + i * 0.2, 4); },
+    // 大白：抱住你
+    hug() { tone(220, 1.2, 'sine', 0.05, 330); tone(330, 1.2, 'sine', 0.04, 440, 0.3); noise(0.8, 0.05, 1200, 0, 0.8); },
+    // 寶箱：打開、跑出怪物
+    chestOpen() { noise(0.4, 0.2, 700, 0, 2); tone(140, 0.5, 'sawtooth', 0.06, 90); [784, 988, 1175, 1568].forEach((f, i) => tone(f, 0.4, 'sine', 0.05, null, 0.4 + i * 0.08)); },
+    chestMonster() { noise(0.6, 0.6, 500, 0, 0.6); tone(60, 0.5, 'sine', 0.5, 30); tone(500, 0.5, 'sawtooth', 0.12, 1000, 0.1); noise(0.4, 0.3, 2500, 0.2, 1); },
   };
 
   // 夜晚的低頻嗡嗡聲
@@ -343,9 +374,26 @@ const Sound = (() => {
     staticG.gain.setTargetAtTime(level * 0.1, ac.currentTime, 0.1);
   }
 
+  // 火爐燃燒的劈啪聲（持續播放，音量隨距離和火力變化）
+  let fireG = null;
+  function setFire(level) {
+    if (!ac) return;
+    if (!fireG) {
+      const len = ac.sampleRate * 2, buf = ac.createBuffer(1, len, ac.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (Math.random() < 0.004 ? 1 : 0.25);
+      const src = ac.createBufferSource(); src.buffer = buf; src.loop = true;
+      const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1200;
+      fireG = ac.createGain(); fireG.gain.value = 0;
+      src.connect(f); f.connect(fireG); fireG.connect(master);
+      src.start();
+    }
+    fireG.gain.setTargetAtTime(level * 0.25, ac.currentTime, 0.15);
+  }
+
   return {
     init,
     setStatic,
+    setFire,
     play(name, vol = 1) {
       if (!ac || muted || !sfx[name]) return;
       if (vol !== 1) { out = ac.createGain(); out.gain.value = vol; out.connect(master); }

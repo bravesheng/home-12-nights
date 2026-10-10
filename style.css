@@ -31,6 +31,8 @@ button, .slot { touch-action: manipulation; -webkit-touch-callout: none; -webkit
 .fill.bat { background: linear-gradient(90deg, #26a269, #7ee081); }
 .fill.stam { background: linear-gradient(90deg, #3a86ff, #8ecae6); }
 .fill.noise { background: linear-gradient(90deg, #7ee081, #ffd166 45%, #ff5a5f); transition: width .1s; }
+.fill.fire { background: linear-gradient(90deg, #ff6a1a, #ffc040); }
+.fill.temp { background: linear-gradient(90deg, #8fd0ff, #ffe0a0); }
 .fill.low { animation: blink .6s infinite; }
 @keyframes blink { 50% { opacity: .35; } }
 
@@ -63,6 +65,9 @@ button, .slot { touch-action: manipulation; -webkit-touch-callout: none; -webkit
   letter-spacing: 6px; text-shadow: 0 0 30px rgba(0, 0, 0, .9); opacity: 0; transition: opacity 1s; }
 #bigText small { display: block; font-size: 18px; letter-spacing: 2px; font-weight: 400; opacity: .8; margin-top: 8px; }
 #bigText.show { opacity: 1; }
+/* 空間不夠（螢幕矮、提示多）時縮小一號 */
+#bigText.compact { font-size: 38px; letter-spacing: 3px; }
+#bigText.compact small { font-size: 14px; margin-top: 4px; }
 
 /* ===== 3D 畫面疊加層 ===== */
 .fxl { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
@@ -268,8 +273,13 @@ li { margin-bottom: 9px; line-height: 1.55; font-size: 14px; }
 #healfx { background: radial-gradient(ellipse at center, rgba(120, 255, 160, 0) 50%, rgba(120, 255, 160, .22) 100%); transition: opacity .6s; }
 #prompt .pm.grab { color: #ff8a8a; font-size: 18px; animation: blink .5s infinite; }
 
-/* 平板：第二世界才有「跳」按鈕 */
-body:not(.w2) #tbtns .tb.jump { visibility: hidden; }
+/* ===== 第三世界的畫面效果：寒寂之境的結霜、時鐘倒退的紫光、列車停下來 ===== */
+#coldfx { background: radial-gradient(ellipse at center, rgba(220, 240, 255, 0) 38%, rgba(225, 240, 255, .55) 78%, rgba(240, 250, 255, .92) 100%); transition: opacity .8s; }
+#timefx { background: radial-gradient(ellipse at center, rgba(170, 80, 255, .25), rgba(120, 30, 220, .75)); }
+#stopfx { background: radial-gradient(ellipse at center, rgba(60, 0, 10, 0) 30%, rgba(80, 0, 10, .7) 100%); transition: opacity 1s; }
+
+/* 平板：第二、三世界才有「跳」按鈕 */
+body:not(.w2):not(.w3) #tbtns .tb.jump { visibility: hidden; }
 .tb.jump { border-color: rgba(255, 158, 200, .7); color: #ffd0e6; }
 
 /* ===== 破關動畫 ===== */
@@ -292,10 +302,13 @@ body:not(.w2) #tbtns .tb.jump { visibility: hidden; }
 .worldbtn.w1 b { color: #ffd166; }
 .worldbtn.w2 { border-color: rgba(255, 158, 200, .75); background: linear-gradient(135deg, rgba(255, 158, 200, .12), rgba(140, 190, 255, .1)); }
 .worldbtn.w2 b { color: #ffb3d6; }
+.worldbtn.w3 { border-color: rgba(214, 170, 90, .8); background: linear-gradient(135deg, rgba(120, 80, 30, .22), rgba(40, 30, 50, .25)); }
+.worldbtn.w3 b { color: #e8c37a; }
 .worldbtn:disabled { opacity: .5; }
 .worldbtn:active { transform: scale(.98); }
 .w2badge { display: inline-block; margin-top: 12px; font-size: 13px; padding: 4px 12px; border-radius: 14px; color: #ffd0e6;
   border: 1px solid rgba(255, 158, 200, .6); background: rgba(255, 158, 200, .1); }
+.w3badge { color: #e8c37a; border-color: rgba(214, 170, 90, .7); background: rgba(214, 170, 90, .1); }
 .tabs { display: flex; gap: 8px; margin: -4px 0 12px; }
 .tabs button { padding: 7px 16px; font-size: 14px; background: rgba(255, 255, 255, .08); color: #ddd; font-weight: 600; }
 .tabs button.on { background: linear-gradient(180deg, #ffd166, #f4a93b); color: #2a1a00; }

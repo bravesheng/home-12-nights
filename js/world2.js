@@ -281,7 +281,7 @@ function updateGirl(e, dt) {
   }
 }
 function plantSeed(x, y) {
-  if (G.phase !== 'night') return;
+  if (G.phase !== 'night' || !isW2()) return;   // 列車上沒有泥土，眼花女孩種不了種子
   const tx = Math.floor(x), ty = Math.floor(y);
   if (!plantSpotOk(tx, ty, 1.5) || G.seedlings.some(s => Math.hypot(s.x - tx - 0.5, s.y - ty - 0.5) < 1.2)) return;
   if (plantCount('sunflower') + G.seedlings.length >= MAX_PLANTS.sunflower) return;

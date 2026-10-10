@@ -24,6 +24,9 @@
     <div id="dizzyfx" class="fxl"></div>
     <div id="sporefx" class="fxl"></div>
     <div id="healfx" class="fxl"></div>
+    <div id="coldfx" class="fxl"></div>
+    <div id="timefx" class="fxl"></div>
+    <div id="stopfx" class="fxl"></div>
     <div id="cross"></div>
     <div id="prompt"></div>
     <canvas id="minimap"></canvas>
@@ -39,6 +42,8 @@
       <div class="bar"><span class="ico">🍗</span><div class="track"><div id="hungerFill" class="fill hunger"></div></div></div>
       <div class="bar"><span class="ico">🔦</span><div class="track"><div id="batFill" class="fill bat"></div></div><b id="flashTier" class="ftier">破爛</b></div>
       <div class="bar"><span class="ico">🏃</span><div class="track"><div id="stamFill" class="fill stam"></div></div></div>
+      <div class="bar hidden" id="fireBar"><span class="ico">🔥</span><div class="track"><div id="fireFill" class="fill fire"></div></div><b id="fireText" class="ftier">0 秒</b></div>
+      <div class="bar hidden" id="tempBar"><span class="ico">🌡️</span><div class="track"><div id="tempFill" class="fill temp"></div></div></div>
       <div class="coins">🪙 <b id="coinText">0</b></div>
       <div class="bar hidden" id="noiseBar"><span class="ico">👂</span><div class="track"><div id="noiseFill" class="fill noise"></div></div></div>
     </div>
@@ -87,6 +92,7 @@
         <button id="btnTransfer" class="ghost">存檔轉移</button>
       </div>
       <p id="w2Badge" class="w2badge hidden">🌸 第二世界：夢核花園 已解鎖</p>
+      <p id="w3Badge" class="w2badge w3badge hidden">🚂 第三世界：末班列車 已解鎖</p>
       <p id="saveInfo" class="small"></p>
       <p id="buildInfo" class="small build"></p>
     </div>
@@ -99,6 +105,7 @@
       <div class="worlds">
         <button class="worldbtn w1" data-w="1"><b>🏠 第一世界：家</b><small>停電的家裡有東西。白天找燈泡，晚上撐過 12 夜。</small></button>
         <button class="worldbtn w2" data-w="2"><b>🌸 第二世界：夢核花園</b><small>🔒 打贏第一世界的 12 夜就會解鎖</small></button>
+        <button class="worldbtn w3" data-w="3"><b>🚂 第三世界：末班列車</b><small>🔒 打贏第二世界的 12 夜就會解鎖</small></button>
       </div>
       <div class="btns"><button id="btnWorldBack" class="ghost">返回</button></div>
     </div>
@@ -205,7 +212,7 @@
   <div id="book" class="screen hidden">
     <div class="panel">
       <h2>怪物圖鑑</h2>
-      <div id="bookTabs" class="tabs"><button data-w="1" class="on">🏠 第一世界</button><button data-w="2">🌸 第二世界</button></div>
+      <div id="bookTabs" class="tabs"><button data-w="1" class="on">🏠 第一世界</button><button data-w="2">🌸 第二世界</button><button data-w="3">🚂 第三世界</button></div>
       <p id="bookNote" class="small book-note">所有怪物都有等級（Lv）和血量，夜晚越後面等級越高、越耐打。</p>
       <div id="bookList" class="book"></div>
       <div class="btns"><button id="btnBookBack">返回</button></div>
@@ -245,6 +252,7 @@
   <script src="js/data.js?v=15"></script>
   <script src="js/audio.js?v=15"></script>
   <script src="js/world2.js?v=15"></script>
+  <script src="js/world3.js?v=15"></script>
   <script src="js/game.js?v=15"></script>
   <script type="module" src="js/render3d.js?v=15"></script>
 </body>
