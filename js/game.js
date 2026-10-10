@@ -566,12 +566,14 @@ const FL_DPS = 1;                // 手電筒每秒對怪物造成的傷害（�
 const BASE_HP = {
   shadow: 1, fast: 0.8, blob: 1.3, stick: 1.5, balloon: 0.8, flower: 1.5, woman: 4, momo: 4, crawler: 3.5, clown: 4, tall: 6,
   sunflower: 1.2, shroom: 2.5, grass: 1.6, snail: 5, girl: 4.5,
+  kronos: 3.2, tyrant: 7, warlord: 6, taowu: 12,
 };
 const MONSTER_NAME = {
   shadow: '黑影', fast: '衣櫃怪', blob: '黑球', stick: '火柴人', balloon: '紅氣球', flower: '眼球花', woman: '血淚女', momo: '鳥腳女', crawler: '爬行女', clown: '小丑', tall: '它',
   sunflower: '向日葵眼', shroom: '千眼菇', grass: '草叢人', snail: '大嘴觸角蟲', girl: '眼花女孩',
+  kronos: '克蘿諾斯・蕈裂衣', tyrant: '熔岩暴君', warlord: '墮落戰神', taowu: '檮杌・九瞳',
 };
-const BOSSES = ['woman', 'momo', 'crawler', 'clown', 'tall', 'snail', 'girl'];
+const BOSSES = ['woman', 'momo', 'crawler', 'clown', 'tall', 'snail', 'girl', 'tyrant', 'warlord', 'taowu'];
 // 長在地上的植物怪（眼球花、向日葵眼、千眼菇）放在 G.flowers，用 ptype 分種類
 const plantKind = t => (t.ptype === 'sunflower' ? 'sunflower' : t.ptype === 'shroom' ? 'shroom' : 'flower');
 const kindOf = t => t.kind || plantKind(t);
@@ -588,15 +590,17 @@ function setLevel(m, kind, lv) {
   return m;
 }
 const initHp = (m, kind) => setLevel(m, kind, rollLevel());
-function hurtMonster(t, dmg) {
+// src：是哪種攻擊（flash 手電筒、pan、shot 彈珠、spray 聖水槍、salt、bomb 鞭炮、fire 火球、angel 天使）；第三世界的怪物各有弱點
+function hurtMonster(t, dmg, src = 'flash') {
   if (t.dead || !(t.hp > 0)) return;
+  if (t.kind && GRADE3[t.kind]) { dmg *= monsterDmgMult(t, src); if (dmg <= 0) return; }
   t.hp -= dmg * (kindOf(t) === 'tall' ? 0.5 : 1); // 「它」很耐打
   t.hitT = 0.3;
   if (t.hp <= 0) defeatMonster(t);
 }
 // 手電筒照著怪物時每一幀呼叫
 function flashHurt(t, dt) {
-  hurtMonster(t, FL_DPS * flTier().dmg * dt);
+  hurtMonster(t, FL_DPS * flTier().dmg * dt, 'flash');
   if (Math.random() < dt * 12) G.fx.push({ type: 'spark', x: t.x + rand(-0.2, 0.2), y: t.y + rand(-0.2, 0.2), h: targetH(t) + rand(-0.3, 0.3), vx: rand(-0.4, 0.4), vy: rand(-0.4, 0.4), vh: rand(0, 0.8), life: 0.4, max: 0.4, color: [255, 240, 200] });
 }
 function defeatMonster(t) {
@@ -610,6 +614,10 @@ function defeatMonster(t) {
   else if (kind === 'snail') { puff(t.x, t.y, [235, 150, 175], 24, 0.6); Sound.play('dissolve'); }
   else if (kind === 'balloon') { puff(t.x, t.y, [200, 20, 30], 12, 1.8); Sound.play('pop'); }
   else if (kind === 'stick') { puff(t.x, t.y, [40, 30, 20], 16, 1); Sound.play('burn'); }
+  else if (kind === 'kronos') { puff(t.x, t.y, [120, 70, 170], 18, 1.2); Sound.play('crack'); for (let i = 0; i < 2; i++) G.pickups.push({ x: t.x + rand(-0.4, 0.4), y: t.y + rand(-0.4, 0.4), id: 'charcoal', n: 1, t: Math.random() * 6 }); }
+  else if (kind === 'tyrant') { puff(t.x, t.y, [60, 40, 30], 26, 1.5); Sound.play('crack'); Sound.play('hiss', 0.5); G.shake = Math.max(G.shake, 0.6); }
+  else if (kind === 'warlord') { puff(t.x, t.y, [200, 195, 185], 20, 1.4); Sound.play('armor'); Sound.play('dissolve'); }
+  else if (kind === 'taowu') { puff(t.x, t.y, [90, 40, 120], 30, 1.4); Sound.play('roar', 0.5); Sound.play('dissolve'); }
   else { puff(t.x, t.y, [10, 6, 16], 18, targetH(t)); Sound.play('dissolve'); }
   if (kind === 'blob' && t.target) t.target.eaten = 0;
   if (kind === 'crawler') { G.ev.tvOn = false; G.ev.tvT = 0; }
@@ -619,6 +627,7 @@ function defeatMonster(t) {
     blob: '⚫ 黑球被打散了！', stick: '✏️ 火柴人被燒掉了！', balloon: '🎈 氣球破了！小丑找不到你了。', flower: '🌼 眼球花枯萎了。',
     woman: '😢 血淚女消散了！', momo: '🐦 鳥腳女被打跑了！', crawler: '📺 爬行女被打倒了，電視也關掉了！', clown: '🤡 小丑被打倒了！', tall: '👁️ 你打倒了「它」！',
     sunflower: '🌻 向日葵眼枯萎了。', shroom: '🍄 千眼菇被打爛了！', grass: '🌿 草叢人被打倒了！', snail: '🐌 大嘴觸角蟲被打倒了！', girl: '👧 眼花女孩消散了！',
+    kronos: '🍄 蕈裂衣的蘑菇傘碎了！掉了 2 塊木炭。', tyrant: '🪨 熔岩暴君碎成了一堆石頭！', warlord: '⚔️ 墮落戰神倒下了，斗篷散落一地。', taowu: '👁️ 你打倒了檮杌・九瞳！',
   }[kind];
   if (msg && (BOSSES.includes(kind) || !G.ev['kill_' + kind])) { G.ev['kill_' + kind] = 1; toast(`${msg}（Lv.${t.lv}）`, 'good'); }
 }
@@ -640,6 +649,11 @@ function spawnEnemy(kind, at) {
   if (kind === 'grass') Object.assign(e, { state: 'hidden', hidden: true, cd: 3, rise: 0, rustleT: 1, upT: 0, escape: 0, shine: 0, grabT: 0, lungeX: 0, lungeY: 0 });
   if (kind === 'snail') Object.assign(e, { retract: 0, retractCd: 0, chew: 0, trailT: 0 });
   if (kind === 'girl') Object.assign(e, { state: 'wander', blind: 0, blindCd: 0, plantT: rand(8, 14), humT: 2, seen: false, lost: 0 });
+  // 第三世界的新怪物（js/world3.js）
+  if (kind === 'kronos') Object.assign(e, { cd: 2, retreat: 0, thrust: 0, hits: 0, limpT: 0, cackleT: 2, face: 0 });
+  if (kind === 'tyrant') Object.assign(e, { cd: 0, cooled: 0, stomp: 0, walked: 0, lavaT: 0.5, hum: 0, face: 0 });
+  if (kind === 'warlord') Object.assign(e, { cd: 0, swing: 0, state: 'patrol', waitT: 0, stepT: 0, dragT: 1, face: Math.PI });
+  if (kind === 'taowu') Object.assign(e, { cd: 0, roarT: 4, roar: 0, pounce: 0, pounceA: 0, blind: 0, eyes: Array.from({ length: TAOWU_EYES }, () => ({ shut: false })), eyeProg: 0, reopenT: 3, lit: false, wanderT: 0, wa: 0, stepT: 0, face: 0 });
   G.enemies.push(e);
   return e;
 }
@@ -1249,6 +1263,7 @@ const SPECIAL_AI = {
   woman: (e, dt) => updateWoman(e, dt), blob: (e, dt) => updateBlob(e, dt), stick: updateStick,
   momo: updateMomo, crawler: updateCrawler, balloon: updateBalloon, clown: updateClown,
   grass: updateGrass, snail: updateSnail, girl: updateGirl,   // 第二世界（js/world2.js）
+  kronos: updateKronos, tyrant: updateTyrant, warlord: updateWarlord, taowu: updateTaowu,   // 第三世界（js/world3.js）
 };
 
 // ====================================================================
@@ -1628,21 +1643,28 @@ function thumbClown(c, S) {
 const BESTIARY = [
   { name: '黑影', night: 1, kind: 'shadow', draw: thumbShadow('#ff3344'), desc: '到處追你，燈光也擋不住牠。手電筒照著牠會一直扣血，平底鍋一敲就散掉。' },
   { name: '火柴人', night: INTRO.stick, kind: 'stick', draw: thumbStick, desc: '會穿牆，一邊吹口哨一邊朝你揮手走過來，走得很慢。紙做的身體被手電筒照到就會燒起來。' },
-  { name: '衣櫃怪', night: 2, kind: 'fast', draw: thumbShadow('#ffd23a', true), w1only: true, desc: '衣櫃晃動時沒去按住 E 壓住門，就會衝出來，速度很快。' },
+  { name: '衣櫃怪', night: 2, kind: 'fast', draw: thumbShadow('#ffd23a', true), in: [1, 3], desc: '衣櫃晃動時沒去按住 E 壓住門，就會衝出來，速度很快。' },
   { name: '黑球', night: INTRO.blob, kind: 'blob', draw: thumbBlob, desc: '不追你，專門去吃燈，每吃一次燈泡降一級，特殊燈泡會直接被吃掉。用手電筒照牠、用彈弓打牠。' },
   { name: '眼球花', night: INTRO.flower, flower: 'eye', draw: thumbFlower, desc: '長在屋子裡、白天也不會消失。被它盯 3 秒它就會尖叫，把黑影叫過來。用手電筒照它、用平底鍋打它，或走過去按住 E 拔掉。' },
   { name: '血淚女', night: INTRO.woman, kind: 'woman', draw: drawWomanFace, desc: '你看著她，她就不會動；但一直盯著她，理智會快速下降。看著她走過去，用平底鍋或聖水槍打她！' },
   { name: '小丑', night: INTRO.clown, kind: 'clown', draw: thumbClown, desc: '先會飄來一顆紅氣球，用手電筒照破或用武器打破它。讓氣球碰到你，小丑就會拿著刀出現在你背後！撒鹽巴可以把他推開。' },
-  { name: '爬行女', night: INTRO.tv, kind: 'crawler', draw: drawCrawlerFace, w1only: true, desc: '客廳的電視自己打開後，不快點關掉，她就會從螢幕裡爬出來。關掉電視或把她打倒都可以。' },
+  { name: '爬行女', night: INTRO.tv, kind: 'crawler', draw: drawCrawlerFace, in: [1], desc: '客廳的電視自己打開後，不快點關掉，她就會從螢幕裡爬出來。關掉電視或把她打倒都可以。' },
   { name: '鳥腳女', night: INTRO.momo, kind: 'momo', draw: drawMomoFace, desc: '眼睛不好，靠聲音找你，一跳一跳地追過來。別奔跑，輕輕推搖桿慢慢走。鞭炮很吵會把她引過去！手電筒照到她的眼鏡會讓她暫時看不見。' },
   { name: '它', night: INTRO.tall, kind: 'tall', draw: thumbTall, desc: '高大又非常耐打，手電筒和武器對它只有一半效果。靠聖水槍、鞭炮、天使和火球一起對付它。' },
   // 第二世界：夢核花園
-  { world: 2, name: '向日葵眼', night: INTRO2.sunflower, flower: 'sunflower', draw: thumbSunflower, desc: '長在地上不會動，會轉向最亮的光。你開著手電筒被它看到，它就會盯著你、往你腳邊吐種子。關掉手電筒走過去打它或按住 E 拔掉；種子吐過來時跳起來就打不到。' },
-  { world: 2, name: '千眼菇', night: INTRO2.shroom, flower: 'shroom', draw: thumbShroom, desc: '長滿眼睛的大蘑菇，不會動，四面八方都看得到。靠近它會撒孢子，理智掉很快、畫面變得暈暈的。用手電筒照它，眼睛就會閉起來。每天早上旁邊會再長出一朵小的，要趕快打掉！' },
-  { world: 2, name: '草叢人', night: INTRO2.grass, kind: 'grass', draw: thumbGrass, desc: '躲在草裡移動，只看得到一叢草在晃。靠近時會突然撲出來抓你的腳：撲過來的瞬間跳起來就抓不到；被抓住就連按「跳」5 下掙脫。用手電筒照晃動的草叢可以把牠逼出來。' },
-  { world: 2, name: '大嘴觸角蟲', night: INTRO2.snail, kind: 'snail', draw: thumbSnail, desc: '爬得很慢但非常耐打，爬過的地方留下黏液，踩到會變慢（跳過去就沒事）。用手電筒照牠，觸角會縮回去、停 2 秒；🧂鹽巴對牠的傷害是 3 倍！' },
-  { world: 2, name: '眼花女孩', night: INTRO2.girl, kind: 'girl', draw: thumbGirl, desc: '第二世界的大魔王。靠樹枝上的兩顆眼球花看東西，被盯著會「眼花」，畫面晃、走路歪。她還會種下眼睛種子，長大就變成向日葵眼（還沒長大前可以踩掉）。手電筒照她會變瞎子，聖水槍特別有效。' },
+  { world: 2, in: [2], name: '向日葵眼', night: INTRO2.sunflower, flower: 'sunflower', draw: thumbSunflower, desc: '長在地上不會動，會轉向最亮的光。你開著手電筒被它看到，它就會盯著你、往你腳邊吐種子。關掉手電筒走過去打它或按住 E 拔掉；種子吐過來時跳起來就打不到。' },
+  { world: 2, in: [2], name: '千眼菇', night: INTRO2.shroom, flower: 'shroom', draw: thumbShroom, desc: '長滿眼睛的大蘑菇，不會動，四面八方都看得到。靠近它會撒孢子，理智掉很快、畫面變得暈暈的。用手電筒照它，眼睛就會閉起來。每天早上旁邊會再長出一朵小的，要趕快打掉！' },
+  { world: 2, in: [2], name: '草叢人', night: INTRO2.grass, kind: 'grass', draw: thumbGrass, desc: '躲在草裡移動，只看得到一叢草在晃。靠近時會突然撲出來抓你的腳：撲過來的瞬間跳起來就抓不到；被抓住就連按「跳」5 下掙脫。用手電筒照晃動的草叢可以把牠逼出來。' },
+  { world: 2, in: [2, 3], name: '大嘴觸角蟲', night: INTRO2.snail, kind: 'snail', draw: thumbSnail, desc: '爬得很慢但非常耐打，爬過的地方留下黏液，踩到會變慢（跳過去就沒事）。用手電筒照牠，觸角會縮回去、停 2 秒；🧂鹽巴對牠的傷害是 3 倍！' },
+  { world: 2, in: [2, 3], name: '眼花女孩', night: INTRO2.girl, kind: 'girl', draw: thumbGirl, desc: '第二世界的大魔王。靠樹枝上的兩顆眼球花看東西，被盯著會「眼花」，畫面晃、走路歪。她還會種下眼睛種子，長大就變成向日葵眼（還沒長大前可以踩掉）。手電筒照她會變瞎子，聖水槍特別有效。' },
+  // 第三世界：末班列車（鬼將級 ＜ 羅判級 ＜ 判官級）
+  { world: 3, in: [3], name: '克蘿諾斯・蕈裂衣', grade: '鬼將級', night: INTRO3.kronos, kind: 'kronos', draw: thumbKronos, desc: '戴著裂開蘑菇傘的駝背矮人，在包廂和走道裡一跛一跛地遊蕩，離你 2.5 格就用骨矛刺你。被刺中夜晚的時鐘會倒退 10 秒，被刺 3 次以上牠會噴孢子讓你變慢。牠怕光：手電筒照蘑菇傘牠會冒煙往後退；有燒的火爐牠不敢靠近，機車室是安全的。鹽巴和平底鍋都有效，打倒會掉 2 塊木炭。' },
+  { world: 3, in: [3], name: '熔岩暴君', grade: '羅判級', night: INTRO3.tyrant, kind: 'tyrant', draw: thumbTyrant, desc: '2.6 公尺的岩石巨人，縫隙透出熔岩光。走得慢但非常耐打，每走 5 步跺一次腳，2 格內會被震倒（跳起來就不會）；走過的地毯會燒出熔岩，踩到會扣血，15 秒後才冷卻。手電筒對岩石沒用：用聖水槍噴牠會「嘶——」地冷卻，3 秒內不會動，這時用平底鍋敲會碎掉一塊（大傷害）；鞭炮也有效。寒寂之境時牠身邊 3 格很溫暖，但靠近就會被打。' },
+  { world: 3, in: [3], name: '墮落戰神', grade: '羅判級', night: INTRO3.warlord, kind: 'warlord', draw: thumbWarlord, desc: '披著破斗篷、骷髏臉的高大戰士，拖著一把比人還長的大劍。牠只在走道裡走，看到你就衝過來，2 格內橫掃一劍把你打飛撞牆。牠不進包廂：躲進包廂、對著門按 E 關上就安全（牠會在門外等 10 秒再走）。正面有盔甲，傷害只有一半；從背後打傷害 3 倍。鞭炮會讓牠停下來。看到牠把劍舉高就趕快退開。' },
+  { world: 3, in: [3], name: '檮杌・九瞳', grade: '判官級', night: INTRO3.taowu, kind: 'taowu', draw: thumbTaowu, desc: '第三世界的大魔王，最後一夜一定會來。四腳的紫黑色巨獸，臉上聚著九顆眼睛，看得到一切，永遠知道你在哪裡，會撞壞關上的門，靠近時撲過來咬，每 15 秒咆哮一次讓理智大掉。用手電筒照牠的臉，被照到的眼睛會一顆一顆閉上（巨光手電筒最快）；九顆都閉上牠就瞎了 10 秒，亂撞、所有傷害 3 倍。聖水槍、鞭炮、火球、天使全部有效。' },
 ];
+// 這隻怪物會在哪些世界出現（圖鑑分頁用）
+const monsterWorlds = m => m.in || [1, 2, 3];
 let bookBuilt = false, bookFrom = 'title', bookWorld = 1;
 function openBook(from) {
   bookFrom = from;
@@ -1658,7 +1680,7 @@ function showBookPage(w) {
   list.innerHTML = '';
   const live = !!(window.Renderer && Renderer.book && Renderer.book.ok()), items = [];
   for (const m of BESTIARY) {
-    if ((m.world || 1) === 2 ? w !== 2 : (w === 2 && m.w1only)) continue;
+    if (!monsterWorlds(m).includes(w)) continue;
     const card = document.createElement('div');
     card.className = 'card';
     let pic;
@@ -1672,15 +1694,17 @@ function showBookPage(w) {
       m.draw(pic.getContext('2d'), 176);
     }
     const info = document.createElement('div');
-    const when = m.world === 2 ? `第 ${m.night} 夜起` : w === 2 ? '第 1 夜起' : `第 ${m.night} 夜起`;
-    info.innerHTML = `<h4>${m.name}<span class="night">${when}</span></h4><p>${m.desc}</p>`;
+    const when = (m.world || 1) === w ? `第 ${m.night} 夜起` : '第 1 夜起';
+    info.innerHTML = `<h4>${m.name}${m.grade ? `<span class="night grade">${m.grade}</span>` : ''}<span class="night">${when}</span></h4><p>${m.desc}</p>`;
     card.append(pic, info);
     list.appendChild(card);
   }
   if (live) Renderer.book.show(items);
-  $('bookNote').textContent = w === 2
-    ? '第二世界的怪物等級比較高。第一世界的怪物也都會來（爬行女和衣櫃怪除外），而且第 1 夜就可能出現。'
-    : '所有怪物都有等級（Lv）和血量，夜晚越後面等級越高、越耐打。';
+  $('bookNote').textContent = w === 3
+    ? '第三世界的怪物最強，新怪物分成鬼將級、羅判級、判官級（最後一夜的大魔王）。第一世界的怪物（爬行女除外）和第二世界的大嘴觸角蟲、眼花女孩也都會來，第 1 夜就可能出現。'
+    : w === 2
+      ? '第二世界的怪物等級比較高。第一世界的怪物也都會來（爬行女和衣櫃怪除外），而且第 1 夜就可能出現。'
+      : '所有怪物都有等級（Lv）和血量，夜晚越後面等級越高、越耐打。';
 }
 
 // ====================================================================
@@ -1722,7 +1746,7 @@ function angelHome(o) { const b = bulbPos(o); return { x: b.x, y: b.y, h: b.h - 
 const targetAlive = t => !t.dead && (t.kind ? G.enemies.includes(t) : G.flowers.includes(t));
 function targetH(t) {
   if (!t.kind) return t.ptype === 'shroom' ? 1.45 : t.ptype === 'sunflower' ? 1.38 : 1.28;
-  return { tall: 2.2, blob: t.h || 0.4, balloon: 1.75, crawler: 0.5, snail: 0.6, grass: t.hidden ? 0.3 : 1.45, girl: 1.35 }[t.kind] || 1.3;
+  return { tall: 2.2, blob: t.h || 0.4, balloon: 1.75, crawler: 0.5, snail: 0.6, grass: t.hidden ? 0.3 : 1.45, girl: 1.35, kronos: 1.0, tyrant: 1.6, warlord: 1.5, taowu: 1.3 }[t.kind] || 1.3;
 }
 // 找範圍內最近、而且看得到的怪物（天使和火球共用）
 function findTarget(x, y, range, skip) {
@@ -1784,7 +1808,7 @@ function angelSmite(t, a) {
     G.fx.push({ type: 'spark', x: t.x, y: t.y, h, vx: Math.cos(r) * s, vy: Math.sin(r) * s, vh: rand(-0.5, 1.5), life: rand(0.4, 0.9), max: 0.9, color: [255, 225, 140] });
   }
   Sound.play('smite');
-  hurtMonster(t, ANGEL_DMG);
+  hurtMonster(t, ANGEL_DMG, 'angel');
   // 大怪物沒被打倒的話會被撞開
   if (!t.dead && t.kind && BOSSES.includes(t.kind)) {
     const r = Math.atan2(t.y - a.y, t.x - a.x);
@@ -1820,7 +1844,7 @@ function updateFireballs(dt) {
     const dx = t.x - f.x, dy = t.y - f.y, dh = targetH(t) - f.h, d = Math.hypot(dx, dy, dh);
     if (d < 0.35) {
       f.dead = true;
-      hurtMonster(t, FIRE_DMG);
+      hurtMonster(t, FIRE_DMG, 'fire');
       Sound.play('fireHit', nearVol(Math.hypot(f.x - G.p.x, f.y - G.p.y)));
       for (let i = 0; i < 14; i++) {
         const r = Math.random() * Math.PI * 2, s = rand(0.5, 2.2);
@@ -1862,8 +1886,8 @@ function handPos(fwd = 0.35, side = 0.15) {
   return { x: p.x + c * fwd + s * side, y: p.y + s * fwd - c * side };
 }
 // 打中怪物：扣血、敲暈、推開
-function whack(t, dmg, stun, kb, fx, fy) {
-  hurtMonster(t, dmg);
+function whack(t, dmg, stun, kb, fx, fy, src = 'pan') {
+  hurtMonster(t, dmg, src);
   const h = targetH(t);
   for (let i = 0; i < 8; i++) G.fx.push({ type: 'spark', x: t.x + rand(-0.15, 0.15), y: t.y + rand(-0.15, 0.15), h: h + rand(-0.3, 0.3), vx: rand(-1.5, 1.5), vy: rand(-1.5, 1.5), vh: rand(-0.5, 1.5), life: rand(0.25, 0.5), max: 0.5, color: [255, 245, 200] });
   if (t.dead || !t.kind) return;
@@ -1936,7 +1960,7 @@ function useWeapon(id) {
         if (!hittable(t)) continue;
         const d = Math.hypot(t.x - p.x, t.y - p.y);
         if (d > SALT_R || !seeLine(p.x, p.y, t, d)) continue;
-        whack(t, SALT_DMG * (t.kind === 'snail' ? 3 : 1), 1, 1.8, p.x, p.y); // 大嘴觸角蟲最怕鹽巴
+        whack(t, SALT_DMG * (t.kind === 'snail' ? 3 : 1), 1, 1.8, p.x, p.y, 'salt'); // 大嘴觸角蟲最怕鹽巴
         if (t.kind === 'snail' && !G.ev.saltTip) { G.ev.saltTip = 1; toast('🧂 大嘴觸角蟲最怕鹽巴了，傷害 3 倍！', 'good'); }
         hit++;
       }
@@ -1976,7 +2000,7 @@ function explode(x, y) {
     if (!hittable(t)) continue;
     const d = Math.hypot(t.x - x, t.y - y);
     if (d > BOMB_R || !seeLine(x, y, t, d)) continue;
-    whack(t, BOMB_DMG * (1 - d / BOMB_R * 0.4), 1.2, 1.5, x, y);
+    whack(t, BOMB_DMG * (1 - d / BOMB_R * 0.4), t.kind === 'warlord' ? 2 : 1.2, 1.5, x, y, 'bomb');   // 鞭炮會讓墮落戰神停 2 秒
   }
 }
 function updateWeapons(dt) {
@@ -1990,7 +2014,7 @@ function updateWeapons(dt) {
       if (!hittable(t)) continue;
       const d = Math.hypot(t.x - p.x, t.y - p.y);
       if (d > SPRAY_RANGE || (d > 0.6 && lookAngle(t.x, t.y) > SPRAY_ARC) || !seeLine(p.x, p.y, t, d)) continue;
-      hurtMonster(t, SPRAY_DPS * (BOSSES.includes(t.kind) ? 1.5 : 1) * dt);
+      hurtMonster(t, SPRAY_DPS * (BOSSES.includes(t.kind) ? 1.5 : 1) * dt, 'spray');
       if (Math.random() < dt * 20) G.fx.push({ type: 'spark', x: t.x + rand(-0.2, 0.2), y: t.y + rand(-0.2, 0.2), h: targetH(t) + rand(-0.3, 0.3), vx: rand(-0.5, 0.5), vy: rand(-0.5, 0.5), vh: rand(0, 1), life: 0.4, max: 0.4, color: [170, 220, 255] });
     }
     const hp = handPos(0.4, 0.13);
@@ -2021,7 +2045,7 @@ function updateWeapons(dt) {
         if (!hittable(m)) continue;
         const r = 0.4 + (m.kind === 'blob' ? 0.4 * (m.size || 1) : 0);
         if (Math.hypot(m.x - sh.x, m.y - sh.y) > r || Math.abs(targetH(m) - sh.h) > 0.95) continue;
-        whack(m, SHOT_DMG, 0.4, 0.3, sh.x - sh.vx, sh.y - sh.vy);
+        whack(m, SHOT_DMG, 0.4, 0.3, sh.x - sh.vx, sh.y - sh.vy, 'shot');
         Sound.play('tick', nearVol(Math.hypot(sh.x - p.x, sh.y - p.y)));
         sh.dead = true;
         break;
@@ -2487,6 +2511,8 @@ function triggerEvent(type) {
     }
     case 'awaken': awakenGarden(); break;
     case 'tender': tenderRaid(); break;   // 第三世界：煤水車被撬開
+    case 'kronos': case 'tyrant': case 'warlord': case 'taowu': spawnW3Monster(type); break;
+    case 'paxturn': passengerTurn(); break;
     case 'woman': {
       if (G.enemies.some(e => e.kind === 'woman') || bossFull() || !spawnEnemy('woman')) break;
       Sound.play('sob', 0.5);
@@ -2997,6 +3023,7 @@ function update(dt) {
   updateEvents(dt);
   updateFlowers(dt);
   updateWorld2(dt);
+  if (isW3()) updateLava(dt);
   updateAngels(dt);
   updateFireLamps(dt);
   updateFireballs(dt);
@@ -3795,6 +3822,8 @@ function musicIntensity() {
   if (G.flowers.some(f => f.ptype === 'sunflower' && f.lock >= SUN_LOCK)) i += 0.15;
   if (G.enemies.some(e => e.kind === 'girl' && e.seen)) i += 0.25;
   if (G.enemies.some(e => e.kind === 'snail')) i += 0.1;
+  if (G.enemies.some(e => e.kind === 'tyrant' || e.kind === 'warlord' || e.kind === 'taowu')) i += 0.3;
+  if (G.enemies.some(e => e.kind === 'taowu' && e.blind <= 0 && Math.hypot(e.x - p.x, e.y - p.y) < 8)) i += 0.2;
   if (p.grabbed) i += 0.3;
   i += (1 - p.san / 100) * 0.3;
   return clamp(i, 0, 1);

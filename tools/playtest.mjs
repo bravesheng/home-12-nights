@@ -386,6 +386,45 @@ await scenario('monsters2', '第二世界怪物模型（草叢人、大嘴觸角
   await shot('2-flashlight');
 });
 
+await scenario('monsters3', '第三世界怪物模型（克蘿諾斯・蕈裂衣、熔岩暴君、墮落戰神、檮杌・九瞳排成一排，旁邊站著大白燈的大白；手電筒開關各拍一張）', {}, async ({ page, shot, check }) => {
+  await page.goto(BASE + '?world=3&night=6&kit=1', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play');
+  await skipToDusk(page);
+  await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
+  // 在交誼車廂排一排（pose：不追、不咬人，只做待機的動作）；落地燈裝上大白燈
+  const n = await page.evaluate(() => {
+    G.enemies = []; G.ev.schedule = [];
+    Object.assign(G.p, { x: 19.5, y: 23.4, face: -Math.PI / 2, pitch: -0.06, inv: 999 });
+    const put = (kind, x, y, extra) => Object.assign(spawnEnemy(kind, { x, y }), { spawn: 0, pose: true, face: Math.PI / 2 }, extra);
+    put('kronos', 16.4, 19.6, { thrust: 0.3 });
+    put('tyrant', 18.3, 18.6);
+    put('warlord', 20.6, 18.8);
+    put('taowu', 22.6, 19.6);
+    G.p.x = 15.0; G.p.y = 22.6; G.selId = 'lamp_floor'; useSelected(); installBulb(G.lamps[0], BAYMAX_TIER);
+    Object.assign(G.p, { x: 19.5, y: 23.6, face: -Math.PI / 2 });
+    return G.enemies.length + G.lamps.filter(l => l.bulb === BAYMAX_TIER).length;
+  });
+  check(n === 5, `要放好 4 隻怪物和大白（現在 ${n}）`);
+  await page.evaluate(() => { document.getElementById('hud').style.opacity = '0'; });
+  await sleep(1500);
+  const alive = await page.evaluate(() => G.enemies.map(e => e.kind));
+  check(alive.length === 4, `擺姿勢的怪物不能自己消失（剩 ${alive.join(',')}）`);
+  await shot('1-lamp');
+  await page.keyboard.press('f');
+  await sleep(1500);
+  check((await state(page)).flash === true, '按 F 要打開手電筒');
+  await shot('2-flashlight');
+  // 檮杌的眼睛：手電筒照著牠，眼睛要一顆一顆閉上
+  const eyes = await page.evaluate(() => {
+    const e = G.enemies.find(e => e.kind === 'taowu');
+    Object.assign(G.p, { x: e.x, y: e.y + 2.2, face: -Math.PI / 2, flash: true, bat: 100 });
+    e.eyeProg = 0;   // 牠擺著姿勢不動（pose），眼睛的判定照常
+    for (let i = 0; i < 40; i++) updateTaowu(e, 0.05);
+    return { shut: e.eyes.filter(x => x.shut).length, lit: e.lit };
+  });
+  check(eyes.shut >= 1, `手電筒照著檮杌，眼睛要閉上（閉了 ${eyes.shut} 顆）`);
+});
+
 await scenario('tablet', '平板觸控（Android 平板尺寸，用點的開新遊戲）', { isMobile: true, hasTouch: true }, async ({ page, shot, check }) => {
   await startFromMenu(page, 1, 'normal', true);
   const s = await state(page);

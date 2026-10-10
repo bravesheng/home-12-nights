@@ -2135,7 +2135,8 @@ function buildGirl(r, g) {
   }
   r.mats.push(top, skirt, skin, blood, branch, petal, eye, white, sock, shoe, hemM, scalp, faceMat, hairM);
 }
-const NEW_BUILD = { stick: buildStick, momo: buildMomo, crawler: buildCrawler, balloon: buildBalloon, clown: buildClown, grass: buildGrass, snail: buildSnail, girl: buildGirl };
+const NEW_BUILD = { stick: buildStick, momo: buildMomo, crawler: buildCrawler, balloon: buildBalloon, clown: buildClown, grass: buildGrass, snail: buildSnail, girl: buildGirl,
+  kronos: buildKronos, tyrant: buildTyrant, warlord: buildWarlord, taowu: buildTaowu };
 
 function syncNewMonster(e, r, t, p = G.p) {
   const d = Math.hypot(e.x - p.x, e.y - p.y);
@@ -2228,6 +2229,7 @@ function syncNewMonster(e, r, t, p = G.p) {
       r.g.position.y = 0;
       break;
     }
+    case 'kronos': case 'tyrant': case 'warlord': case 'taowu': syncMonster3(e, r, t, p, d, dt); break;
     case 'girl': {
       // 被手電筒照到時，樹枝上的眼球花會閉起來
       const shut = e.blind > 0 ? 0.15 : 1;
@@ -2625,6 +2627,287 @@ function addSlimePuddle(g, o) {
   g.add(m);
 }
 
+// ====================================================================
+// 第三世界的 4 隻新怪物（照紙本設計圖做成寫實風，貼圖 512、全部打開自己的明暗）：
+// 克蘿諾斯・蕈裂衣、熔岩暴君、墮落戰神、檮杌・九瞳；熔岩暴君走過留下的熔岩
+// ====================================================================
+let kronosSkinTex, kronosCapTex, kronosFaceTex, rockTex, lavaCrackTex, tyrantFaceTex, cloakTex, bandageTex, skullTex, taowuFurTex, taowuStrandTex, taowuEyeTex;
+function makeMonster3Textures() {
+  const faceT = draw => { const t = canvasTex(512, 512, c => draw(c, 512)); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; return t; };
+  kronosFaceTex = faceT((c, S) => drawKronosFace(c, S, true));
+  tyrantFaceTex = faceT(drawTyrantFace);
+  skullTex = faceT(drawSkullFace);
+  // 蕈裂衣：灰綠色乾裂的屍皮
+  kronosSkinTex = canvasTex(256, 256, (c, w, h) => {
+    c.fillStyle = '#5f6e4e'; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 300; i++) { c.fillStyle = `rgba(${90 + rnd() * 60 | 0},${110 + rnd() * 50 | 0},${70 + rnd() * 30 | 0},.35)`; c.fillRect(rnd() * w, rnd() * h, 2 + rnd() * 4, 2 + rnd() * 4); }
+    c.strokeStyle = 'rgba(25,30,20,.7)'; c.lineWidth = 1.5;
+    for (let i = 0; i < 60; i++) { let x = rnd() * w, y = rnd() * h; c.beginPath(); c.moveTo(x, y); for (let k = 0; k < 4; k++) { x += (rnd() - 0.5) * 30; y += (rnd() - 0.5) * 30; c.lineTo(x, y); } c.stroke(); }
+    for (let i = 0; i < 30; i++) { c.fillStyle = `rgba(40,30,30,${0.15 + rnd() * 0.3})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 3 + rnd() * 10, 2 + rnd() * 6, rnd() * 3, 0, 7); c.fill(); }
+  });
+  // 蘑菇傘（半球貼圖）：紫藍色、白斑、從頂上裂開的縫透出紫光
+  kronosCapTex = canvasTex(512, 256, (c, w, h) => {
+    const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#5a3a8c'); g.addColorStop(0.6, '#3e2868'); g.addColorStop(1, '#6a5aa0');
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 40; i++) { const x = rnd() * w, y = rnd() * h * 0.8, rr = 6 + rnd() * 16; c.fillStyle = 'rgba(40,20,70,.5)'; c.beginPath(); c.ellipse(x + 2, y + 3, rr * 1.2, rr * 0.8, 0, 0, 7); c.fill(); c.fillStyle = `rgba(${225 + rnd() * 25 | 0},${220 + rnd() * 25 | 0},${235 + rnd() * 20 | 0},.9)`; c.beginPath(); c.ellipse(x, y, rr * 1.2, rr * 0.8, 0, 0, 7); c.fill(); }
+    c.lineCap = 'round';
+    for (let i = 0; i < 5; i++) { const x0 = i / 5 * w + rnd() * 60; c.strokeStyle = 'rgba(200,150,255,.45)'; c.lineWidth = 12; c.beginPath(); c.moveTo(x0, 0); c.lineTo(x0 + (rnd() - 0.5) * 40, 60); c.lineTo(x0 + (rnd() - 0.5) * 60, 150); c.lineTo(x0 + (rnd() - 0.5) * 50, 230); c.stroke(); c.strokeStyle = '#e8c8ff'; c.lineWidth = 4; c.stroke(); }
+    for (let i = 0; i < 30; i++) { c.fillStyle = `rgba(20,10,30,${0.1 + rnd() * 0.25})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 6 + rnd() * 20, 3 + rnd() * 10, rnd() * 3, 0, 7); c.fill(); }
+  });
+  // 熔岩暴君：黑色岩塊（diffuse）和縫隙裡的熔岩光（emissiveMap，亮度會呼吸）
+  const cracks = [];
+  for (let i = 0; i < 26; i++) { let x = rnd() * 512, y = rnd() * 512; const pts = [[x, y]]; for (let k = 0; k < 6; k++) { x += (rnd() - 0.5) * 90; y += (rnd() - 0.5) * 90; pts.push([x, y]); } cracks.push(pts); }
+  const strokeCracks = (c, col, lw) => { c.strokeStyle = col; c.lineWidth = lw; c.lineCap = 'round'; for (const pts of cracks) { c.beginPath(); pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.stroke(); } };
+  rockTex = canvasTex(512, 512, (c, w, h) => {
+    c.fillStyle = '#17150f'; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 160; i++) { const x = rnd() * w, y = rnd() * h, bw = 20 + rnd() * 60, bh = 16 + rnd() * 50; c.fillStyle = `rgb(${22 + rnd() * 26 | 0},${20 + rnd() * 20 | 0},${18 + rnd() * 16 | 0})`; c.beginPath(); c.moveTo(x, y); c.lineTo(x + bw, y + (rnd() - 0.5) * 12); c.lineTo(x + bw + (rnd() - 0.5) * 12, y + bh); c.lineTo(x + (rnd() - 0.5) * 12, y + bh); c.closePath(); c.fill(); c.strokeStyle = 'rgba(80,70,60,.35)'; c.lineWidth = 1; c.stroke(); }
+    strokeCracks(c, '#000', 6);
+  });
+  lavaCrackTex = canvasTex(512, 512, (c, w, h) => { c.fillStyle = '#000'; c.fillRect(0, 0, w, h); strokeCracks(c, 'rgba(255,80,10,.5)', 12); strokeCracks(c, '#ff6a10', 5); strokeCracks(c, '#ffd060', 2); });
+  // 墮落戰神的斗篷（一片一片的布，用頭髮的做法）：泛黃的白布、鏽褐色的污漬、下擺破破爛爛；腳上的髒布條
+  cloakTex = canvasTex(64, 256, (c, w, h) => {
+    c.fillStyle = '#ddd6c6'; c.fillRect(6, 0, w - 12, h);
+    for (let i = 0; i < 14; i++) { c.fillStyle = `rgba(110,60,30,${0.15 + rnd() * 0.35})`; c.beginPath(); c.ellipse(rnd() * w, 60 + rnd() * 180, 4 + rnd() * 10, 8 + rnd() * 30, 0, 0, 7); c.fill(); }
+    for (let i = 0; i < 20; i++) { c.fillStyle = `rgba(60,55,50,${0.1 + rnd() * 0.2})`; c.fillRect(6 + rnd() * (w - 12), rnd() * h, 2, 10 + rnd() * 40); }
+    c.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < 6; i++) { c.beginPath(); c.moveTo(i * 12, h); c.lineTo(i * 12 + 6, h - 20 - rnd() * 40); c.lineTo(i * 12 + 12, h); c.fill(); }
+    for (let i = 0; i < 4; i++) { c.beginPath(); c.arc(10 + rnd() * 44, 100 + rnd() * 120, 2 + rnd() * 4, 0, 7); c.fill(); }
+    c.globalCompositeOperation = 'source-over';
+  });
+  cloakTex.wrapS = cloakTex.wrapT = THREE.ClampToEdgeWrapping;
+  bandageTex = canvasTex(64, 64, (c, w, h) => {
+    c.fillStyle = '#9a8a6a'; c.fillRect(0, 0, w, h);
+    for (let y = -8; y < h + 8; y += 11) { c.fillStyle = shade('#b8a680', (rnd() - 0.5) * 30); c.save(); c.translate(0, y); c.rotate(-0.25); c.fillRect(-10, 0, w + 20, 8); c.restore(); }
+    for (let i = 0; i < 12; i++) { c.fillStyle = `rgba(80,40,20,${0.2 + rnd() * 0.3})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 3 + rnd() * 6, 2 + rnd() * 4, 0, 0, 7); c.fill(); }
+  });
+  // 檮杌：紫黑色的粗毛、鬃毛（一束一束）、紫色瞳孔的眼睛
+  taowuFurTex = canvasTex(256, 256, (c, w, h) => {
+    c.fillStyle = '#9c8ab0'; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 1200; i++) { const x = rnd() * w, y = rnd() * h, g = rnd(); c.strokeStyle = `rgba(${40 + g * 80 | 0},${20 + g * 40 | 0},${70 + g * 100 | 0},.5)`; c.lineWidth = 1 + rnd(); c.beginPath(); c.moveTo(x, y); c.lineTo(x + (rnd() - 0.5) * 4, y + 6 + rnd() * 10); c.stroke(); }
+  });
+  taowuStrandTex = canvasTex(64, 256, (c, w, h) => {
+    for (let i = 0; i < 120; i++) { const x = 32 + (rnd() + rnd() + rnd() - 1.5) * 38, end = 150 + rnd() * 100, g = rnd(); c.strokeStyle = `rgba(${50 + g * 60 | 0},${20 + g * 30 | 0},${80 + g * 90 | 0},${0.7 + rnd() * 0.3})`; c.lineWidth = 1.5 + rnd() * 2.5; c.beginPath(); c.moveTo(x, 0); c.quadraticCurveTo(x + (rnd() - 0.5) * 10, end * 0.5, x + (rnd() - 0.5) * 14, end); c.stroke(); }
+  }, true);
+  taowuStrandTex.wrapS = taowuStrandTex.wrapT = THREE.ClampToEdgeWrapping;
+  taowuEyeTex = canvasTex(256, 128, (c) => {
+    paintEyeball(c, 256, 128);
+    c.fillStyle = '#5a2a8c'; c.beginPath(); c.arc(64, 64, 22, 0, 7); c.fill();
+    c.strokeStyle = 'rgba(20,5,30,.7)'; c.lineWidth = 2; c.beginPath(); c.arc(64, 64, 21, 0, 7); c.stroke();
+    c.fillStyle = '#080410'; c.beginPath(); c.arc(64, 64, 10, 0, 7); c.fill();
+    c.fillStyle = 'rgba(255,255,255,.85)'; c.beginPath(); c.arc(57, 57, 4, 0, 7); c.fill();
+  }, true);
+}
+// 克蘿諾斯・蕈裂衣：1.5 公尺、駝背的矮人，灰綠色乾裂的屍皮，頭上一頂裂開的紫色蘑菇傘（裂縫透出紫光），
+// 肩膀和腰上長著小蘑菇，右手拿骨矛、左手拿一朵小蘑菇，身上是綠色的破布衣。走路一跛一跛
+function buildKronos(r, g) {
+  const skin = ownLM('#ffffff', { map: kronosSkinTex, shade: 0.8, transparent: true });
+  const cloth = ownLM('#3f5a2e', { shade: 0.7, transparent: true }), bone = ownLM('#d8d0b8', { shade: 0.7, transparent: true });
+  const cap = ownLM('#ffffff', { map: kronosCapTex, emissive: 0x2a1040, shade: 0.75, transparent: true });
+  const small = ownLM('#8a5aa8', { shade: 0.7, transparent: true });
+  r.body = new THREE.Group(); g.add(r.body);
+  for (const s of [-1, 1]) { taper(r.body, [s * 0.12, 0.55, 0], [s * 0.16, 0.28, 0.06], 0.06, 0.05, skin); taper(r.body, [s * 0.16, 0.28, 0.06], [s * 0.15, 0.03, -0.04], 0.05, 0.04, skin); sph(r.body, 0.07, s * 0.15, 0.03, 0.04, skin, 1.1, 0.5, 1.6, 8); }
+  r.torso = new THREE.Group(); r.torso.position.set(0, 0.55, 0); r.torso.rotation.x = 0.55; r.body.add(r.torso);
+  sph(r.torso, 0.24, 0, 0.3, -0.02, cloth, 1, 1.3, 0.8, 12);
+  sph(r.torso, 0.2, 0, 0.62, -0.12, skin, 1.2, 0.8, 1, 10);
+  for (let i = 0; i < 7; i++) { const a = i / 7 * Math.PI * 2; const strip = box(r.torso, -0.03, 0.03, -0.12, 0.1, -0.01, 0.01, cloth, false); strip.position.set(Math.cos(a) * 0.22, 0, Math.sin(a) * 0.2); strip.rotation.y = -a; }
+  r.head = new THREE.Group(); r.head.position.set(0, 0.86, 0.1); r.head.rotation.x = -0.45; r.torso.add(r.head);
+  sph(r.head, 0.17, 0, 0, -0.02, skin, 1, 1.1, 1, 12);
+  const faceMat = ownLM('#ffffff', { map: kronosFaceTex, transparent: true, alphaTest: 0.3, shade: 0.6 });
+  r.face = new THREE.Mesh(faceGeo('kronosface', 0.42, 0.13, 0.16, -0.01, 0.06), faceMat); r.face.position.set(0, -0.01, 0.13); r.head.add(r.face);
+  r.cap = new THREE.Mesh(geo('kcap', () => new THREE.SphereGeometry(0.4, 22, 12, 0, Math.PI * 2, 0, Math.PI / 2)), cap);
+  r.cap.position.set(0, 0.12, -0.02); r.cap.scale.y = 0.55; r.cap.castShadow = true; r.head.add(r.cap);
+  const under = new THREE.Mesh(geo('kunder', () => new THREE.CircleGeometry(0.4, 22)), ownLM('#5a3a7a', { map: gillTex, shade: 0.5, transparent: true })); under.rotation.x = Math.PI / 2; under.position.set(0, 0.115, -0.02); r.head.add(under);
+  r.capGlow = ownSprite(glowTex, 0xb070ff); r.capGlow.position.set(0, 0.25, 0); r.capGlow.scale.setScalar(0.5); r.head.add(r.capGlow);
+  for (const [x, y, z, s] of [[0.22, 0.75, -0.05, 1], [-0.2, 0.72, 0.02, 0.8], [0.18, 0.2, 0.18, 0.7], [-0.15, 0.15, 0.2, 0.6]]) { cyl(r.torso, 0.012 * s, 0.015 * s, 0.07 * s, x, y, z, bone, 6); sph(r.torso, 0.04 * s, x, y + 0.07 * s, z, small, 1, 0.6, 1, 8); }
+  r.armR = new THREE.Group(); r.armR.position.set(0.25, 0.5, 0.05); r.torso.add(r.armR);
+  taper(r.armR, [0, 0, 0], [0.1, -0.25, 0.2], 0.045, 0.035, skin); taper(r.armR, [0.1, -0.25, 0.2], [0.05, -0.2, 0.45], 0.035, 0.03, skin);
+  r.spear = new THREE.Group(); r.spear.position.set(0.05, -0.2, 0.45); r.armR.add(r.spear);
+  const shaft = cyl(r.spear, 0.016, 0.018, 1.7, 0, 0, 0, bone, 7); shaft.rotation.x = Math.PI / 2; shaft.position.set(0, 0, 0.3);
+  const tip = new THREE.Mesh(geo('ktip', () => new THREE.ConeGeometry(0.03, 0.22, 6)), bone); tip.rotation.x = Math.PI / 2; tip.position.set(0, 0, 1.25); r.spear.add(tip);
+  const armL = new THREE.Group(); armL.position.set(-0.25, 0.5, 0.05); r.torso.add(armL);
+  taper(armL, [0, 0, 0], [-0.08, -0.3, 0.12], 0.045, 0.035, skin); taper(armL, [-0.08, -0.3, 0.12], [-0.02, -0.45, 0.3], 0.035, 0.03, skin);
+  cyl(armL, 0.012, 0.014, 0.1, -0.02, -0.5, 0.3, bone, 6); sph(armL, 0.055, -0.02, -0.4, 0.3, small, 1, 0.6, 1, 8);
+  r.mats.push(skin, cloth, bone, cap, faceMat, small);
+}
+// 熔岩暴君：2.6 公尺的岩石巨人，全身是冷卻的黑色岩塊，縫隙透出橘紅色的熔岩光（會呼吸），沒有脖子，
+// 兇狠的臉陷在肩膀裡，眼睛是兩個熔岩洞；走動時掉火星，被聖水冷卻時全身變黑
+function buildTyrant(r, g) {
+  const rock = ownLM('#ffffff', { map: rockTex, emissiveMap: lavaCrackTex, emissive: 0xff6a10, shade: 0.85, transparent: true });
+  r.rock = rock;
+  r.body = new THREE.Group(); g.add(r.body);
+  r.legs = [];
+  for (const s of [-1, 1]) { const leg = new THREE.Group(); leg.position.set(s * 0.42, 1.1, 0); r.body.add(leg); sph(leg, 0.3, 0, -0.5, 0, rock, 1, 1.5, 1, 10); sph(leg, 0.34, 0, -1.0, 0.08, rock, 1.1, 0.5, 1.4, 10); r.legs.push(leg); }
+  sph(r.body, 0.62, 0, 1.55, 0, rock, 1.25, 1.0, 0.9, 14);
+  sph(r.body, 0.5, 0, 2.05, -0.05, rock, 1.45, 0.65, 0.9, 12);
+  for (let i = 0; i < 8; i++) { const a = i * 2.4; sph(r.body, 0.18 + (i % 3) * 0.06, Math.cos(a) * 0.55, 1.3 + (i % 4) * 0.25, Math.sin(a) * 0.4, rock, 1.2, 0.8, 1, 8); }
+  r.head = new THREE.Group(); r.head.position.set(0, 2.2, 0.18); r.body.add(r.head);
+  sph(r.head, 0.3, 0, 0, -0.08, rock, 1.1, 0.9, 1, 12);
+  const faceMat = ownLM('#ffffff', { map: tyrantFaceTex, emissive: 0x401000, shade: 0.5, transparent: true, alphaTest: 0.3 });
+  r.face = new THREE.Mesh(faceGeo('tyrantface', 0.62, 0.2, 0.2, 0, 0.08), faceMat); r.face.position.set(0, -0.02, 0.2); r.head.add(r.face);
+  r.eyes = [];
+  for (const s of [-1, 1]) { const e = ownSprite(glowTex, 0xffb020); e.position.set(s * 0.1, 0.02, 0.3); e.scale.setScalar(0.16); r.head.add(e); r.eyes.push(e); }
+  r.arms = [];
+  for (const s of [-1, 1]) { const arm = new THREE.Group(); arm.position.set(s * 0.85, 2.0, 0); r.body.add(arm); sph(arm, 0.24, 0, -0.45, 0.05, rock, 1, 1.6, 1, 10); sph(arm, 0.3, 0, -1.05, 0.15, rock, 1.1, 1, 1.1, 10); arm.rotation.z = s * 0.15; r.arms.push(arm); }
+  r.heat = ownSprite(glowTex, 0xff6020); r.heat.position.set(0, 1.5, 0); r.heat.scale.setScalar(2.4); r.body.add(r.heat);
+  r.mats.push(rock, faceMat);
+}
+// 墮落戰神：2.4 公尺，披著破爛的白斗篷（會飄的布片），頭盔上兩根彎角，面罩下是骷髏的臉，胸口的鎧甲破了露出肋骨和
+// 空空的胸腔；拖著一把比人還長的大劍（劍尖在地上磨出火花），腳上綁著髒布條。走路很慢、很重
+function buildWarlord(r, g) {
+  const bone = ownLM('#d8d0bc', { shade: 0.75, transparent: true }), steel = ownPhong('#8a8f96', { specular: 0x666666, shininess: 30, shade: 0.8, transparent: true });
+  const dark = ownLM('#0e0c0a', { transparent: true }), bandage = ownLM('#ffffff', { map: bandageTex, shade: 0.7, transparent: true }), horn = ownLM('#aab4bc', { shade: 0.8, transparent: true });
+  r.body = new THREE.Group(); g.add(r.body);
+  r.legs = [];
+  for (const s of [-1, 1]) { const leg = new THREE.Group(); leg.position.set(s * 0.2, 1.15, 0); r.body.add(leg); cyl(leg, 0.09, 0.11, 0.6, 0, -0.6, 0, bandage, 10); cyl(leg, 0.08, 0.1, 0.55, 0, -1.15, 0.02, bandage, 10); box(leg, -0.1, 0.1, -1.15, -1.05, -0.08, 0.2, dark); r.legs.push(leg); }
+  cyl(r.body, 0.18, 0.14, 0.2, 0, 1.1, 0, bone, 10);
+  cyl(r.body, 0.05, 0.05, 0.75, 0, 1.3, -0.04, bone, 8);
+  box(r.body, -0.32, 0.32, 1.35, 2.05, -0.2, 0.04, dark);
+  for (let i = 0; i < 5; i++) { const rib = new THREE.Mesh(geo('rib', () => new THREE.TorusGeometry(0.22, 0.018, 6, 14, Math.PI)), bone); rib.position.set(0, 1.5 + i * 0.12, 0); rib.rotation.x = Math.PI / 2; rib.scale.set(1, 0.8, 1); r.body.add(rib); }
+  box(r.body, -0.36, 0.36, 2.0, 2.15, -0.22, 0.14, steel); box(r.body, -0.36, -0.26, 1.35, 2.05, -0.22, 0.12, steel); box(r.body, 0.26, 0.36, 1.35, 2.05, -0.22, 0.12, steel);
+  for (const s of [-1, 1]) sph(r.body, 0.17, s * 0.4, 2.12, 0, steel, 1.2, 0.7, 1.1, 10);
+  r.head = new THREE.Group(); r.head.position.set(0, 2.3, 0.02); r.body.add(r.head);
+  sph(r.head, 0.17, 0, 0.02, 0, steel, 1, 1.15, 1, 12);
+  for (const s of [-1, 1]) { taper(r.head, [s * 0.12, 0.1, -0.02], [s * 0.28, 0.32, -0.08], 0.035, 0.02, horn); taper(r.head, [s * 0.28, 0.32, -0.08], [s * 0.3, 0.5, 0.04], 0.02, 0.008, horn); }
+  const faceMat = ownLM('#ffffff', { map: skullTex, transparent: true, alphaTest: 0.3, shade: 0.6 });
+  r.face = new THREE.Mesh(faceGeo('skullface', 0.36, 0.12, 0.14, -0.02, 0.05), faceMat); r.face.position.set(0, -0.04, 0.13); r.head.add(r.face);
+  const cm = hairMat(cloakTex, 0.6), S = [];
+  for (let x = -0.34; x <= 0.341; x += 0.06) { const j = Math.sin(x * 50) * 0.5 + 0.5; S.push({ a: [x, 2.1, -0.18], b: [x * 1.2, 1.4, -0.3], c: [x * 1.3, 0.35 + j * 0.3, -0.34], w: 0.1, f: Math.PI, ph: x * 9, tp: 0.2 }); }
+  for (const s of [-1, 1]) for (let k = 0; k < 3; k++) S.push({ a: [s * 0.36, 2.05, -0.1 + k * 0.08], b: [s * 0.46, 1.4, -0.12 + k * 0.08], c: [s * 0.44, 0.5 + k * 0.15, -0.15 + k * 0.08], w: 0.11, f: s * 1.4, ph: s * 2 + k, tp: 0.25 });
+  r.body.add(new THREE.Mesh(hairGeo('cloak', S), cm)); r.hairU = cm.userData.hair;
+  r.armR = new THREE.Group(); r.armR.position.set(0.42, 2.0, 0); r.body.add(r.armR);
+  cyl(r.armR, 0.05, 0.06, 0.5, 0, -0.28, 0.02, bone, 8); cyl(r.armR, 0.045, 0.05, 0.5, 0.02, -0.75, 0.08, bone, 8);
+  r.sword = new THREE.Group(); r.sword.position.set(0.02, -0.98, 0.1); r.armR.add(r.sword);
+  cyl(r.sword, 0.03, 0.03, 0.3, 0, 0, 0, dark, 8);
+  box(r.sword, -0.16, 0.16, -0.17, -0.13, -0.03, 0.03, steel);
+  box(r.sword, -0.07, 0.07, -1.75, -0.17, -0.012, 0.012, steel);
+  r.sword.rotation.x = 0.95;   // 劍尖拖在前面的地上
+  const armL = new THREE.Group(); armL.position.set(-0.42, 2.0, 0); r.body.add(armL);
+  cyl(armL, 0.05, 0.06, 0.5, 0, -0.28, 0.02, bone, 8); cyl(armL, 0.045, 0.05, 0.45, -0.04, -0.72, 0.1, bone, 8);
+  r.spark = ownSprite(glowTex, 0xffd080); r.spark.position.set(0, -1.75, 0); r.spark.scale.setScalar(0.25); r.sword.add(r.spark);
+  r.mats.push(bone, steel, dark, bandage, horn, faceMat, cm);
+}
+// 檮杌・九瞳：四腳的巨獸（肩高 2.2 公尺），紫黑色的粗毛、背上一排骨刺、帶刺的尾巴、長爪子；
+// 臉上沒有鼻子和嘴，只有一團九顆大小不一的眼睛（紫色瞳孔，各自會轉、會閉），脖子一圈鬃毛
+function buildTaowu(r, g) {
+  const fur = ownLM('#ffffff', { map: taowuFurTex, shade: 0.8, transparent: true }), spine = ownLM('#4a2a6e', { shade: 0.7, transparent: true }), claw = ownLM('#2a1a30', { shade: 0.6, transparent: true });
+  r.body = new THREE.Group(); g.add(r.body);
+  sph(r.body, 0.5, 0, 1.3, -0.2, fur, 0.9, 0.85, 1.9, 16);
+  sph(r.body, 0.42, 0, 1.4, 0.75, fur, 1.1, 0.95, 0.9, 14);
+  r.legs = [];
+  for (const [x, z] of [[-0.35, 0.6], [0.35, 0.6], [-0.3, -0.95], [0.3, -0.95]]) {
+    const leg = new THREE.Group(); leg.position.set(x, 1.15, z); r.body.add(leg);
+    taper(leg, [0, 0, 0], [0, -0.6, 0.05], 0.13, 0.1, fur, 10); taper(leg, [0, -0.6, 0.05], [0, -1.12, -0.05], 0.1, 0.08, fur, 10);
+    sph(leg, 0.12, 0, -1.12, 0.02, fur, 1.2, 0.5, 1.4, 8);
+    for (let k = -1; k <= 1; k++) { const c = new THREE.Mesh(geo('claw', () => new THREE.ConeGeometry(0.03, 0.14, 6)), claw); c.position.set(k * 0.07, -1.15, 0.18); c.rotation.x = Math.PI / 2; leg.add(c); }
+    r.legs.push(leg);
+  }
+  for (let i = 0; i < 9; i++) { const s = new THREE.Mesh(geo('tspine', () => new THREE.ConeGeometry(0.06, 0.32, 6)), spine); s.position.set(0, 1.68 - Math.abs(i - 3) * 0.04, 0.7 - i * 0.22); s.rotation.x = -0.4; s.scale.setScalar(1 - Math.abs(i - 4) * 0.08); r.body.add(s); }
+  r.tail = new THREE.Group(); r.tail.position.set(0, 1.35, -1.15); r.body.add(r.tail);
+  taper(r.tail, [0, 0, 0], [0, 0.15, -0.6], 0.09, 0.06, fur); taper(r.tail, [0, 0.15, -0.6], [0, -0.1, -1.2], 0.06, 0.03, fur);
+  for (let i = 0; i < 4; i++) { const s = new THREE.Mesh(geo('tspine2', () => new THREE.ConeGeometry(0.035, 0.18, 6)), spine); s.position.set(0, 0.2 - i * 0.05, -0.3 - i * 0.22); s.rotation.x = -0.6; r.tail.add(s); }
+  r.head = new THREE.Group(); r.head.position.set(0, 1.55, 1.15); r.body.add(r.head);
+  sph(r.head, 0.34, 0, 0, 0, fur, 1, 0.9, 1.1, 14);
+  const mm = hairMat(taowuStrandTex, 0.6);
+  r.head.add(new THREE.Mesh(hairGeo('tmane', grassStrands(48, 0.3, 0.3, 0.55, 0.3, 7701, -0.1, -0.25, 0.9)), mm)); r.maneU = mm.userData.hair;
+  r.body.add(new THREE.Mesh(hairGeo('tmane2', grassStrands(60, 0.45, 0.25, 0.5, 0.2, 7702, 1.55, 0.3, 0.9)), mm));
+  r.eyeMat = wetEyeMat(taowuEyeTex, 0x201030, 0x555555, { transparent: true });
+  r.eyes = [];
+  for (const [x, y, z, rr] of [[0, 0.02, 0.3, 0.085], [-0.14, 0.08, 0.27, 0.06], [0.15, 0.06, 0.27, 0.065], [-0.08, -0.12, 0.28, 0.055], [0.09, -0.13, 0.28, 0.058], [-0.22, -0.04, 0.22, 0.045], [0.23, -0.02, 0.22, 0.05], [0, -0.2, 0.26, 0.045], [0.01, 0.17, 0.26, 0.04]]) {
+    const e = new THREE.Mesh(geo('teye' + rr, () => new THREE.SphereGeometry(rr, 12, 10)), r.eyeMat); e.position.set(x, y, z); r.head.add(e); r.eyes.push(e);
+  }
+  r.litGlow = ownSprite(glowTex, 0xffffff); r.litGlow.scale.setScalar(0.22); r.litGlow.visible = false; r.head.add(r.litGlow);
+  r.mats.push(fur, spine, claw, mm, r.eyeMat);
+}
+// 面向某個方向（地圖的角度）的 group 旋轉
+const faceRot = a => Math.atan2(Math.cos(a), Math.sin(a));
+function syncMonster3(e, r, t, p, d, dt) {
+  const moving = !e.pose && !(e.stunT > 0) && !(e.cooled > 0);
+  switch (e.kind) {
+    case 'kronos': {
+      const lp = e.limpT || t;
+      r.body.position.y = Math.abs(Math.sin(lp * 3.2)) * 0.07 - 0.03; r.body.rotation.z = Math.sin(lp * 3.2) * 0.07;
+      const th = e.thrust > 0 ? 1 - e.thrust / 0.5 : 0;
+      r.spear.position.z = 0.45 + th * 0.7; r.armR.rotation.x = -th * 0.9;
+      r.head.rotation.z = Math.sin(t * 0.8) * 0.08;
+      r.capGlow.material.opacity = (0.25 + 0.2 * Math.sin(t * 2.5) + (e.retreat > 0 ? 0.35 : 0)) * enemyAlpha(e);
+      break;
+    }
+    case 'tyrant': {
+      const cool = e.cooled > 0, k = cool ? 0 : 0.55 + 0.45 * Math.sin(t * 2.2);
+      r.rock.emissive.setRGB(k, k * 0.4, k * 0.06);
+      for (const ey of r.eyes) ey.material.opacity = cool ? 0.05 : 0.7 + 0.3 * Math.sin(t * 5);
+      r.heat.material.opacity = cool ? 0 : 0.1 + 0.06 * Math.sin(t * 3);
+      const w = e.wob * 2.2, st = e.stomp > 0 ? 1 - e.stomp / 0.6 : 0;
+      r.legs[0].rotation.x = moving ? Math.sin(w) * 0.3 : 0; r.legs[1].rotation.x = moving ? -Math.sin(w) * 0.3 : 0;
+      if (st > 0) { r.legs[1].rotation.x = -1.1 * Math.sin(st * Math.PI); r.body.position.y = 0.15 * Math.sin(st * Math.PI); } else r.body.position.y = moving ? Math.abs(Math.sin(w)) * 0.05 : 0;
+      r.body.rotation.z = moving ? Math.sin(w) * 0.04 : 0;
+      r.arms[0].rotation.x = moving ? -Math.sin(w) * 0.25 : 0; r.arms[1].rotation.x = moving ? Math.sin(w) * 0.25 : 0;
+      break;
+    }
+    case 'warlord': {
+      r.g.rotation.y = faceRot(e.face || 0);
+      const w = e.wob * 3.0, mv = moving && e.state !== 'wait';
+      r.legs[0].rotation.x = mv ? Math.sin(w) * 0.45 : 0; r.legs[1].rotation.x = mv ? -Math.sin(w) * 0.45 : 0;
+      r.body.position.y = mv ? Math.abs(Math.sin(w)) * 0.06 : 0;
+      const sw = e.swing > 0 ? 1 - e.swing / 0.6 : 0, cdk = e.cd > 0 && e.swing <= 0 ? clamp(e.cd / 1.2, 0, 1) : 0;
+      r.armR.rotation.x = -2.0 * sw - 0.9 * cdk; r.armR.rotation.y = -1.6 * cdk * (1 - cdk);
+      r.sword.rotation.x = 0.95 - 1.5 * sw;
+      r.spark.material.opacity = mv && e.swing <= 0 ? 0.5 + 0.5 * Math.random() : 0;
+      const hu = r.hairU; hu.uHT.value = t; hu.uHAmp.value = 0.02 + (e.state === 'charge' ? 0.03 : 0);
+      hu.uHDrag.value.set(spring(r, 'hx', Math.sin(w) * 0.01, dt), spring(r, 'hz', e.state === 'charge' ? -0.12 : -0.03, dt));
+      break;
+    }
+    case 'taowu': {
+      if (moving || e.pose) r.g.rotation.y = faceRot(e.face || 0);
+      let dy = Math.atan2(p.x - e.x, p.y - e.y) - r.g.rotation.y;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      r.head.rotation.y = clamp(dy, -1.2, 1.2) * (e.blind > 0 ? 0.2 : 1);
+      r.head.rotation.x = -0.5 * (e.roar || 0);
+      const w = e.wob * 5, mv = moving && !(e.pounce > 0);
+      r.legs.forEach((leg, i) => { leg.rotation.x = mv ? Math.sin(w + (i % 2 ? Math.PI : 0) + (i < 2 ? 0 : Math.PI * 0.5)) * 0.45 : 0; });
+      r.body.position.y = e.pounce > 0 ? 0.25 : mv ? Math.abs(Math.sin(w)) * 0.04 : 0;
+      r.body.rotation.x = e.pounce > 0 ? -0.25 : 0;
+      r.tail.rotation.y = Math.sin(t * 2.5) * 0.3;
+      const mu = r.maneU; mu.uHT.value = t; mu.uHAmp.value = 0.03 + (e.roar > 0 ? 0.08 : 0);
+      const openIdx = e.eyes ? e.eyes.findIndex(x => !x.shut) : -1;
+      r.eyes.forEach((ey, i) => {
+        const shut = e.blind > 0 || !!(e.eyes && e.eyes[i] && e.eyes[i].shut);
+        ey.scale.y += ((shut ? 0.12 : 1) - ey.scale.y) * 0.2;
+        ey.rotation.set(Math.sin(t * 1.3 + i) * 0.2, Math.sin(t * 0.9 + i * 2) * 0.3, 0);
+      });
+      const litEye = e.lit && openIdx >= 0 && !(e.blind > 0) ? r.eyes[openIdx] : null;
+      r.litGlow.visible = !!litEye;
+      if (litEye) { r.litGlow.position.copy(litEye.position); r.litGlow.position.z += 0.05; r.litGlow.material.opacity = 0.5 + 0.4 * Math.sin(t * 20); }
+      r.eyeMat.emissive.setRGB(e.blind > 0 ? 0.05 : 0.15 + 0.1 * Math.sin(t * 3), 0.05, e.blind > 0 ? 0.05 : 0.2);
+      break;
+    }
+  }
+}
+// 熔岩暴君走過留下的熔岩：地上一灘一灘發光的痕跡，15 秒後慢慢冷卻變黑
+let lavaMesh = null;
+const LAVA_MAX = 60, _lcol = new THREE.Color();
+function syncLava3(t) {
+  const lava = G.lava || [];
+  if (!lavaMesh && lava.length) {
+    lavaMesh = new THREE.InstancedMesh(geo('trail', () => new THREE.CircleGeometry(1, 14)), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.92, depthWrite: false }), LAVA_MAX);
+    lavaMesh.frustumCulled = false; lavaMesh.count = 0;
+    scene.add(lavaMesh);
+  }
+  if (!lavaMesh) return;
+  const n = Math.min(LAVA_MAX, lava.length);
+  for (let i = 0; i < n; i++) {
+    const l = lava[lava.length - n + i], hot = clamp((l.life - 4) / 11, 0, 1);
+    _q.setFromEuler(_e.set(-Math.PI / 2, 0, l.a, 'XYZ'));
+    _m4.compose(_v.set(l.x, 0.014 + i * 0.00005, l.y), _q, _sc.set(l.r, l.r * 0.8, 1));
+    lavaMesh.setMatrixAt(i, _m4);
+    _lcol.setRGB(0.12 + hot * 0.88, 0.06 + hot * 0.4 * (0.7 + 0.3 * Math.sin(t * 4 + i)), 0.04 + hot * 0.05);
+    lavaMesh.setColorAt(i, _lcol);
+  }
+  lavaMesh.count = n; lavaMesh.instanceMatrix.needsUpdate = true;
+  if (lavaMesh.instanceColor) lavaMesh.instanceColor.needsUpdate = true;
+}
+
 // ---------- 大白燈：燈下站著一個 2 公尺高的「大白」（寫實版：白色合成皮的人形充氣體，有接縫、磨損和泛黃；
 // 臉是一條暗色的面罩線和兩點微光）。慢慢呼吸；你走到它面前，手臂會慢慢合起來抱住你；被黑球吃掉時慢慢消氣倒下 ----------
 let baymaxTex = null;
@@ -2812,6 +3095,10 @@ function barH(t) {
     case 'balloon': return 2.25;
     case 'clown': return 2.55;
     case 'stick': return 2.3;
+    case 'kronos': return 1.95;
+    case 'tyrant': return 3.0;
+    case 'warlord': return 2.9;
+    case 'taowu': return 2.6;
     default: return 2.0;
   }
 }
@@ -2819,9 +3106,12 @@ function drawHpBar(c, t, ratio) {
   c.clearRect(0, 0, 160, 44);
   c.fillStyle = 'rgba(8,6,12,.6)';
   c.beginPath(); c.roundRect(0, 0, 160, 44, 10); c.fill();
-  c.font = 'bold 17px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.textAlign = 'center'; c.textBaseline = 'middle';
   c.fillStyle = BOSSES.includes(t.kind) ? '#ffb347' : '#f0ecf5';
-  c.fillText(`Lv.${t.lv} ${MONSTER_NAME[kindOf(t)]}`, 80, 14);
+  const label = `Lv.${t.lv} ${MONSTER_NAME[kindOf(t)]}`;
+  c.font = 'bold 17px sans-serif';
+  if (c.measureText(label).width > 150) c.font = 'bold 13px sans-serif';   // 名字太長就縮小
+  c.fillText(label, 80, 14);
   c.fillStyle = '#3a0a10'; c.fillRect(10, 28, 140, 9);
   c.fillStyle = ratio > 0.5 ? '#e6394a' : ratio > 0.25 ? '#ff8a2a' : '#ffd23a';
   c.fillRect(10, 28, 140 * ratio, 9);
@@ -4056,7 +4346,8 @@ function updateAtmosphere(dark, t) {
 const book = { active: false, items: [], models: new Map(), renderer: null, scene: null, cam: null, t: 0, w: 0, h: 0, okFlag: null, stats: { rendered: 0, built: 0 } };
 const BOOK_P = { x: 0, y: 0, flash: false };   // 假的玩家：怪物會面向它
 // 每種怪物的取景：h 高度、d 鏡頭距離、cy 看著的高度（沒寫就用高度算）
-const BOOK_VIEW = { crawler: { h: 1.0, d: 2.8, cy: 0.4 }, snail: { h: 1.45, d: 2.9, cy: 0.6 }, blob: { h: 1.0, d: 2.4, cy: 0.5 }, shroom: { h: 1.95, d: 3.7 }, grass: { h: 1.95 }, sunflower: { h: 1.75 }, eye: { h: 1.65 } };
+const BOOK_VIEW = { crawler: { h: 1.0, d: 2.8, cy: 0.4 }, snail: { h: 1.45, d: 2.9, cy: 0.6 }, blob: { h: 1.0, d: 2.4, cy: 0.5 }, shroom: { h: 1.95, d: 3.7 }, grass: { h: 1.95 }, sunflower: { h: 1.75 }, eye: { h: 1.65 },
+  kronos: { h: 1.7, d: 3.3, cy: 0.8 }, tyrant: { h: 3.0, d: 5.4, cy: 1.4 }, warlord: { h: 2.75, d: 5.0, cy: 1.3 }, taowu: { h: 2.3, d: 5.0, cy: 1.1 } };
 function bookOk() {
   if (book.okFlag !== null) return book.okFlag;
   try {
@@ -4096,7 +4387,8 @@ function bookModel(spec) {
     m = { key, f, r: buildFlower(f, book.scene) };
   } else {
     const e = { kind: spec.kind, x: BOOK_X, y: BOOK_Y, wob: 0, spawn: 0, hp: 1, lv: 1, size: 1, h: 0.4, eatT: 0, seen: false,
-      burn: 0, emerge: 0, pauseT: 0, state: 'idle', cd: 0, stun: 0, hopT: 1, hopping: 0, air: 0, rise: 0, hidden: false, retract: 0, chew: 0, blind: 0, blindCd: 0 };
+      burn: 0, emerge: 0, pauseT: 0, state: 'idle', cd: 0, stun: 0, hopT: 1, hopping: 0, air: 0, rise: 0, hidden: false, retract: 0, chew: 0, blind: 0, blindCd: 0,
+      pose: true, thrust: 0, limpT: 0, retreat: 0, stomp: 0, cooled: 0, swing: 0, roar: 0, pounce: 0, lit: false, face: Math.PI / 2, eyes: Array.from({ length: 9 }, () => ({ shut: false })) };
     m = { key, e, r: buildEnemy(e, book.scene) };
   }
   const v = BOOK_VIEW[spec.flower || spec.kind] || {};
@@ -4143,6 +4435,11 @@ function bookAnimate(m, t, dt, ph) {
     case 'snail': { const g = (t + ph) % 7; e.chew = g > 5 ? 1 : 0; e.retract = g > 3.2 && g < 4.4 ? 1 : 0; break; }  // 爬、縮觸角、嚼
     case 'girl': { const g = (t + ph) % 7; e.state = g < 3 ? 'hunt' : 'wander'; e.blind = g > 4.5 && g < 6 ? 1 : 0; break; }  // 追、被照瞎甩頭
     case 'clown': near = (t + ph) % 5 < 2.4 ? 1.5 : 3; break;   // 靠近時揮刀
+    // 第三世界
+    case 'kronos': { const c = (t + ph) % 4; e.thrust = c < 0.5 ? 0.5 - c : 0; e.limpT = t; e.retreat = c > 2.5 && c < 3.2 ? 1 : 0; break; }   // 一跛一跛、刺矛、被光照到往後縮
+    case 'tyrant': { const c = (t + ph) % 6; e.stomp = c < 0.6 ? 0.6 - c : 0; e.cooled = c > 3.5 && c < 5 ? 1 : 0; break; }                    // 跺腳、被聖水冷卻變黑
+    case 'warlord': { const c = (t + ph) % 5; e.swing = c > 2 && c < 2.6 ? 2.6 - c : 0; e.cd = c >= 2.6 && c < 3.8 ? 3.8 - c : 0; e.state = c < 2 ? 'patrol' : 'charge'; break; }   // 走、舉劍、橫掃
+    case 'taowu': { const c = (t + ph) % 14, k = Math.floor(c / 1.1); e.eyes.forEach((x, i) => { x.shut = i < k; }); e.lit = c < 9.9; e.blind = c >= 9.9 && c < 13 ? 1 : 0; e.roar = c > 13 ? 14 - c : 0; e.pounce = 0; break; }   // 眼睛一顆一顆閉上、瞎了、咆哮
   }
   BOOK_P.x = e.x; BOOK_P.y = e.y + near;
   syncEnemy(e, m.r, t, BOOK_P);
@@ -4200,7 +4497,7 @@ function render(dt) {
   syncFireballs(t);
   syncProjectiles(t);
   syncWorld2(t);
-  if (isW3()) { syncChests3(t); syncStopEyes(t); }
+  if (isW3()) { syncChests3(t); syncStopEyes(t); syncLava3(t); }
   syncStun(t);
   syncHpBars();
   syncGhosts();
@@ -4254,6 +4551,7 @@ function init() {
   makeExtraTextures();
   makeGardenTextures();
   makeTrainTextures();
+  makeMonster3Textures();
   buildHouse();
   buildFurniture();
   buildFlashlight();

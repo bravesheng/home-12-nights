@@ -88,6 +88,7 @@ function updateNight3(dt) {
   tr.t += dt;
   updateFire3(dt);
   if (mode !== 'play') return;
+  if (ev.paxTurn) { ev.paxTurn.t += dt; if (ev.paxTurn.t > 16) ev.paxTurn = null; }
   ev.clackT -= dt;
   if (tr.k > 0.15 && ev.clackT <= 0) { ev.clackT = 0.56 / tr.k; Sound.play('clack', 0.3 * tr.k); }
 }
@@ -95,7 +96,13 @@ function updateNight3(dt) {
 function scheduleNight3(add, again, night, n, hz) {
   if (again(0.35)) add('snail', 30, NIGHT_LEN - 35);
   if (night === 1 ? Math.random() < 0.5 : again(0.4)) add('girl', 25, NIGHT_LEN - 40);
+  // 4 隻新怪物：一隻一隻登場，之後每晚都可能再來；檮杌最後一夜一定來
+  const intro3 = (k, a, b, base) => { if (night === INTRO3[k]) add(k, a, b); else if (night > INTRO3[k] && again(base)) add(k, 10, NIGHT_LEN - 35); };
+  intro3('kronos', 40, 60, 0.6); intro3('tyrant', 30, 50, 0.45); intro3('warlord', 25, 45, 0.45);
+  if (night === INTRO3.taowu || night === LAST_NIGHT) add('taowu', 30, 50);
+  else if (night > INTRO3.taowu && again(0.3)) add('taowu', 40, 80);
   if (night >= 4 && Math.random() < 0.35 * hz) add('tender', 30, NIGHT_LEN - 40);   // 煤水車被撬開
+  if (night >= 2 && Math.random() < 0.5) add('paxturn', 20, NIGHT_LEN - 30);       // 乘客轉頭
 }
 
 // ====================================================================
@@ -120,6 +127,12 @@ function addLights3(L) {
 function alerts3() {
   const a = [], tr = G.train;
   if (G.phase === 'day' && G.t >= DAY_LEN - DUSK && G.t < DAY_LEN - 3) a.push('🚂 列車快開了，快上車！');
+  for (const e of G.enemies) {
+    if (e.kind === 'kronos') a.push('🍄 蕈裂衣在列車上（怕光，不敢靠近火爐）');
+    else if (e.kind === 'tyrant') a.push(e.cooled > 0 ? '🪨 熔岩暴君冷卻了！快用平底鍋敲' : '🪨 熔岩暴君在列車上（聖水槍冷卻再敲）');
+    else if (e.kind === 'warlord') a.push('⚔️ 墮落戰神在走道裡（從背後打、躲進包廂關門）');
+    else if (e.kind === 'taowu') a.push(e.blind > 0 ? '👁️ 檮杌瞎了！傷害 3 倍' : `👁️ 檮杌・九瞳在列車上（眼睛 ${e.eyes.filter(x => x.shut).length}/9）`);
+  }
   if (G.phase === 'night') {
     if (tr.state === 'slowing') a.push('🚂 列車在減速！快丟燃料進火爐');
     else if (tr.state === 'stopped') a.push(`🚂 列車停了！→ ${RN('attic')}的火爐`);
@@ -157,6 +170,20 @@ function addTargets3(cands) {
     }
   }
   chestTargets(cands);
+  // 包廂的門可以關（墮落戰神進不來）：對著門按 E。車站的門和連結處的門不行
+  for (const d of DOORS) {
+    if (d.front || d.station || d.locked) continue;
+    const cx = d.x + 0.5, cy = d.y + 0.5, rd = Math.hypot(cx - p.x, cy - p.y);
+    if (rd > 1.4 || rd < 0.55 || lookAngle(cx, cy) > 0.9) continue;
+    if (d.closed) cands.push({ d: rd + 0.4, id: `door:${d.x},${d.y}`, label: '打開包廂門', hold: 0, action: () => { setDoor(d, false); Sound.play('click'); } });
+    else cands.push({ d: rd + 0.4, id: `door:${d.x},${d.y}`, label: '關上包廂門', sub: '關上的門擋得住怪物（檮杌除外）', hold: 0, action: () => closeDoor3(d) });
+  }
+}
+function closeDoor3(d) {
+  const cx = d.x + 0.5, cy = d.y + 0.5;
+  if (Math.hypot(cx - G.p.x, cy - G.p.y) < 0.75 || G.enemies.some(e => Math.hypot(cx - e.x, cy - e.y) < 0.7)) { toast('門口有東西擋著，關不起來。'); return; }
+  setDoor(d, true); Sound.play('doorSlam', 0.5);
+  if (!G.ev.doorTip) { G.ev.doorTip = 1; toast('🚪 門關上了。關上的門跟牆一樣，怪物進不來（檮杌會撞壞）；再按一次 E 打開。', 'good'); }
 }
 // 小地圖：寶箱（照等級的顏色）
 function drawMinimap3(c) {
@@ -458,3 +485,406 @@ function updateWarmth3(dt) {
   G.ev.windT = (G.ev.windT || 0) - dt;
   if (G.ev.windT <= 0) { G.ev.windT = rand(6, 11); Sound.play('wind', isStationRoom(r) ? 0.9 : 0.4); }
 }
+
+// ====================================================================
+// 第三世界的 4 隻新怪物（照紙本設計圖，寫實風）：
+// 克蘿諾斯・蕈裂衣（鬼將級，第 1 夜）、熔岩暴君（羅判級，第 4 夜）、墮落戰神（羅判級，第 7 夜）、檮杌・九瞳（判官級，第 10 夜和最後一夜）
+// ====================================================================
+const GRADE3 = { kronos: '鬼將級', tyrant: '羅判級', warlord: '羅判級', taowu: '判官級' };
+// 怪物受到不同攻擊的傷害倍數（src：flash 手電筒、pan 平底鍋、shot 彈珠、spray 聖水槍、salt 鹽巴、bomb 鞭炮、fire 火球、angel 天使）
+function monsterDmgMult(t, src) {
+  if (!t.kind) return 1;
+  if (t.kind === 'tyrant') {
+    if (src === 'flash') return 0;                      // 手電筒對岩石沒用
+    if (src === 'spray') {   // 聖水冷卻：嘶——
+      if (!(t.cooled > 0)) { t.cooled = 3; Sound.play('hiss'); if (!G.ev.coolTip) { G.ev.coolTip = 1; toast('💧 聖水讓熔岩暴君「嘶——」地冷卻了！3 秒內牠不會動，快用平底鍋敲碎牠！', 'good'); } }
+      return 3;
+    }
+    if (src === 'pan' && t.cooled > 0) { Sound.play('crack'); return 4; }   // 冷卻後敲碎一塊
+    if (src === 'bomb') return 1.5;
+    return 1;
+  }
+  if (t.kind === 'warlord') {
+    if (src === 'fire' || src === 'angel') return 1;
+    // 正面有盔甲傷害減半；從背後打 3 倍
+    const p = G.p, toP = Math.atan2(p.y - t.y, p.x - t.x);
+    let da = toP - (t.face || 0);
+    while (da > Math.PI) da -= Math.PI * 2;
+    while (da < -Math.PI) da += Math.PI * 2;
+    if (Math.abs(da) > 2.2) { if (!G.ev.backTip) { G.ev.backTip = 1; toast('⚔️ 從背後打墮落戰神，傷害 3 倍！', 'good'); } return 3; }
+    return Math.abs(da) < 1.0 ? 0.5 : 1;
+  }
+  if (t.kind === 'taowu') return t.blind > 0 ? 3 : 1;
+  return 1;
+}
+
+// ---------- 克蘿諾斯・蕈裂衣：跟時間有關的矮人。用長矛刺你，被刺中夜晚的時鐘會倒退 10 秒；怕光和火 ----------
+function updateKronos(e, dt) {
+  const p = G.p, n = diffN(), d = Math.hypot(e.x - p.x, e.y - p.y);
+  e.cd = Math.max(0, e.cd - dt); e.retreat = Math.max(0, e.retreat - dt); e.limpT += dt;
+  if (e.pose) return;
+  const beam = inBeam(e);
+  if (beam) {
+    flashHurt(e, dt);
+    if (e.dead) return;
+    e.retreat = 0.5; e.smoke = 1;
+    if (Math.random() < dt * 20) G.fx.push({ type: 'smoke', x: e.x + rand(-0.2, 0.2), y: e.y + rand(-0.2, 0.2), h: 1.6, vx: rand(-0.3, 0.3), vy: rand(-0.3, 0.3), vh: rand(0.6, 1.2), life: 0.8, max: 0.8, color: [150, 90, 200] });
+    if (!G.ev.kronosLightTip) { G.ev.kronosLightTip = 1; toast('🔦 手電筒照到蘑菇傘，蕈裂衣冒煙往後退了！', 'good'); }
+  }
+  // 不敢靠近有燒的火爐：機車室是安全的
+  const fb = FURN_BY_ID.firebox, fire = fb && fireBurning();
+  const fd = fire ? Math.hypot(fb.x + 1 - e.x, fb.y + 1 - e.y) : 99;
+  let dir, sp = Math.min(1.6 + n * 0.01, 2.4) * (e.spawn > 0 ? 0.3 : 1) * (0.7 + 0.5 * Math.abs(Math.sin(e.limpT * 3.2)));   // 一跛一跛
+  if (e.retreat > 0 || fd < 4.5) {
+    const ax = e.retreat > 0 ? p.x : fb.x + 1, ay = e.retreat > 0 ? p.y : fb.y + 1, a = Math.atan2(e.y - ay, e.x - ax);
+    dir = { x: Math.cos(a), y: Math.sin(a) }; sp = 2.2;
+    if (fd < 4.5 && !G.ev.kronosFireTip && d < 8) { G.ev.kronosFireTip = 1; toast('🔥 蕈裂衣不敢靠近有燒的火爐。機車室是安全的！', 'good'); }
+  } else if (e.thrust > 0) dir = { x: 0, y: 0 };
+  else dir = chaseDir(e);
+  if (e.thrust <= 0) move(e, dir.x * sp * dt, dir.y * sp * dt, ENEMY_R);
+  e.face = Math.atan2(p.y - e.y, p.x - e.x);
+  e.cackleT -= dt;
+  if (e.cackleT <= 0 && d < 12) { Sound.play('kcackle', nearVol(d)); e.cackleT = rand(4, 7); }
+  // 長矛：離你 2.5 格就舉矛，0.5 秒後刺出去
+  if (e.thrust > 0) {
+    e.thrust -= dt;
+    if (e.thrust <= 0) {
+      const dd = Math.hypot(e.x - p.x, e.y - p.y);
+      if (dd < 2.9 && p.inv <= 0 && castRay(e.x, e.y, Math.atan2(p.y - e.y, p.x - e.x), dd) >= dd - 0.05) kronosHit(e);
+      e.cd = 3;
+    }
+  } else if (d < 2.5 && e.cd <= 0 && e.spawn <= 0 && e.retreat <= 0 && fd >= 4.5) { e.thrust = 0.5; Sound.play('spear', nearVol(d)); }
+}
+function kronosHit(e) {
+  const p = G.p, n = diffN();
+  damage(14 + n * 0.1, 10); p.inv = 1.2;
+  e.hits = (e.hits || 0) + 1;
+  // 時鐘倒退 10 秒：天亮變晚
+  if (G.phase === 'night') G.t = Math.max(0, G.t - 10);
+  G.timeFlash = 1; Sound.play('clockBack');
+  toast(e.hits === 1 ? '⏳ 蕈裂衣的長矛刺中了你……夜晚的時鐘倒退了 10 秒！' : '⏳ 又被刺中了！時鐘倒退 10 秒。', 'warn');
+  if (e.hits >= 3) {
+    p.slowT = 5;
+    for (let i = 0; i < 24; i++) G.fx.push({ type: 'spark', x: e.x + rand(-0.3, 0.3), y: e.y + rand(-0.3, 0.3), h: 1.5, vx: (p.x - e.x) * rand(0.3, 0.6), vy: (p.y - e.y) * rand(0.3, 0.6), vh: rand(-0.3, 0.3), life: 1.2, max: 1.2, color: [190, 120, 255] });
+    Sound.play('spore');
+    toast('🍄 蕈裂衣頭上的蘑菇噴出孢子，你走路變慢了 5 秒！', 'warn');
+  }
+}
+
+// ---------- 熔岩暴君：岩石巨人，走得慢但很耐打。每走 5 步跺一次腳（2 格內的人會被震倒，跳起來就不會）；走過的地方燒出熔岩 ----------
+function updateTyrant(e, dt) {
+  const p = G.p, n = diffN(), d = Math.hypot(e.x - p.x, e.y - p.y);
+  e.cooled = Math.max(0, (e.cooled || 0) - dt); e.cd = Math.max(0, e.cd - dt); e.hum += dt;
+  if (inBeam(e)) { flashHurt(e, dt); if (!G.ev.tyrantFlashTip && d < 7) { G.ev.tyrantFlashTip = 1; toast('🪨 手電筒對岩石沒用！用聖水槍把牠冷卻，再用平底鍋敲碎。', 'warn'); } }
+  if (e.dead || e.pose) return;
+  if (e.cooled > 0) { e.stunT = Math.max(e.stunT || 0, 0.05); return; }   // 冷卻中：全身變黑、不會動
+  if (Math.random() < dt * 6) G.fx.push({ type: 'ember', x: e.x + rand(-0.4, 0.4), y: e.y + rand(-0.4, 0.4), h: rand(0.5, 2.2), vx: rand(-0.3, 0.3), vy: rand(-0.3, 0.3), vh: -rand(0.5, 1.5), life: rand(0.4, 0.9), max: 0.9, color: pick(EMBER_COLORS) });
+  if (e.stomp > 0) {
+    e.stomp -= dt;
+    if (e.stomp <= 0) {
+      G.shake = Math.max(G.shake, 0.9); Sound.play('stompBig', nearVol(d) * 1.2);
+      if (d < 2 && p.z < 0.25 && p.inv <= 0) { damage(10 + n * 0.1, 8); p.stunT = 1.0; p.inv = 1; toast('🪨 熔岩暴君跺腳，地板一震，你被震倒了！跳起來就不會被震到。', 'warn'); }
+      else if (d < 2 && p.z >= 0.25 && !G.ev.stompDodgeTip) { G.ev.stompDodgeTip = 1; toast('⤒ 跳起來躲過了跺腳！', 'good'); }
+    }
+    return;
+  }
+  // 寒寂之境時被火爐吸引，在機車室附近徘徊
+  const fb = FURN_BY_ID.firebox;
+  let tx = p.x, ty = p.y, fl = flow;
+  if (G.cold && fb && Math.hypot(fb.x + 1 - p.x, fb.y + 1 - p.y) > 6 && Math.sin(e.hum * 0.15) > 0) { tx = fb.x + 1; ty = fb.y + 2.5; fl = flowTo(fb.x + 1, fb.y + 2); }
+  const dir = pathDir(e, fl, tx, ty, 0.1), sp = Math.min(0.85 + n * 0.004, 1.3) * (e.spawn > 0 ? 0.3 : 1);
+  const ox = e.x, oy = e.y;
+  move(e, dir.x * sp * dt, dir.y * sp * dt, ENEMY_R);
+  const moved = Math.hypot(e.x - ox, e.y - oy);
+  e.walked += moved; e.face = Math.atan2(dir.y, dir.x);
+  e.lavaT -= moved;
+  if (e.lavaT <= 0) { e.lavaT = 0.6; addLava(e.x, e.y); }
+  if (e.walked >= 5) { e.walked = 0; e.stomp = 0.6; Sound.play('armor', nearVol(d)); }
+  if (d < 1.1 && e.spawn <= 0 && p.inv <= 0) {
+    damage(28 + n * 0.15, 12); p.inv = 1.3;
+    const a = Math.atan2(p.y - e.y, p.x - e.x); move(p, Math.cos(a) * 1.4, Math.sin(a) * 1.4, PLAYER_R);
+    G.shake = 0.7; Sound.play('thump');
+    toast('🪨 熔岩暴君一拳把你打飛了！', 'warn');
+  }
+}
+function addLava(x, y) {
+  const last = G.lava[G.lava.length - 1];
+  if (last && Math.hypot(last.x - x, last.y - y) < 0.35) { last.life = 15; return; }
+  G.lava.push({ x, y, life: 15, r: rand(0.3, 0.42), a: Math.random() * 6 });
+  if (G.lava.length > 60) G.lava.shift();
+}
+function updateLava(dt) {
+  const p = G.p;
+  let on = false;
+  for (const l of G.lava) { l.life -= dt; if (l.life > 4 && p.z < 0.1 && (l.x - p.x) ** 2 + (l.y - p.y) ** 2 < 0.3) on = true; }
+  if (G.lava.length && G.lava[0].life <= 0) G.lava = G.lava.filter(l => l.life > 0);
+  if (on) {
+    p.hp -= 4 * D().dmg * dt; p.hurt = Math.max(p.hurt, 0.4);
+    if (!G.ev.lavaTip) { G.ev.lavaTip = 1; toast('🔥 踩到熔岩了！熔岩暴君走過的地方 15 秒後才會冷卻，跳過去或繞開。', 'warn'); Sound.play('hiss', 0.5); }
+    if (p.hp <= 0) gameOver();
+  }
+}
+
+// ---------- 墮落戰神：只在走道裡走。看到你就衝過來，2 格內橫掃一劍（打飛、眩暈）；不進包廂，會在門外等 10 秒 ----------
+const HALL = ROOMS.find(r => r.id === 'hall');
+const inHall = (x, y) => y >= HALL.y && y < HALL.y + HALL.h && x >= HALL.x && x < HALL.x + HALL.w;
+function updateWarlord(e, dt) {
+  const p = G.p, n = diffN(), d = Math.hypot(e.x - p.x, e.y - p.y);
+  e.cd = Math.max(0, e.cd - dt); e.stepT += dt;
+  if (inBeam(e)) { flashHurt(e, dt); if (e.dead) return; }
+  if (e.pose) return;
+  const playerInHall = inHall(p.x, p.y), los = d < 16 && castRay(e.x, e.y, Math.atan2(p.y - e.y, p.x - e.x), d) >= d - 0.05;
+  e.dragT -= dt;
+  if (e.dragT <= 0 && d < 12) { Sound.play('swordDrag', nearVol(d) * 0.7); e.dragT = rand(1.4, 2.2); }
+  if (Math.random() < dt * 8) G.fx.push({ type: 'ember', x: e.x + Math.cos(e.face + 0.5) * 0.5, y: e.y + Math.sin(e.face + 0.5) * 0.5, h: 0.05, vx: rand(-0.6, 0.6), vy: rand(-0.6, 0.6), vh: rand(0.3, 1), life: 0.3, max: 0.3, color: [255, 220, 150] });
+  // 揮劍：先把劍舉高 0.6 秒，再橫掃
+  if (e.swing > 0) {
+    e.swing -= dt;
+    if (e.swing <= 0) {
+      Sound.play('swordSwing', nearVol(d));
+      const dd = Math.hypot(e.x - p.x, e.y - p.y);
+      if (dd < 2.4 && inHall(p.x, p.y) && p.inv <= 0) {
+        damage(32 + n * 0.15, 15); p.inv = 1.5; p.stunT = 1;
+        const a = Math.atan2(p.y - e.y, p.x - e.x); move(p, Math.cos(a) * 2.5, Math.sin(a) * 2.5, PLAYER_R);
+        G.shake = 0.8;
+        toast('⚔️ 墮落戰神一劍把你打飛撞牆！看到牠舉劍就趕快退開，或躲進包廂關上門。', 'warn');
+      }
+      e.cd = 1.2;
+    }
+    return;
+  }
+  let tx, ty, sp;
+  if (playerInHall && los) {
+    // 看到你就衝過來
+    tx = p.x; ty = p.y; sp = Math.min(4.0 + n * 0.01, 4.8); e.state = 'charge'; e.waitT = 0;
+    if (!G.ev.warlordChargeTip) { G.ev.warlordChargeTip = 1; toast('⚔️ 墮落戰神看到你了，牠衝過來了！牠不會進包廂。', 'warn'); }
+  } else if (e.state === 'charge' || e.state === 'wait') {
+    // 你躲進包廂了：在門外等 10 秒，然後往下一節走
+    if (e.state === 'charge') { e.state = 'wait'; e.waitT = 10; e.wx = clamp(p.x, HALL.x + 0.5, HALL.x + HALL.w - 0.5); }
+    e.waitT -= dt;
+    tx = e.wx; ty = 12.5; sp = 2.2;
+    if (e.waitT <= 0) { e.state = 'patrol'; e.px = e.x < 22 ? HALL.x + HALL.w - 1.5 : HALL.x + 1.5; }
+  } else {
+    // 巡邏：從走道的一頭走到另一頭
+    if (e.px === undefined || Math.abs(e.px - e.x) < 0.6) e.px = e.x < 22 ? HALL.x + HALL.w - 1.5 : HALL.x + 1.5;
+    tx = e.px; ty = 12.5; sp = Math.min(1.5 + n * 0.006, 2.0);
+  }
+  if (e.spawn > 0) sp *= 0.3;
+  const dx = tx - e.x, dy = ty - e.y, l = Math.hypot(dx, dy) || 1;
+  if (l > 0.3) {
+    const ox = e.x, oy = e.y;
+    move(e, dx / l * sp * dt, dy / l * sp * dt, ENEMY_R);
+    e.y = clamp(e.y, HALL.y + 0.35, HALL.y + HALL.h - 0.35);   // 永遠待在走道裡
+    e.x = clamp(e.x, HALL.x + 0.35, HALL.x + HALL.w - 0.35);
+    if (Math.hypot(e.x - ox, e.y - oy) > 0.001) e.face = Math.atan2(e.y - oy, e.x - ox);
+    if (e.stepT > (e.state === 'charge' ? 0.3 : 0.6) && d < 14) { e.stepT = 0; Sound.play('armor', nearVol(d) * 0.8); if (d < 6) G.shake = Math.max(G.shake, 0.05); }
+  } else if (playerInHall) e.face = Math.atan2(p.y - e.y, p.x - e.x);
+  if (playerInHall && d < 2.0 && e.cd <= 0 && e.spawn <= 0) { e.swing = 0.6; e.face = Math.atan2(p.y - e.y, p.x - e.x); Sound.play('armor', nearVol(d)); }
+}
+// 走道裡離你最遠的那一頭
+function warlordSpawn() {
+  const p = G.p, x = p.x < 22 ? HALL.x + HALL.w - 2.5 : HALL.x + 2.5;
+  return { x, y: 12.5 };
+}
+
+// ---------- 檮杌・九瞳：四腳巨獸，九顆眼睛看得到一切。用手電筒把九顆眼睛一顆一顆照到閉上，牠就瞎了 10 秒（傷害 3 倍） ----------
+const TAOWU_EYES = 9;
+function updateTaowu(e, dt) {
+  const p = G.p, n = diffN(), d = Math.hypot(e.x - p.x, e.y - p.y);
+  e.cd = Math.max(0, e.cd - dt); e.roarT -= dt; e.stepT += dt;
+  const beam = inBeam(e);
+  if (beam) { flashHurt(e, dt); if (e.dead) return; }
+  // 眼睛：被手電筒照著時，目前這顆眼睛慢慢閉上（破爛 2 秒、稀有 1.3 秒、巨光 1 秒）
+  const closeTime = [2, 1.33, 1][clamp(p.flashLv || 1, 1, 3) - 1];
+  if (e.blind > 0) {
+    e.blind -= dt;
+    if (e.blind <= 0) { e.reopenT = 3; toast('👁️ 檮杌的眼睛開始重新張開了……', 'warn'); }
+  } else {
+    const shut = e.eyes.filter(x => x.shut).length;
+    if (beam && shut < TAOWU_EYES) {
+      e.eyeProg += dt; e.lit = true;
+      if (e.eyeProg >= closeTime) {
+        e.eyeProg = 0;
+        const eye = e.eyes.find(x => !x.shut); eye.shut = true;
+        Sound.play('tick', 0.6);
+        if (shut + 1 >= TAOWU_EYES) { e.blind = 10; e.lit = false; Sound.play('roar', 0.6); toast('👁️ 九顆眼睛都閉上了！檮杌瞎了 10 秒，所有傷害 3 倍，快打牠！', 'good'); }
+        else if (!G.ev.taowuEyeTip) { G.ev.taowuEyeTip = 1; toast(`👁️ 照到的眼睛閉上了（${shut + 1}/9）！繼續照，九顆都閉上牠就瞎了。`, 'good'); }
+      }
+    } else { e.lit = false; e.eyeProg = Math.max(0, e.eyeProg - dt * 0.5); }
+    // 眼睛慢慢重新張開（每 3 秒一顆）
+    if (shut > 0 && e.blind <= 0) { e.reopenT -= dt; if (e.reopenT <= 0) { e.reopenT = 3; const eye = [...e.eyes].reverse().find(x => x.shut); if (eye) eye.shut = false; } }
+  }
+  if (e.pose) return;
+  // 咆哮（每 15 秒）：理智大掉、畫面模糊
+  if (e.roarT <= 0) {
+    e.roarT = 15; e.roar = 1.2;
+    Sound.play('roar', nearVol(d) * 1.3); G.shake = Math.max(G.shake, 0.5);
+    if (d < 14) { p.san -= 15 * D().san; G.dizzy = Math.min(1, (G.dizzy || 0) + 0.8); toast('🐾 檮杌的咆哮裡有好多人在低語……理智大掉！', 'warn'); }
+  }
+  e.roar = Math.max(0, (e.roar || 0) - dt);
+  if (e.pounce > 0) {
+    e.pounce -= dt;
+    const a = e.pounceA;
+    move(e, Math.cos(a) * 7 * dt, Math.sin(a) * 7 * dt, ENEMY_R);
+    if (Math.hypot(e.x - p.x, e.y - p.y) < 1.0 && p.inv <= 0 && e.blind <= 0) {
+      damage(35 + n * 0.2, 20); p.inv = 1.5;
+      const b = Math.atan2(p.y - e.y, p.x - e.x); move(p, Math.cos(b) * 1.8, Math.sin(b) * 1.8, PLAYER_R);
+      G.shake = 0.9; Sound.play('chomp');
+      toast('🐾 檮杌撲過來咬了你一口！', 'warn');
+      e.pounce = 0; e.cd = 2.5;
+    }
+    return;
+  }
+  let dir, sp = Math.min(1.7 + n * 0.008, 2.4) * (e.spawn > 0 ? 0.3 : 1);
+  if (e.blind > 0) {
+    // 瞎了：亂撞
+    e.wanderT -= dt;
+    if (e.wanderT <= 0) { e.wanderT = rand(0.6, 1.4); e.wa = Math.random() * Math.PI * 2; }
+    dir = { x: Math.cos(e.wa), y: Math.sin(e.wa) }; sp *= 1.3;
+  } else dir = chaseDir(e);   // 九顆眼睛看得到一切：永遠知道你在哪裡
+  const ox = e.x, oy = e.y;
+  move(e, dir.x * sp * dt, dir.y * sp * dt, ENEMY_R);
+  if (Math.hypot(e.x - ox, e.y - oy) > 0.001) e.face = Math.atan2(e.y - oy, e.x - ox);
+  // 撞壞關上的包廂門
+  for (const dr of DOORS) if (dr.closed && !dr.locked && Math.hypot(dr.x + 0.5 - e.x, dr.y + 0.5 - e.y) < 1.3) { setDoor(dr, false); Sound.play('doorSlam'); G.shake = Math.max(G.shake, 0.4); toast('💥 檮杌撞壞了包廂的門！', 'warn'); }
+  if (e.stepT > 0.5 && d < 14) { e.stepT = 0; Sound.play('thump', nearVol(d) * 0.5); }
+  if (d < 1.6 && e.cd <= 0 && e.spawn <= 0 && e.blind <= 0 && e.pounce <= 0) { e.pounce = 0.45; e.pounceA = Math.atan2(p.y - e.y, p.x - e.x); e.cd = 2.5; Sound.play('swish'); }
+}
+
+// ---------- 事件：生新怪物、乘客轉頭 ----------
+function spawnW3Monster(kind) {
+  const ev = G.ev;
+  if (G.enemies.some(e => e.kind === kind) || (kind !== 'kronos' && bossFull())) return;
+  const e = spawnEnemy(kind, kind === 'warlord' ? warlordSpawn() : null);
+  if (!e) return;
+  const tips = {
+    kronos: ['🍄 一個戴著裂開蘑菇傘的矮人一跛一跛地走進了列車……克蘿諾斯・蕈裂衣！牠的長矛會讓夜晚的時鐘倒退，用手電筒照牠的蘑菇傘，有燒的火爐牠不敢靠近。', '🍄 咯咯咯……蕈裂衣又來了。'],
+    tyrant: ['🪨 地板在震動……熔岩暴君上車了！手電筒對牠沒用，用聖水槍冷卻牠再用平底鍋敲，鞭炮也有效。牠跺腳時跳起來就不會被震倒。', '🪨 地板又在震了……熔岩暴君來了。'],
+    warlord: ['⚔️ 走道那頭傳來鐵甲和劍磨地的聲音……墮落戰神！牠只在走道裡走，看到你就衝過來。從背後打傷害 3 倍，躲進包廂關上門牠就進不來。', '⚔️ 劍磨地的聲音又出現了……墮落戰神在走道裡。'],
+    taowu: ['🐾 一聲咆哮混著無數人的低語……檮杌・九瞳！牠知道你在哪裡。用手電筒把牠臉上的九顆眼睛一顆一顆照到閉上，牠就瞎了。', '🐾 檮杌・九瞳又來了……'],
+  }[kind];
+  Sound.play({ kronos: 'kcackle', tyrant: 'stompBig', warlord: 'swordDrag', taowu: 'roar' }[kind], 0.7);
+  toast(ev['tip_' + kind] ? tips[1] : tips[0], 'warn');
+  ev['tip_' + kind] = 1;
+}
+// 某個乘客的頭慢慢轉過來看你（跟閣樓娃娃一樣的做法）
+function passengerTurn() {
+  const seats = FURN.filter(f => f.pax);
+  if (!seats.length) return;
+  const f = pick(seats);
+  G.ev.paxTurn = { id: f.id, t: 0 };
+  Sound.play('whisper');
+  toast('👤 ……有個乘客的頭，慢慢地轉了過來。', 'warn');
+}
+
+// ====================================================================
+// 臉（2D 畫法；3D 貼圖、驚嚇畫面、圖鑑的 2D 縮圖共用）。全部寫實風：空洞的眼窩、裂開的嘴、沒有表情
+// ====================================================================
+// 克蘿諾斯・蕈裂衣：灰綠色乾裂的屍皮、深陷的眼窩裡一點黃光、裂開的嘴露出爛牙、尖耳朵
+function drawKronosFace(c, S, bare = false) {
+  const r = seeded(3301);
+  c.save(); c.scale(S / 512, S / 512); c.lineCap = 'round'; c.lineJoin = 'round';
+  if (!bare) {
+    // 蘑菇傘（紫藍色、白斑、裂縫透出紫光）
+    const cg = c.createRadialGradient(256, 150, 20, 256, 150, 240); cg.addColorStop(0, '#6a4a9c'); cg.addColorStop(0.7, '#4a2e7a'); cg.addColorStop(1, '#2c1a4a');
+    c.fillStyle = cg; c.beginPath(); c.ellipse(256, 150, 250, 130, 0, Math.PI, 0); c.fill();
+    c.fillStyle = '#3a2a5c'; c.fillRect(6, 146, 500, 14);
+    for (let i = 0; i < 16; i++) { const x = 40 + r() * 432, y = 60 + r() * 80; c.fillStyle = `rgba(230,225,240,${0.55 + r() * 0.35})`; c.beginPath(); c.ellipse(x, y, 8 + r() * 12, 5 + r() * 8, r() * 3, 0, 7); c.fill(); }
+    c.strokeStyle = '#d9b3ff'; c.lineWidth = 3; c.beginPath(); c.moveTo(256, 24); c.lineTo(248, 70); c.lineTo(262, 110); c.lineTo(250, 150); c.stroke();
+    c.strokeStyle = 'rgba(220,180,255,.5)'; c.lineWidth = 8; c.stroke();
+  }
+  // 尖耳朵
+  c.fillStyle = '#5f6e4e';
+  for (const s of [-1, 1]) { c.beginPath(); c.moveTo(256 + s * 120, 250); c.lineTo(256 + s * 230, 180); c.lineTo(256 + s * 150, 300); c.fill(); }
+  // 臉：灰綠色、乾裂
+  const fg = c.createRadialGradient(256, 290, 30, 256, 300, 180); fg.addColorStop(0, '#8a9a72'); fg.addColorStop(0.75, '#5f6e4e'); fg.addColorStop(1, '#3a4530');
+  c.fillStyle = fg; c.beginPath(); c.ellipse(256, 300, 128, 150, 0, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = 'rgba(30,40,25,.6)'; c.lineWidth = 1.5;
+  for (let i = 0; i < 40; i++) { let x = 140 + r() * 232, y = 170 + r() * 260; c.beginPath(); c.moveTo(x, y); for (let k = 0; k < 3; k++) { x += (r() - 0.5) * 30; y += (r() - 0.5) * 30; c.lineTo(x, y); } c.stroke(); }
+  // 深陷的眼窩、小小的黃色眼珠
+  for (const ex of [205, 307]) {
+    const g = c.createRadialGradient(ex, 262, 4, ex, 262, 40); g.addColorStop(0, '#060805'); g.addColorStop(0.7, '#1c2416'); g.addColorStop(1, 'rgba(60,70,50,0)');
+    c.fillStyle = g; c.beginPath(); c.ellipse(ex, 262, 38, 28, 0, 0, 7); c.fill();
+    c.fillStyle = '#e8c24a'; c.beginPath(); c.arc(ex + 3, 264, 5, 0, 7); c.fill();
+    c.fillStyle = 'rgba(232,194,74,.35)'; c.beginPath(); c.arc(ex + 3, 264, 10, 0, 7); c.fill();
+  }
+  // 鼻子：兩個洞
+  c.fillStyle = '#2a3322'; for (const s of [-1, 1]) { c.beginPath(); c.ellipse(256 + s * 10, 318, 6, 9, 0, 0, 7); c.fill(); }
+  // 裂開的嘴：咧到兩邊，爛牙
+  c.fillStyle = '#1a1410'; c.beginPath(); c.moveTo(166, 360); c.quadraticCurveTo(256, 400, 346, 356); c.quadraticCurveTo(300, 420, 256, 422); c.quadraticCurveTo(212, 420, 166, 360); c.fill();
+  c.fillStyle = '#c9b98a';
+  for (let x = 180; x < 330; x += 17) { const h = 10 + r() * 14; c.fillRect(x, 366 + Math.abs(x - 256) * 0.1, 11, h); }
+  c.strokeStyle = '#3a4530'; c.lineWidth = 5; c.beginPath(); c.moveTo(166, 360); c.quadraticCurveTo(256, 400, 346, 356); c.stroke();
+  c.restore();
+}
+// 熔岩暴君：黑色的岩塊拼成的臉，縫隙透出橘紅色的熔岩光，兩個熔岩洞當眼睛，鋸齒狀的嘴
+function drawTyrantFace(c, S) {
+  const r = seeded(4402);
+  c.save(); c.scale(S / 512, S / 512); c.lineJoin = 'round';
+  c.beginPath(); c.ellipse(256, 270, 236, 250, 0, 0, Math.PI * 2); c.clip();   // 橢圓形的臉，外面透明（3D 的臉才不會是一塊方的）
+  const lava = c.createRadialGradient(256, 280, 20, 256, 280, 240); lava.addColorStop(0, '#ff9a2a'); lava.addColorStop(0.6, '#e04a10'); lava.addColorStop(1, '#5a1000');
+  c.fillStyle = lava; c.fillRect(0, 0, 512, 512);
+  // 岩塊
+  for (let i = 0; i < 70; i++) {
+    const x = r() * 512, y = r() * 512, w = 30 + r() * 70, h = 24 + r() * 50;
+    c.fillStyle = `rgb(${18 + r() * 20 | 0},${16 + r() * 16 | 0},${16 + r() * 14 | 0})`;
+    c.beginPath(); c.moveTo(x, y); c.lineTo(x + w, y + (r() - 0.5) * 14); c.lineTo(x + w + (r() - 0.5) * 14, y + h); c.lineTo(x + (r() - 0.5) * 14, y + h + (r() - 0.5) * 10); c.closePath(); c.fill();
+  }
+  // 眼睛：兩個熔岩洞
+  for (const ex of [196, 316]) {
+    c.fillStyle = '#0a0806'; c.beginPath(); c.ellipse(ex, 230, 52, 34, 0, 0, 7); c.fill();
+    const g = c.createRadialGradient(ex, 232, 2, ex, 232, 36); g.addColorStop(0, '#fff2a0'); g.addColorStop(0.3, '#ffb020'); g.addColorStop(1, 'rgba(255,100,20,0)');
+    c.fillStyle = g; c.beginPath(); c.ellipse(ex, 232, 40, 26, 0, 0, 7); c.fill();
+    c.fillStyle = '#0a0806'; c.beginPath(); c.moveTo(ex - 60, 196); c.lineTo(ex + 60, 206); c.lineTo(ex + 50, 186); c.fill();
+  }
+  // 鋸齒狀的嘴，裡面是熔岩
+  c.fillStyle = '#ff8a1a'; c.beginPath(); c.moveTo(150, 360); c.lineTo(362, 350); c.lineTo(340, 420); c.lineTo(172, 428); c.fill();
+  c.fillStyle = '#0c0a08';
+  for (let x = 150; x < 362; x += 24) { c.beginPath(); c.moveTo(x, 352); c.lineTo(x + 12, 392 + r() * 10); c.lineTo(x + 24, 352); c.fill(); c.beginPath(); c.moveTo(x + 6, 428); c.lineTo(x + 14, 396 - r() * 10); c.lineTo(x + 24, 428); c.fill(); }
+  c.restore();
+}
+// 墮落戰神：骷髏的臉（空洞的眼窩、沒有鼻子、一排牙），頭盔的面罩在上面
+function drawSkullFace(c, S) {
+  const r = seeded(5503);
+  c.save(); c.scale(S / 512, S / 512); c.lineJoin = 'round';
+  const bg = c.createRadialGradient(256, 260, 40, 256, 280, 200); bg.addColorStop(0, '#d9d2c2'); bg.addColorStop(0.8, '#b3ab98'); bg.addColorStop(1, '#6a6458');
+  c.fillStyle = bg; c.beginPath(); c.ellipse(256, 250, 150, 170, 0, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.moveTo(150, 320); c.quadraticCurveTo(256, 470, 362, 320); c.fill();
+  c.strokeStyle = 'rgba(60,55,45,.5)'; c.lineWidth = 1.5;
+  for (let i = 0; i < 20; i++) { let x = 130 + r() * 252, y = 120 + r() * 300; c.beginPath(); c.moveTo(x, y); for (let k = 0; k < 3; k++) { x += (r() - 0.5) * 36; y += (r() - 0.5) * 36; c.lineTo(x, y); } c.stroke(); }
+  for (const ex of [196, 316]) { const g = c.createRadialGradient(ex, 250, 4, ex, 250, 54); g.addColorStop(0, '#000'); g.addColorStop(0.75, '#120e0c'); g.addColorStop(1, 'rgba(40,30,25,0)'); c.fillStyle = g; c.beginPath(); c.ellipse(ex, 250, 54, 44, 0, 0, 7); c.fill(); c.fillStyle = 'rgba(200,60,40,.55)'; c.beginPath(); c.arc(ex + 2, 254, 6, 0, 7); c.fill(); }
+  c.fillStyle = '#1a1512'; c.beginPath(); c.moveTo(256, 300); c.lineTo(236, 340); c.lineTo(276, 340); c.fill();
+  c.fillStyle = '#2a2420'; c.fillRect(176, 372, 160, 34);
+  c.fillStyle = '#e4ddcc'; for (let x = 180; x < 332; x += 16) c.fillRect(x, 372, 12, 28 + r() * 8);
+  c.strokeStyle = '#3a3430'; c.lineWidth = 3; c.beginPath(); c.moveTo(176, 406); c.lineTo(336, 406); c.stroke();
+  c.restore();
+}
+// 檮杌・九瞳：一團深紫色的毛，上面聚著九顆大小不一的眼睛（紫色瞳孔）
+function drawTaowuFace(c, S) {
+  const r = seeded(6604);
+  c.save(); c.scale(S / 512, S / 512);
+  const fg = c.createRadialGradient(256, 256, 40, 256, 256, 250); fg.addColorStop(0, '#7a6a90'); fg.addColorStop(1, '#2a1a3a');
+  c.fillStyle = fg; c.beginPath(); c.ellipse(256, 270, 230, 230, 0, 0, 7); c.fill();
+  c.strokeStyle = 'rgba(120,60,180,.6)'; c.lineCap = 'round';
+  for (let i = 0; i < 160; i++) { const a = r() * Math.PI * 2, d = 150 + r() * 100; c.lineWidth = 2 + r() * 3; c.beginPath(); c.moveTo(256 + Math.cos(a) * d * 0.6, 270 + Math.sin(a) * d * 0.6); c.lineTo(256 + Math.cos(a) * d, 270 + Math.sin(a) * d); c.stroke(); }
+  for (const [x, y, rr] of [[256, 250, 44], [196, 230, 30], [318, 236, 32], [226, 300, 26], [292, 304, 28], [170, 280, 20], [344, 288, 22], [256, 332, 22], [256, 190, 18]]) {
+    c.fillStyle = '#1a0c22'; c.beginPath(); c.arc(x, y, rr + 6, 0, 7); c.fill();
+    c.fillStyle = '#efe6ea'; c.beginPath(); c.arc(x, y, rr, 0, 7); c.fill();
+    c.strokeStyle = 'rgba(140,40,120,.6)'; c.lineWidth = 1; for (let k = 0; k < 6; k++) { const a = r() * Math.PI * 2; c.beginPath(); c.moveTo(x + Math.cos(a) * rr * 0.95, y + Math.sin(a) * rr * 0.95); c.lineTo(x + Math.cos(a) * rr * 0.55, y + Math.sin(a) * rr * 0.55); c.stroke(); }
+    c.fillStyle = '#6a2a9c'; c.beginPath(); c.arc(x + rr * 0.12, y, rr * 0.5, 0, 7); c.fill();
+    c.fillStyle = '#0a0410'; c.beginPath(); c.arc(x + rr * 0.12, y, rr * 0.24, 0, 7); c.fill();
+    c.fillStyle = 'rgba(255,255,255,.8)'; c.beginPath(); c.arc(x - rr * 0.1, y - rr * 0.2, rr * 0.12, 0, 7); c.fill();
+  }
+  c.restore();
+}
+// ---------- 圖鑑的 2D 縮圖（WebGL 開不起來時用） ----------
+function thumbKronos(c, S) { c.save(); c.scale(S / 200, S / 200); c.translate(14, 6); drawKronosFace(c, 172); c.restore(); }
+function thumbTyrant(c, S) { c.save(); c.scale(S / 200, S / 200); c.translate(10, 10); drawTyrantFace(c, 180); c.restore(); }
+function thumbWarlord(c, S) {
+  c.save(); c.scale(S / 200, S / 200);
+  c.fillStyle = '#e6e0d2'; c.beginPath(); c.moveTo(60, 200); c.lineTo(70, 90); c.lineTo(130, 90); c.lineTo(140, 200); c.fill();
+  c.fillStyle = '#b8c0c8'; for (const s of [-1, 1]) { c.beginPath(); c.moveTo(100 + s * 28, 60); c.quadraticCurveTo(100 + s * 60, 30, 100 + s * 46, 4); c.lineTo(100 + s * 38, 54); c.fill(); }
+  c.translate(60, 20); drawSkullFace(c, 80); c.restore();
+  c.save(); c.scale(S / 200, S / 200); c.strokeStyle = '#8a8f96'; c.lineWidth = 9; c.beginPath(); c.moveTo(150, 110); c.lineTo(178, 196); c.stroke(); c.restore();
+}
+function thumbTaowu(c, S) { c.save(); c.scale(S / 200, S / 200); c.translate(8, 8); drawTaowuFace(c, 184); c.restore(); }
