@@ -1509,7 +1509,7 @@ function drawClownFace(c, S) {
 }
 
 // ====================================================================
-// 怪物圖鑑
+// 怪物圖鑑：卡片上是遊戲裡的 3D 怪物（會做動作，render3d.js 的 Renderer.book）；WebGL 不行時用下面的 2D 縮圖
 // ====================================================================
 function thumbShadow(eye, crouch) {
   return (c, S) => {
@@ -1587,22 +1587,22 @@ function thumbClown(c, S) {
   c.restore();
 }
 const BESTIARY = [
-  { name: '黑影', night: 1, draw: thumbShadow('#ff3344'), desc: '到處追你，燈光也擋不住牠。手電筒照著牠會一直扣血，平底鍋一敲就散掉。' },
-  { name: '火柴人', night: INTRO.stick, draw: thumbStick, desc: '會穿牆，一邊吹口哨一邊朝你揮手走過來，走得很慢。紙做的身體被手電筒照到就會燒起來。' },
-  { name: '衣櫃怪', night: 2, draw: thumbShadow('#ffd23a', true), w1only: true, desc: '衣櫃晃動時沒去按住 E 壓住門，就會衝出來，速度很快。' },
-  { name: '黑球', night: INTRO.blob, draw: thumbBlob, desc: '不追你，專門去吃燈，每吃一次燈泡降一級，特殊燈泡會直接被吃掉。用手電筒照牠、用彈弓打牠。' },
-  { name: '眼球花', night: INTRO.flower, draw: thumbFlower, desc: '長在屋子裡、白天也不會消失。被它盯 3 秒它就會尖叫，把黑影叫過來。用手電筒照它、用平底鍋打它，或走過去按住 E 拔掉。' },
-  { name: '血淚女', night: INTRO.woman, draw: drawWomanFace, desc: '你看著她，她就不會動；但一直盯著她，理智會快速下降。看著她走過去，用平底鍋或聖水槍打她！' },
-  { name: '小丑', night: INTRO.clown, draw: thumbClown, desc: '先會飄來一顆紅氣球，用手電筒照破或用武器打破它。讓氣球碰到你，小丑就會拿著刀出現在你背後！撒鹽巴可以把他推開。' },
-  { name: '爬行女', night: INTRO.tv, draw: drawCrawlerFace, w1only: true, desc: '客廳的電視自己打開後，不快點關掉，她就會從螢幕裡爬出來。關掉電視或把她打倒都可以。' },
-  { name: '鳥腳女', night: INTRO.momo, draw: drawMomoFace, desc: '眼睛不好，靠聲音找你，一跳一跳地追過來。別奔跑，輕輕推搖桿慢慢走。鞭炮很吵會把她引過去！手電筒照到她的眼鏡會讓她暫時看不見。' },
-  { name: '它', night: INTRO.tall, draw: thumbTall, desc: '高大又非常耐打，手電筒和武器對它只有一半效果。靠聖水槍、鞭炮、天使和火球一起對付它。' },
+  { name: '黑影', night: 1, kind: 'shadow', draw: thumbShadow('#ff3344'), desc: '到處追你，燈光也擋不住牠。手電筒照著牠會一直扣血，平底鍋一敲就散掉。' },
+  { name: '火柴人', night: INTRO.stick, kind: 'stick', draw: thumbStick, desc: '會穿牆，一邊吹口哨一邊朝你揮手走過來，走得很慢。紙做的身體被手電筒照到就會燒起來。' },
+  { name: '衣櫃怪', night: 2, kind: 'fast', draw: thumbShadow('#ffd23a', true), w1only: true, desc: '衣櫃晃動時沒去按住 E 壓住門，就會衝出來，速度很快。' },
+  { name: '黑球', night: INTRO.blob, kind: 'blob', draw: thumbBlob, desc: '不追你，專門去吃燈，每吃一次燈泡降一級，特殊燈泡會直接被吃掉。用手電筒照牠、用彈弓打牠。' },
+  { name: '眼球花', night: INTRO.flower, flower: 'eye', draw: thumbFlower, desc: '長在屋子裡、白天也不會消失。被它盯 3 秒它就會尖叫，把黑影叫過來。用手電筒照它、用平底鍋打它，或走過去按住 E 拔掉。' },
+  { name: '血淚女', night: INTRO.woman, kind: 'woman', draw: drawWomanFace, desc: '你看著她，她就不會動；但一直盯著她，理智會快速下降。看著她走過去，用平底鍋或聖水槍打她！' },
+  { name: '小丑', night: INTRO.clown, kind: 'clown', draw: thumbClown, desc: '先會飄來一顆紅氣球，用手電筒照破或用武器打破它。讓氣球碰到你，小丑就會拿著刀出現在你背後！撒鹽巴可以把他推開。' },
+  { name: '爬行女', night: INTRO.tv, kind: 'crawler', draw: drawCrawlerFace, w1only: true, desc: '客廳的電視自己打開後，不快點關掉，她就會從螢幕裡爬出來。關掉電視或把她打倒都可以。' },
+  { name: '鳥腳女', night: INTRO.momo, kind: 'momo', draw: drawMomoFace, desc: '眼睛不好，靠聲音找你，一跳一跳地追過來。別奔跑，輕輕推搖桿慢慢走。鞭炮很吵會把她引過去！手電筒照到她的眼鏡會讓她暫時看不見。' },
+  { name: '它', night: INTRO.tall, kind: 'tall', draw: thumbTall, desc: '高大又非常耐打，手電筒和武器對它只有一半效果。靠聖水槍、鞭炮、天使和火球一起對付它。' },
   // 第二世界：夢核花園
-  { world: 2, name: '向日葵眼', night: INTRO2.sunflower, draw: thumbSunflower, desc: '長在地上不會動，會轉向最亮的光。你開著手電筒被它看到，它就會盯著你、往你腳邊吐種子。關掉手電筒走過去打它或按住 E 拔掉；種子吐過來時跳起來就打不到。' },
-  { world: 2, name: '千眼菇', night: INTRO2.shroom, draw: thumbShroom, desc: '長滿眼睛的大蘑菇，不會動，四面八方都看得到。靠近它會撒孢子，理智掉很快、畫面變得暈暈的。用手電筒照它，眼睛就會閉起來。每天早上旁邊會再長出一朵小的，要趕快打掉！' },
-  { world: 2, name: '草叢人', night: INTRO2.grass, draw: thumbGrass, desc: '躲在草裡移動，只看得到一叢草在晃。靠近時會突然撲出來抓你的腳：撲過來的瞬間跳起來就抓不到；被抓住就連按「跳」5 下掙脫。用手電筒照晃動的草叢可以把牠逼出來。' },
-  { world: 2, name: '大嘴觸角蟲', night: INTRO2.snail, draw: thumbSnail, desc: '爬得很慢但非常耐打，爬過的地方留下黏液，踩到會變慢（跳過去就沒事）。用手電筒照牠，觸角會縮回去、停 2 秒；🧂鹽巴對牠的傷害是 3 倍！' },
-  { world: 2, name: '眼花女孩', night: INTRO2.girl, draw: thumbGirl, desc: '第二世界的大魔王。靠樹枝上的兩顆眼球花看東西，被盯著會「眼花」，畫面晃、走路歪。她還會種下眼睛種子，長大就變成向日葵眼（還沒長大前可以踩掉）。手電筒照她會變瞎子，聖水槍特別有效。' },
+  { world: 2, name: '向日葵眼', night: INTRO2.sunflower, flower: 'sunflower', draw: thumbSunflower, desc: '長在地上不會動，會轉向最亮的光。你開著手電筒被它看到，它就會盯著你、往你腳邊吐種子。關掉手電筒走過去打它或按住 E 拔掉；種子吐過來時跳起來就打不到。' },
+  { world: 2, name: '千眼菇', night: INTRO2.shroom, flower: 'shroom', draw: thumbShroom, desc: '長滿眼睛的大蘑菇，不會動，四面八方都看得到。靠近它會撒孢子，理智掉很快、畫面變得暈暈的。用手電筒照它，眼睛就會閉起來。每天早上旁邊會再長出一朵小的，要趕快打掉！' },
+  { world: 2, name: '草叢人', night: INTRO2.grass, kind: 'grass', draw: thumbGrass, desc: '躲在草裡移動，只看得到一叢草在晃。靠近時會突然撲出來抓你的腳：撲過來的瞬間跳起來就抓不到；被抓住就連按「跳」5 下掙脫。用手電筒照晃動的草叢可以把牠逼出來。' },
+  { world: 2, name: '大嘴觸角蟲', night: INTRO2.snail, kind: 'snail', draw: thumbSnail, desc: '爬得很慢但非常耐打，爬過的地方留下黏液，踩到會變慢（跳過去就沒事）。用手電筒照牠，觸角會縮回去、停 2 秒；🧂鹽巴對牠的傷害是 3 倍！' },
+  { world: 2, name: '眼花女孩', night: INTRO2.girl, kind: 'girl', draw: thumbGirl, desc: '第二世界的大魔王。靠樹枝上的兩顆眼球花看東西，被盯著會「眼花」，畫面晃、走路歪。她還會種下眼睛種子，長大就變成向日葵眼（還沒長大前可以踩掉）。手電筒照她會變瞎子，聖水槍特別有效。' },
 ];
 let bookBuilt = false, bookFrom = 'title', bookWorld = 1;
 function openBook(from) {
@@ -1617,19 +1617,28 @@ function showBookPage(w) {
   for (const b of document.querySelectorAll('#bookTabs button')) b.classList.toggle('on', +b.dataset.w === w);
   const list = $('bookList');
   list.innerHTML = '';
+  const live = !!(window.Renderer && Renderer.book && Renderer.book.ok()), items = [];
   for (const m of BESTIARY) {
     if ((m.world || 1) === 2 ? w !== 2 : (w === 2 && m.w1only)) continue;
     const card = document.createElement('div');
     card.className = 'card';
-    const cvs = document.createElement('canvas');
-    cvs.width = cvs.height = 176;
-    m.draw(cvs.getContext('2d'), 176);
+    let pic;
+    if (live) {
+      // 3D 怪物畫在這個框的位置上（render3d.js 每一幀照它在畫面上的位置畫）
+      pic = document.createElement('div'); pic.className = 'stage';
+      items.push({ el: pic, kind: m.kind, flower: m.flower });
+    } else {
+      pic = document.createElement('canvas');
+      pic.width = pic.height = 176;
+      m.draw(pic.getContext('2d'), 176);
+    }
     const info = document.createElement('div');
     const when = m.world === 2 ? `第 ${m.night} 夜起` : w === 2 ? '第 1 夜起' : `第 ${m.night} 夜起`;
     info.innerHTML = `<h4>${m.name}<span class="night">${when}</span></h4><p>${m.desc}</p>`;
-    card.append(cvs, info);
+    card.append(pic, info);
     list.appendChild(card);
   }
+  if (live) Renderer.book.show(items);
   $('bookNote').textContent = w === 2
     ? '第二世界的怪物等級比較高。第一世界的怪物也都會來（爬行女和衣櫃怪除外），而且第 1 夜就可能出現。'
     : '所有怪物都有等級（Lv）和血量，夜晚越後面等級越高、越耐打。';

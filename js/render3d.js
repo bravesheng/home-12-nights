@@ -2061,8 +2061,8 @@ function buildGirl(r, g) {
 }
 const NEW_BUILD = { stick: buildStick, momo: buildMomo, crawler: buildCrawler, balloon: buildBalloon, clown: buildClown, grass: buildGrass, snail: buildSnail, girl: buildGirl };
 
-function syncNewMonster(e, r, t) {
-  const p = G.p, d = Math.hypot(e.x - p.x, e.y - p.y);
+function syncNewMonster(e, r, t, p = G.p) {
+  const d = Math.hypot(e.x - p.x, e.y - p.y);
   const dt = clamp(t - (r.lastT ?? t), 0, 0.1);   // 這一幀過了多久（頭髮的彈簧、火柴人的動作用）
   r.lastT = t;
   switch (e.kind) {
@@ -2340,8 +2340,8 @@ function buildShroom(f, g) {
 }
 // 眼球花：綠色的莖和兩片葉子，花是一顆會轉過來盯著你的大眼球
 const flowerMap = new Map();
-function buildFlower(f) {
-  const g = new THREE.Group(); g.position.set(f.x, 0, f.y); scene.add(g);
+function buildFlower(f, parent = scene) {
+  const g = new THREE.Group(); g.position.set(f.x, 0, f.y); parent.add(g);
   if (f.ptype === 'sunflower') return buildSunflower(f, g);
   if (f.ptype === 'shroom') return buildShroom(f, g);
   const stem = lm('#4f8a4a');
@@ -2368,6 +2368,13 @@ function syncFlowers(t) {
     seen.add(f);
     let r = flowerMap.get(f);
     if (!r) { r = buildFlower(f); flowerMap.set(f, r); }
+    syncFlower(f, r, t, p, awake);
+  }
+  for (const [f, r] of flowerMap) if (!seen.has(f)) { disposeGroup(r.g); flowerMap.delete(f); }
+}
+// 一朵植物怪的動作（p 是玩家的位置；圖鑑裡是假的玩家）
+function syncFlower(f, r, t, p, awake) {
+  {
     r.g.scale.setScalar(Math.max(0.05, f.grow));
     const dx = p.x - f.x, dz = p.y - f.y, dist = Math.hypot(dx, dz);
     if (f.ptype === 'sunflower') {
@@ -2385,7 +2392,7 @@ function syncFlowers(t) {
       const blink = Math.sin(t * 0.9 + f.x * 2.7) > 0.975 ? 1 : 0;
       const k = !awake ? 0.85 : Math.max(Math.min(1, f.burn || 0) * 0.55, blink) - (f.lock >= SUN_LOCK ? 0.12 : 0);
       r.lids[0].rotation.x = -0.35 + 0.92 * k; r.lids[1].rotation.x = 0.35 - 0.92 * k;
-      continue;
+      return;
     }
     if (f.ptype === 'shroom') {
       // 被手電筒照到時，菇傘上的眼睛全部閉起來（變暗）；撒孢子時發亮
@@ -2413,7 +2420,7 @@ function syncFlowers(t) {
         _m4.compose(_v, _qI, _v2.setScalar(k < 1 ? 1 : 1.3)); r.drops.setMatrixAt(i, _m4);
       }
       r.drops.instanceMatrix.needsUpdate = true;
-      continue;
+      return;
     }
     if (awake) {
       r.eyeG.rotation.y = Math.atan2(dx, dz) + Math.sin(t * 7 + f.x) * 0.02;
@@ -2425,7 +2432,6 @@ function syncFlowers(t) {
     r.eyeMat.emissive.setRGB(0.1 + al, 0.08, 0.08);
     r.irisMat.emissive.setRGB(0.08 + al, 0.06, 0.06);
   }
-  for (const [f, r] of flowerMap) if (!seen.has(f)) { disposeGroup(r.g); flowerMap.delete(f); }
 }
 
 // ====================================================================
@@ -2750,8 +2756,8 @@ function eyePair(g, y, z, color, size, gap) {
   }
   return eyes;
 }
-function buildEnemy(e) {
-  const g = new THREE.Group(); scene.add(g);
+function buildEnemy(e, parent = scene) {
+  const g = new THREE.Group(); parent.add(g);
   const mat = ownBasic({ color: 0x000000, transparent: true, opacity: 1 });
   const r = { g, mat, wisps: [], eyes: [], mats: [mat] };
   if (e.kind === 'woman') {
@@ -2803,6 +2809,13 @@ function syncEnemies(t) {
     seen.add(e);
     let r = enemyMap.get(e);
     if (!r) { r = buildEnemy(e); enemyMap.set(e, r); }
+    syncEnemy(e, r, t, p);
+  }
+  for (const [e, r] of enemyMap) if (!seen.has(e)) { disposeGroup(r.g); enemyMap.delete(e); }
+}
+// 一隻怪物的動作（p 是玩家的位置；圖鑑裡是假的玩家）
+function syncEnemy(e, r, t, p) {
+  {
     const a = enemyAlpha(e);
     r.g.visible = a > 0.02;
     r.g.position.set(e.x, Math.sin(e.wob * 2) * 0.04, e.y);
@@ -2825,9 +2838,8 @@ function syncEnemies(t) {
       r.body.rotation.y = e.wob * 0.5;
       r.eyeG.position.set(0, R * 0.22, R * 0.97);
       r.eyes.forEach((ey, i) => { ey.position.set((i ? 1 : -1) * R * 0.2, 0, 0); ey.scale.setScalar(0.1 * (e.size || 1)); });
-    } else if (NEW_BUILD[e.kind]) syncNewMonster(e, r, t);
+    } else if (NEW_BUILD[e.kind]) syncNewMonster(e, r, t, p);
   }
-  for (const [e, r] of enemyMap) if (!seen.has(e)) { disposeGroup(r.g); enemyMap.delete(e); }
 }
 const ghostMap = new Map();
 function syncGhosts() {
@@ -3196,6 +3208,147 @@ function updateAtmosphere(dark, t) {
   if (k < 0.5) tmpC.copy(cWinDay).lerp(cWinDusk, k * 2); else tmpC.copy(cWinDusk).lerp(winNight, (k - 0.5) * 2);
   for (const w of windows) w.material.color.copy(tmpC);
 }
+// ====================================================================
+// 怪物圖鑑：用遊戲裡的 3D 模型即時畫在卡片上，而且會做動作
+// 另外開一張透明、不吃觸控的 WebGL 畫布蓋在圖鑑畫面上，每張卡片的位置各畫一隻（用 scissor 裁在卡片和面板的範圍內）。
+// 怪物用假的敵人資料驅動原本的動作程式，照劇本輪流做動作；鏡頭慢慢左右繞，看得出立體。
+// 光線不用遊戲的光照貼圖（換成一張固定亮度的 1×1 貼圖），再加兩盞燈。WebGL 開不起來就回報 ok() = false，圖鑑改用 2D 縮圖。
+// ====================================================================
+const book = { active: false, items: [], models: new Map(), renderer: null, scene: null, cam: null, t: 0, w: 0, h: 0, okFlag: null, stats: { rendered: 0, built: 0 } };
+const BOOK_P = { x: 0, y: 0, flash: false };   // 假的玩家：怪物會面向它
+// 每種怪物的取景：h 高度、d 鏡頭距離、cy 看著的高度（沒寫就用高度算）
+const BOOK_VIEW = { crawler: { h: 1.0, d: 2.8, cy: 0.4 }, snail: { h: 1.45, d: 2.9, cy: 0.6 }, blob: { h: 1.0, d: 2.4, cy: 0.5 }, shroom: { h: 1.95, d: 3.7 }, grass: { h: 1.95 }, sunflower: { h: 1.75 }, eye: { h: 1.65 } };
+function bookOk() {
+  if (book.okFlag !== null) return book.okFlag;
+  try {
+    const cv = document.createElement('canvas');
+    cv.id = 'bookfx';
+    document.getElementById('book').appendChild(cv);
+    const coarse = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+    const R = new THREE.WebGLRenderer({ canvas: cv, alpha: true, antialias: !coarse, powerPreference: 'high-performance' });
+    R.outputColorSpace = SRGB;
+    R.setScissorTest(true);
+    book.renderer = R;
+    book.scene = new THREE.Scene();
+    book.cam = new THREE.PerspectiveCamera(36, 1, 0.05, 40);
+    const key = new THREE.DirectionalLight(0xfff0dc, 1.0); key.position.set(1.5, 3, 2.5); book.scene.add(key);
+    const fill = new THREE.DirectionalLight(0xa8b8ff, 0.3); fill.position.set(-2, 1, -1); book.scene.add(fill);
+    // 舞台：四周是暗色漸層的背景、腳下一圈地板（圖鑑卡片的範圍全部由這裡畫滿）
+    const bg = canvasTex(8, 64, (c, w, h) => { const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#171320'); g.addColorStop(0.5, '#2e2640'); g.addColorStop(1, '#4a3d5e'); c.fillStyle = g; c.fillRect(0, 0, w, h); });
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(12, 16, 12), new THREE.MeshBasicMaterial({ map: bg, side: THREE.BackSide, fog: false }));
+    dome.position.set(BOOK_X, 1.0, BOOK_Y); book.scene.add(dome);
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(1.6, 32), new THREE.MeshBasicMaterial({ color: 0x231c2e, fog: false }));
+    floor.rotation.x = -Math.PI / 2; floor.position.set(BOOK_X, 0.002, BOOK_Y); book.scene.add(floor);
+    book.lm = new THREE.DataTexture(new Uint8Array([100, 96, 108, 255]), 1, 1, THREE.RGBAFormat);
+    book.lm.needsUpdate = true;
+    book.okFlag = true;
+  } catch (e) { book.okFlag = false; }
+  return book.okFlag;
+}
+// 怪物都放在地圖中間同一個位置（lightAt 之類的函式要查得到房間），一次只顯示一隻
+const BOOK_X = Math.floor(MAP_W / 2) + 0.5, BOOK_Y = Math.floor(MAP_H / 2) + 0.5;
+function bookModel(spec) {
+  const key = spec.flower ? 'f:' + spec.flower : spec.kind;
+  let m = book.models.get(key);
+  if (m) return m;
+  book.stats.built++;
+  if (spec.flower) {
+    const f = { x: BOOK_X, y: BOOK_Y, ptype: spec.flower, grow: 1, face: Math.PI / 2, lock: 0, burn: 0, alarm: 0, shut: 0, spore: false, sees: false, watch: 0 };
+    m = { key, f, r: buildFlower(f, book.scene) };
+  } else {
+    const e = { kind: spec.kind, x: BOOK_X, y: BOOK_Y, wob: 0, spawn: 0, hp: 1, lv: 1, size: 1, h: 0.4, eatT: 0, seen: false,
+      burn: 0, emerge: 0, pauseT: 0, state: 'idle', cd: 0, stun: 0, hopT: 1, hopping: 0, air: 0, rise: 0, hidden: false, retract: 0, chew: 0, blind: 0, blindCd: 0 };
+    m = { key, e, r: buildEnemy(e, book.scene) };
+  }
+  const v = BOOK_VIEW[spec.flower || spec.kind] || {};
+  m.h = v.h || barH(m.e || m.f); m.d = v.d || m.h * 1.85 + 0.3; m.cy = v.cy ?? m.h * 0.5;
+  m.r.g.visible = false;
+  book.models.set(key, m);
+  return m;
+}
+// 劇本：每隻怪物輪流做自己的動作（c 是這隻的週期時間）
+function bookAnimate(m, t, dt, ph) {
+  const e = m.e, f = m.f;
+  if (f) {
+    const c = (t + ph) % 6;
+    // 假玩家慢慢左右走，眼睛會跟著看；向日葵眼一半時間盯著你、一半時間看別的光；千眼菇偶爾閉眼
+    BOOK_P.x = f.x + Math.sin(t * 0.7 + ph) * 1.6; BOOK_P.y = f.y + 2.6;
+    if (f.ptype === 'sunflower') { f.lock = c < 3.2 ? 1 : 0; f.face = f.lock ? Math.atan2(BOOK_P.y - f.y, BOOK_P.x - f.x) : Math.PI / 2 + 1.1; }
+    else if (f.ptype === 'shroom') f.shut = c > 4.6 ? 1 : 0;
+    else f.alarm = c > 5.2 ? 1 : 0;
+    syncFlower(f, m.r, t, BOOK_P, true);
+    return;
+  }
+  e.wob += dt;
+  let near = 2.5;
+  switch (e.kind) {
+    case 'momo': {   // 每 2 秒跳一下，跳之前先蹲
+      const hc = (t + ph) % 2, HOP = 0.45;
+      e.hopping = hc < HOP ? HOP - hc : 0;
+      e.air = e.hopping > 0 ? Math.sin(Math.PI * (1 - e.hopping / HOP)) : 0;
+      e.hopT = e.hopping > 0 ? 1 : 2 - hc;
+      break;
+    }
+    case 'crawler': e.pauseT = (t + ph) % 3.5 < 2.4 ? 0 : 1; break;   // 爬一段、停一下（頭會抽動）
+    case 'woman': e.seen = (t + ph) % 4.5 < 2; break;                  // 被看著時不動、沒被看著時飄
+    case 'grass': {   // 躲在草裡 → 站起來 → 撲 → 抓 → 鑽回去
+      const g = (t + ph) % 6.5;
+      if (g < 2.2) { e.hidden = true; e.state = 'hidden'; e.rise = Math.max(0, e.rise - dt * 3); }
+      else if (g < 2.65) { e.hidden = false; e.state = 'rise'; e.rise = Math.min(1, e.rise + dt / 0.42); }
+      else if (g < 4.6) { e.state = 'up'; e.rise = 1; }
+      else if (g < 5.0) e.state = 'lunge';
+      else if (g < 5.6) e.state = 'grab';
+      else { e.state = 'sink'; e.rise = Math.max(0, e.rise - dt / 0.6); }
+      break;
+    }
+    case 'snail': { const g = (t + ph) % 7; e.chew = g > 5 ? 1 : 0; e.retract = g > 3.2 && g < 4.4 ? 1 : 0; break; }  // 爬、縮觸角、嚼
+    case 'girl': { const g = (t + ph) % 7; e.state = g < 3 ? 'hunt' : 'wander'; e.blind = g > 4.5 && g < 6 ? 1 : 0; break; }  // 追、被照瞎甩頭
+    case 'clown': near = (t + ph) % 5 < 2.4 ? 1.5 : 3; break;   // 靠近時揮刀
+  }
+  BOOK_P.x = e.x; BOOK_P.y = e.y + near;
+  syncEnemy(e, m.r, t, BOOK_P);
+}
+function renderBook(dt) {
+  if (!book.active || !book.renderer) return;
+  const screen = document.getElementById('book');
+  if (screen.classList.contains('hidden')) return;
+  book.t += dt;
+  const R = book.renderer, W = innerWidth, H = innerHeight;
+  if (book.w !== W || book.h !== H) {
+    book.w = W; book.h = H;
+    R.setPixelRatio(Math.min(window.devicePixelRatio || 1, document.body.classList.contains('touch') ? 1.4 : 2));
+    R.setSize(W, H, false);
+  }
+  R.setScissor(0, 0, W, H); R.setViewport(0, 0, W, H); R.setClearColor(0x000000, 0); R.clear();
+  const panel = screen.querySelector('.panel').getBoundingClientRect();
+  const lm0 = uni.uLM.value, amb0 = uni.uAmb.value;
+  uni.uLM.value = book.lm; uni.uAmb.value = 0.05;
+  for (const it of book.items) {
+    const rc = it.el.getBoundingClientRect();
+    const x0 = Math.max(rc.left, panel.left), y0 = Math.max(rc.top, panel.top), x1 = Math.min(rc.right, panel.right), y1 = Math.min(rc.bottom, panel.bottom);
+    if (x1 - x0 < 4 || y1 - y0 < 4 || rc.width < 4) continue;   // 捲到面板外面就不畫
+    const m = it.m || (it.m = bookModel(it.spec));
+    bookAnimate(m, book.t, dt, it.ph);
+    for (const o of book.models.values()) o.r.g.visible = o === m;
+    // 鏡頭：看著怪物的中間，慢慢左右繞
+    const a = Math.sin(book.t * 0.4 + it.ph) * 0.5, el = 0.16, cam = book.cam;
+    cam.aspect = rc.width / rc.height; cam.updateProjectionMatrix();
+    cam.position.set(BOOK_X + Math.sin(a) * m.d * Math.cos(el), m.cy + m.d * Math.sin(el), BOOK_Y + Math.cos(a) * m.d * Math.cos(el));
+    cam.lookAt(BOOK_X, m.cy, BOOK_Y);
+    R.setViewport(rc.left, H - rc.bottom, rc.width, rc.height);
+    R.setScissor(x0, H - y1, x1 - x0, y1 - y0);
+    R.setClearColor(0x14101b, 1); R.clear();
+    R.render(book.scene, book.cam);
+    book.stats.rendered++;
+  }
+  uni.uLM.value = lm0; uni.uAmb.value = amb0;
+}
+// 圖鑑畫面建好卡片後呼叫：items 是 [{ el: 卡片上放怪物的元素, kind 或 flower }]
+function bookShow(items) {
+  book.items = items.map(spec => ({ el: spec.el, spec, ph: Math.random() * 10 }));
+  book.active = true;
+}
+
 function render(dt) {
   if (!G) return;
   const t = G.time, dark = darkLevel();
@@ -3220,6 +3373,7 @@ function render(dt) {
   updateViewWeapon();
   updatePlaceGhost();
   renderer.render(scene, camera);
+  renderBook(dt);
 }
 function resize() {
   const touch = document.body.classList.contains('touch');
@@ -3265,7 +3419,7 @@ function init() {
   buildExtras();
   glowPts = makePoints(0.07, THREE.AdditiveBlending);
   smokePts = makePoints(0.3, THREE.NormalBlending);
-  window.Renderer = { render, resize, setWorld };
+  window.Renderer = { render, resize, setWorld, book: { ok: bookOk, show: bookShow, stats: book.stats } };
   resize();
 }
 init();
