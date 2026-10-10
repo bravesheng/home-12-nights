@@ -527,7 +527,8 @@ function addLight(x, y, r, room, col, k) {
 function updateLightmap(dark) {
   const day = 1 - dark / NIGHT_DARK;
   const amb = 0.95 * day;
-  const tg = isW2() ? 0.95 : isW3() ? 0.9 : 0.97, tb = isW2() ? 1.02 : isW3() ? 0.74 : 0.92; // 第二世界的白天帶一點粉紫色，第三世界偏褐色（像老照片）
+  const cold = isW3() && G.cold;   // 寒寂之境：偏白偏藍
+  const tg = isW2() ? 0.95 : cold ? 1.0 : isW3() ? 0.9 : 0.97, tb = isW2() ? 1.02 : cold ? 1.08 : isW3() ? 0.74 : 0.92; // 第二世界的白天帶一點粉紫色，第三世界偏褐色（像老照片）
   for (let i = 0, n = LMW * LMH; i < n; i++) {
     const r = texRoom[i];
     const a = r ? amb * (1 - (r.dayDark || 0)) : texDoor[i] ? amb * 0.9 : 0;
@@ -1601,6 +1602,7 @@ function syncFixtures(t) {
       if (o.bulb === FIRE_TIER) b.scale.set(1, 0.85 + 0.3 * Math.abs(Math.sin(t * 13 + o.x)), 1);
     }
     if (f.stars) f.stars.forEach((st, i) => { st.visible = !!L; st.material.opacity = 0.5 + 0.5 * Math.abs(Math.sin(t * 3 + i * 1.7)); });
+    if (f.bm) syncBaymax(o, f, t);
     for (const h of f.halos) { h.visible = !!L; if (L) { setSRGB(h.material.color, col); h.material.opacity = 0.35 + 0.65 * k; } }
     if (f.rays) { f.rays.visible = !!L; setSRGB(f.rays.material.color, col); f.rays.material.opacity = 0.75 * k; f.rays.material.rotation = t * (o.bulb === 5 ? 0.4 : 0.7); }
     if (f.spin) {
@@ -2587,7 +2589,8 @@ function addSpecialDecor(res, g, y, tier) {
       const a = i / 5 * Math.PI * 2, d = sph(g, 0.02, Math.cos(a) * 0.06, y - 0.08 - (i % 2) * 0.05, Math.sin(a) * 0.06, dm, 1, 2.2, 1, 8);
       d.castShadow = false;
     }
-  } else if (tier === HEAL_TIER) {
+  } else if (tier === BAYMAX_TIER) addBaymax(res, g);
+  else if (tier === HEAL_TIER) {
     // 回血燈泡：繞著轉的綠色「+」
     res.spin = new THREE.Group(); res.spin.position.y = y; g.add(res.spin);
     for (let i = 0; i < 3; i++) {
@@ -2620,6 +2623,51 @@ function addSlimePuddle(g, o) {
   const m = new THREE.Mesh(gm, ownBasic({ map: slimeTex, transparent: true, depthWrite: false, color: 0xb8c8b0 }));
   m.userData.ownGeo = true;
   g.add(m);
+}
+
+// ---------- 大白燈：燈下站著一個 2 公尺高的「大白」（寫實版：白色合成皮的人形充氣體，有接縫、磨損和泛黃；
+// 臉是一條暗色的面罩線和兩點微光）。慢慢呼吸；你走到它面前，手臂會慢慢合起來抱住你；被黑球吃掉時慢慢消氣倒下 ----------
+let baymaxTex = null;
+function makeBaymaxTex() {
+  baymaxTex = canvasTex(256, 256, (c, w, h) => {
+    const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#f3efe6'); g.addColorStop(1, '#e4d9c6');
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+    c.strokeStyle = 'rgba(120,110,95,.45)'; c.lineWidth = 2;
+    for (const y of [40, 128, 216]) { c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke(); }
+    for (const x of [64, 192]) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, h); c.stroke(); }
+    c.strokeStyle = 'rgba(255,255,255,.5)'; c.lineWidth = 1; for (const y of [42, 130, 218]) { c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke(); }
+    for (let i = 0; i < 40; i++) { c.fillStyle = `rgba(150,130,90,${0.06 + rnd() * 0.14})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 6 + rnd() * 24, 3 + rnd() * 12, rnd() * 3, 0, 7); c.fill(); }
+    for (let i = 0; i < 25; i++) { c.strokeStyle = `rgba(90,80,70,${0.15 + rnd() * 0.3})`; c.lineWidth = 1; const x = rnd() * w, y = rnd() * h; c.beginPath(); c.moveTo(x, y); c.lineTo(x + (rnd() - 0.5) * 30, y + (rnd() - 0.5) * 10); c.stroke(); }
+  });
+}
+function addBaymax(res, g) {
+  if (!baymaxTex) makeBaymaxTex();
+  const skin = ownPhong('#ffffff', { map: baymaxTex, specular: 0x333333, shininess: 14, shade: 0.85 });
+  const b = new THREE.Group(); g.add(b);
+  for (const s of [-1, 1]) { sph(b, 0.13, s * 0.17, 0.1, 0.03, skin, 1.1, 0.6, 1.4, 10); cyl(b, 0.1, 0.12, 0.55, s * 0.17, 0.12, 0, skin, 10); }
+  sph(b, 0.42, 0, 1.05, 0, skin, 1, 1.15, 0.8, 16);
+  sph(b, 0.3, 0, 1.68, 0, skin, 1.05, 0.9, 0.95, 14);
+  sph(b, 0.25, 0, 1.9, 0, skin, 1.1, 0.78, 1, 14);
+  box(b, -0.16, 0.16, 1.885, 1.905, 0.2, 0.26, ownBasic({ color: 0x1a1816 }), false);
+  res.bmEyes = [];
+  for (const s of [-1, 1]) { const e = ownSprite(glowTex, 0xfff1d8); e.position.set(s * 0.16, 1.895, 0.27); e.scale.setScalar(0.09); b.add(e); res.bmEyes.push(e); }
+  res.bmArms = [];
+  for (const s of [-1, 1]) {
+    const piv = new THREE.Group(); piv.position.set(s * 0.42, 1.38, 0); b.add(piv);
+    cyl(piv, 0.1, 0.12, 0.62, 0, -0.62, 0, skin, 10);
+    sph(piv, 0.12, 0, -0.66, 0.02, skin, 1, 0.8, 1.1, 10);
+    res.bmArms.push({ piv, s });
+  }
+  b.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  res.bm = b;
+}
+function syncBaymax(o, f, t) {
+  const hug = G.hugObj === o ? (G.hug || 0) : 0, eaten = o.eaten || 0, breath = 1 + 0.015 * Math.sin(t * 1.4);
+  f.bm.scale.set(breath, (2 - breath) * (1 - 0.55 * eaten), breath);
+  f.bm.rotation.x = eaten * 0.9;
+  f.bm.rotation.y = Math.atan2(G.p.x - (o.x + 0.5), G.p.y - (o.y + 0.5)) - f.g.rotation.y;
+  for (const a of f.bmArms) { a.piv.rotation.z = a.s * (0.35 - 0.08 * Math.sin(t * 1.4)) * (1 - hug) + a.s * 0.95 * hug; a.piv.rotation.x = -1.25 * hug; a.piv.rotation.y = -a.s * 0.55 * hug; }
+  for (const e of f.bmEyes) e.material.opacity = (0.45 + 0.25 * Math.sin(t * 2)) * (1 - eaten);
 }
 
 // ---------- 天使 ----------

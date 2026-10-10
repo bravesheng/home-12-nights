@@ -172,10 +172,10 @@ const ITEMS = {
   candle:   { name: '蠟燭',   kind: 'candle',  icon: '🕯️', desc: '放在腳下，燒 90 秒。停電時也能用。' },
   snack:    { name: '零食',   kind: 'food', icon: '🍪', hunger: 20, desc: '飽食 +20' },
   canned:   { name: '罐頭',   kind: 'food', icon: '🥫', hunger: 45, desc: '飽食 +45' },
-  noodles:  { name: '泡麵',   kind: 'food', icon: '🍜', hunger: 35, san: 5, desc: '飽食 +35、理智 +5' },
-  cocoa:    { name: '熱可可', kind: 'food', icon: '☕', hunger: 10, san: 30, desc: '理智 +30、飽食 +10' },
+  noodles:  { name: '泡麵',   kind: 'food', icon: '🍜', hunger: 35, san: 5, warm: 10, desc: '飽食 +35、理智 +5' },
+  cocoa:    { name: '熱可可', kind: 'food', icon: '☕', hunger: 10, san: 30, warm: 20, desc: '理智 +30、飽食 +10' },
   chocolate: { name: '巧克力', kind: 'food', icon: '🍫', hunger: 10, san: 20, desc: '理智 +20、飽食 +10' },
-  milk:     { name: '熱牛奶', kind: 'food', icon: '🥛', hunger: 20, san: 15, desc: '理智 +15、飽食 +20' },
+  milk:     { name: '熱牛奶', kind: 'food', icon: '🥛', hunger: 20, san: 15, warm: 15, desc: '理智 +15、飽食 +20' },
   // 第三世界的燃料（丟進機車室的火爐讓列車一直開）：木柴 LV1、木炭 LV2；椅墊和舊報紙是沒燃料時的救急辦法
   wood:      { name: '木柴',     kind: 'fuel', icon: '🪵', burn: 25, lv: 1, desc: '燃料 LV1：丟進火爐燒 25 秒。對著火爐按 E 丟進去。' },
   charcoal:  { name: '木炭',     kind: 'fuel', icon: '🪨', burn: 55, lv: 2, desc: '燃料 LV2：丟進火爐燒 55 秒，比木柴耐燒。' },

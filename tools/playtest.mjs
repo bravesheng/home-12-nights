@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // 自動試玩測試：用無頭 Chromium 開遊戲跑幾個情境，截圖並檢查有沒有錯誤
 // 用法：node tools/playtest.mjs [截圖資料夾，預設 playtest-out]
+// 只跑某幾個情境：PT_ONLY=w3,w3cold node tools/playtest.mjs（情境名稱是 scenario() 的第一個參數）
 // 需要 Node 18 以上和 Playwright（雲端 session 已內建；自己電腦上：npm i -g playwright && npx playwright install chromium）
 // 有 JS 錯誤、檔案載入失敗或檢查沒過，結束代碼就不是 0
 // 注意：無頭瀏覽器沒有 GPU，3D 用軟體算，FPS 很低，只能抓錯誤，看不出平板上順不順
@@ -53,7 +54,9 @@ const browser = await chromium.launch({
 
 // ---------- 共用工具 ----------
 const results = [];
+const ONLY = process.env.PT_ONLY ? process.env.PT_ONLY.split(',') : null;
 async function scenario(name, title, ctxOpts, fn) {
+  if (ONLY && !ONLY.includes(name)) return;
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, ...ctxOpts });
   const page = await ctx.newPage();
   const problems = [];
@@ -290,6 +293,39 @@ await scenario('w3stop', '第三世界第 2 夜火爐是空的（?world=3&night=
   check(true, '');
   await sleep(1000);
   await shot('2-running');
+});
+
+await scenario('w3cold', '第三世界寒寂之境（?world=3&night=3&cold）：體溫條、在車站體溫會掉、大白燈抱住你會回體溫', {}, async ({ page, shot, check }) => {
+  await page.goto(BASE + '?world=3&night=3&kit=1&cold', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play');
+  await sleep(2000);
+  // 站在月台上：體溫每秒掉 2 點（低 FPS 下遊戲時間走得慢，直接比較前後）
+  const t0 = await page.evaluate(() => { Object.assign(G.p, { x: 8.5, y: 29.5, face: -Math.PI / 2 }); return { cold: G.cold, temp: G.p.temp, bar: !document.getElementById('tempBar').classList.contains('hidden') }; });
+  check(t0.cold && t0.bar, '&cold 要是寒寂之境，狀態列要顯示 🌡️ 體溫');
+  await sleep(3000);
+  const t1 = await page.evaluate(() => ({ temp: G.p.temp, frost: G.frost, snow: G.fx.length }));
+  check(t1.temp < t0.temp, `在車站體溫要一直掉（${t0.temp} → ${t1.temp.toFixed(1)}）`);
+  check(t1.snow > 0, '寒寂之境的車站要下雪');
+  await shot('1-platform');
+  // 大白燈：放一盞落地燈裝上大白燈，走到大白面前會被抱住、體溫回升
+  const h0 = await page.evaluate(() => {
+    Object.assign(G.p, { x: 20.5, y: 21.2, face: -Math.PI / 2, pitch: -0.1 });
+    G.selId = 'lamp_floor'; useSelected(); installBulb(G.lamps[0], BAYMAX_TIER);
+    Object.assign(G.p, { x: 20.5, y: 20.3 }); G.p.temp = 40;
+    return { ok: G.lamps[0].bulb === BAYMAX_TIER, temp: G.p.temp };
+  });
+  check(h0.ok, '落地燈要能裝上大白燈');
+  await sleep(3000);
+  const h1 = await page.evaluate(() => ({ hugged: G.hugged, hug: G.hug, temp: G.p.temp, frost: G.frost }));
+  check(h1.hugged && h1.hug > 0.5, `走到大白面前要被抱住（hug=${h1.hug.toFixed(2)}）`);
+  check(h1.temp > h0.temp, `被大白抱住體溫要回升（${h0.temp} → ${h1.temp.toFixed(1)}）`);
+  await shot('1b-hug');
+  const lay = await overlaps(page);
+  check(lay.length === 0, '寒寂之境時版面重疊：' + lay.join('、'));
+  // 退後幾步看大白（抱著的時候鏡頭在它身體裡面）
+  await page.evaluate(() => { Object.assign(G.p, { x: 20.5, y: 23.0, face: -Math.PI / 2, pitch: -0.05 }); document.getElementById('hud').style.opacity = '0'; });
+  await sleep(1500);
+  await shot('2-baymax');
 });
 
 await scenario('monsters', '怪物模型（火柴人、鳥腳女和爬行女會動的頭髮、眼球花，手電筒開關各拍一張）', {}, async ({ page, shot, check }) => {

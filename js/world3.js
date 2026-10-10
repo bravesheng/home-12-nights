@@ -401,3 +401,60 @@ function victory3() {
   $('btnRetry').classList.add('hidden');
   $('gameover').classList.remove('hidden');
 }
+
+// ====================================================================
+// 寒寂之境（第 3、7、10、12 天）：整天下雪、零下 100 度，多了「體溫」。體溫歸零就死。
+// 每秒掉：車站（室外）2、列車上 0.8；機車室火爐有燒 +3；大白燈 3 格內 +5、被大白抱住 +10；熔岩暴君身邊 3 格 +4
+// 大白燈（第 15 級）：燈下站著一個大白，走到它面前它會抱住你（被打只扣一半的血）。不管有沒有下雪都會回體溫
+// ====================================================================
+const BAYMAX_WARM_R = 3, BAYMAX_HUG_R = 1.0;
+function nearestBaymax() {
+  const p = G.p, tx = Math.floor(p.x), ty = Math.floor(p.y);
+  if (!inMap(tx, ty)) return null;
+  const rooms = roomsAt(tx, ty);
+  let best = null, bd = Infinity;
+  for (const o of fixtures()) {
+    if (o.bulb !== BAYMAX_TIER || !rooms.includes(o.room)) continue;
+    const d = Math.hypot(o.x + 0.5 - p.x, o.y + 0.5 - p.y);
+    if (d < bd) { bd = d; best = o; }
+  }
+  return best ? { o: best, d: bd } : null;
+}
+// 走路的速度：寒寂之境的車站積雪、體溫太低、被孢子噴到都會變慢
+function speedMult3() {
+  const p = G.p, r = roomAt(p.x, p.y);
+  return (G.cold && isStationRoom(r) ? 0.75 : 1) * (G.cold && p.temp < 30 ? 0.8 : 1) * (p.slowT > 0 ? 0.6 : 1);
+}
+function updateWarmth3(dt) {
+  const p = G.p, nb = nearestBaymax();
+  p.slowT = Math.max(0, (p.slowT || 0) - dt);
+  G.timeFlash = Math.max(0, (G.timeFlash || 0) - dt * 2);
+  // 大白的擁抱
+  const hugging = !!(nb && nb.d < BAYMAX_HUG_R);
+  if (hugging && !G.hugged) { Sound.play('hug'); if (!G.ev.hugTip) { G.ev.hugTip = 1; toast('🤍 大白抱住了你……好溫暖。被抱著的時候被打只扣一半的血，體溫回得更快。', 'good'); } }
+  G.hugged = hugging; G.hugObj = nb ? nb.o : null;
+  G.hug = clamp((G.hug || 0) + (hugging ? dt * 1.5 : -dt * 1.5), 0, 1);
+  if (!G.cold) { p.temp = Math.min(100, p.temp + dt * 5); G.frost = 0; return; }
+  const r = roomAt(p.x, p.y);
+  let rate = isStationRoom(r) ? -2 : -0.8;
+  if (r && r.id === 'attic' && G.fire.queue.length) rate = 3;
+  if (nb) rate += hugging ? 10 : nb.d < BAYMAX_WARM_R ? 5 : 0;
+  for (const e of G.enemies) if (e.kind === 'tyrant' && !e.dead && Math.hypot(e.x - p.x, e.y - p.y) < 3) rate += 4;
+  p.temp = clamp(p.temp + rate * dt, 0, 100);
+  G.frost = clamp((40 - p.temp) / 40, 0, 1);
+  if (p.temp < 20) p.san -= 1.2 * D().san * dt;
+  if (p.temp < 30 && !G.ev.coldTip) { G.ev.coldTip = 1; toast('🥶 體溫太低了！快去機車室的火爐旁邊，或站到大白燈下面取暖。', 'warn'); Sound.play('wind'); }
+  if (p.temp >= 50) G.ev.coldTip = 0;
+  if (rate > 0 && !G.ev.warmTip && p.temp < 60) { G.ev.warmTip = 1; toast('🔥 體溫正在回升。', 'good'); }
+  if (p.temp <= 0) { gameOver('cold'); return; }
+  // 下雪：車站裡飄雪；風聲
+  if (isStationRoom(r) || G.phase === 'night') {
+    for (let i = 0; i < 3; i++) {
+      const x = p.x + rand(-6, 6), y = p.y + rand(-6, 6), rr = roomAt(x, y);
+      if (!isStationRoom(rr)) continue;
+      G.fx.push({ type: 'spark', x, y, h: rand(1.8, 2.6), vx: rand(0.2, 0.5), vy: rand(-0.1, 0.1), vh: -rand(0.5, 0.9), life: 3, max: 3, color: [230, 240, 255] });
+    }
+  }
+  G.ev.windT = (G.ev.windT || 0) - dt;
+  if (G.ev.windT <= 0) { G.ev.windT = rand(6, 11); Sound.play('wind', isStationRoom(r) ? 0.9 : 0.4); }
+}

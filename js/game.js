@@ -290,7 +290,7 @@ const bulbName = t => (bulbVariant(t) ? bulbVariant(t).name : BULBS[t].name);
 function itemName(id) { const it = ITEMS[id]; return it.kind === 'bulb' ? bulbName(it.tier) : it.name; }
 function itemDesc(id) {
   const it = ITEMS[id];
-  if (it.kind !== 'bulb') return it.desc;
+  if (it.kind !== 'bulb') return it.desc + (isW3() && it.warm ? `、體溫 +${it.warm}` : '');
   const t = it.tier, v = bulbVariant(t);
   return `${RARITY[bulbRarity(t)].name}燈泡・` + (BULBS[t].special ? '特殊燈泡。' : `第 ${t} 級。`) + (v ? v.desc : BULBS[t].desc);
 }
@@ -692,7 +692,7 @@ function hurtPlayer(e) {
 // caught：算不算「被抓到」（會影響早晨禮物）；被種子打到之類的小傷不算
 function damage(hp, san, caught = true) {
   const p = G.p;
-  p.hp -= hp * D().dmg * (G.inv.amulet ? 0.5 : 1); // 護身符：只扣一半的血
+  p.hp -= hp * D().dmg * (G.inv.amulet ? 0.5 : 1) * (G.hugged ? 0.5 : 1); // 護身符、被大白抱著：只扣一半的血（可以疊）
   p.san -= san * D().san;
   p.hurt = caught ? 1 : Math.max(p.hurt, 0.5); G.shake = Math.max(G.shake, caught ? 0.4 : 0.15);
   if (caught && G.nightStats && G.phase === 'night') G.nightStats.caught++;
@@ -2159,6 +2159,8 @@ function makeStock() {
     { id: 'battery', price: 2, qty: 2 }, { id: 'key', price: 8, qty: 1 },
     { id: 'medkit', price: 6, qty: 1 }, { id: 'cocoa', price: 2, qty: 2 }, { id: 'chocolate', price: 1, qty: 3 },
   ];
+  // 第三世界第 5 天起，商人會賣大白燈（很貴）
+  if (isW3() && d >= 5 && (G.baymaxGot || 0) < BAYMAX_MAX) G.stock.splice(tiers.length, 0, { id: 'bulb' + BAYMAX_TIER, price: BULB_PRICE[BAYMAX_TIER], qty: 1 });
   for (const st of G.stock) if (WEAPON_PRICE[st.id]) st.price = WEAPON_PRICE[st.id];
 }
 const WEAPON_PRICE = { pan: 4, slingshot: 6, watergun: 8, amulet: 7, strongflash: 9, megaflash: 15 };
@@ -2234,7 +2236,7 @@ function openGacha() {
   }, act => {
     if (act !== 'spin' || G.coins < GACHA_PRICE) return;
     G.coins -= GACHA_PRICE;
-    const k = weighted(GACHA_TABLE);
+    const k = weighted(isW3() && (G.baymaxGot || 0) < BAYMAX_MAX ? { ...GACHA_TABLE, ['bulb' + BAYMAX_TIER]: 0.4 } : GACHA_TABLE);   // 幸運機非常少見地會轉出大白燈
     if (k === 'coin5') { addCoins(5); last = { id: 'coin', n: 5 }; }
     else {
       const [[id, n]] = gainItem(k, LOOT_QTY[k] || 1);
@@ -2670,7 +2672,8 @@ function updatePlayer(dt) {
   // 踩到大嘴觸角蟲的黏液會變慢（跳起來就沒事）
   const sticky = p.z < 0.08 && onTrail(p.x, p.y);
   if (sticky && !G.ev.trailTip) { G.ev.trailTip = 1; toast('🐌 踩到黏液了，走不快！跳過去就不會變慢。', 'warn'); }
-  const sp = (sprint ? 4.8 : 3.0) * (sneakKey && !sprint ? 0.45 : 1) * (sticky ? 0.45 : 1);
+  const sp = (sprint ? 4.8 : 3.0) * (sneakKey && !sprint ? 0.45 : 1) * (sticky ? 0.45 : 1) * (isW3() ? speedMult3() : 1);
+  if (p.stunT > 0) { p.stunT -= dt; fwd = 0; str = 0; }   // 被震倒、被打飛：動不了
   if (sprint) p.stam -= 28 * dt; else p.stam = Math.min(100, p.stam + 16 * dt);
   const c = Math.cos(p.face), s = Math.sin(p.face);
   const mx = c * fwd - s * str, my = s * fwd + c * str;
@@ -2882,6 +2885,7 @@ function useSelected() {
       makeNoise(3);
       if (it.hunger) p.hunger = Math.min(100, p.hunger + it.hunger);
       if (it.san) p.san = Math.min(100, p.san + it.san);
+      if (it.warm && isW3()) p.temp = Math.min(100, p.temp + it.warm);
       if (it.hp) p.hp = Math.min(100, p.hp + it.hp);
       removeItem(id); Sound.play('eat'); toast(`使用了${it.name}（${it.desc}）`);
       break;
@@ -2987,6 +2991,7 @@ function update(dt) {
   buildLights();
   updatePlayer(dt);
   if (mode !== 'play') return;
+  if (isW3()) { updateWarmth3(dt); if (mode !== 'play') return; }
   updateTime(dt);
   if (mode !== 'play') return;
   updateEvents(dt);
@@ -3019,13 +3024,15 @@ function updateFx(dt) {
   }
   for (const L of G.lights) {
     if (!L.obj || L.tier < 4) continue;
-    const rate = L.tier === ANGEL_TIER ? 2 : L.tier === STAR_TIER ? 8 : L.tier === HEAL_TIER ? 5 : (L.tier - 3) * 1.4;
+    const rate = L.tier === ANGEL_TIER ? 2 : L.tier === STAR_TIER ? 8 : L.tier === HEAL_TIER ? 5 : L.tier === BAYMAX_TIER ? 3 : (L.tier - 3) * 1.4;
     if (Math.random() < rate * dt) {
       const pos = bulbPos(L.obj);
       if (L.tier === STAR_TIER) G.fx.push({ type: 'spark', x: pos.x + rand(-0.7, 0.7), y: pos.y + rand(-0.7, 0.7), h: pos.h + rand(-0.4, 0.3), vx: 0, vy: 0, vh: rand(-0.05, 0.05), life: rand(0.5, 1.2), max: 1.2, color: pick([[255, 255, 255], [190, 210, 255], [255, 240, 170]]) });
       else if (L.tier === ANGEL_TIER) G.fx.push({ type: 'spark', x: pos.x + rand(-0.3, 0.3), y: pos.y + rand(-0.3, 0.3), h: pos.h, vx: rand(-0.1, 0.1), vy: rand(-0.1, 0.1), vh: -rand(0.1, 0.3), life: 1.5, max: 1.5, color: [255, 230, 160] });
       // 回血燈泡：往下飄的綠色光點
       else if (L.tier === HEAL_TIER) { const life = Math.max(0.4, pos.h / 0.9); G.fx.push({ type: 'spark', x: pos.x + rand(-0.6, 0.6), y: pos.y + rand(-0.6, 0.6), h: pos.h - 0.1, vx: 0, vy: 0, vh: -0.9, life, max: life, color: pick([[140, 255, 175], [220, 255, 230]]) }); }
+      // 大白燈：暖暖的、慢慢往上飄的光點
+      else if (L.tier === BAYMAX_TIER) G.fx.push({ type: 'spark', x: pos.x + rand(-0.9, 0.9), y: pos.y + rand(-0.9, 0.9), h: rand(0.2, 1.4), vx: 0, vy: 0, vh: rand(0.15, 0.35), life: rand(1.2, 2), max: 2, color: pick([[255, 236, 205], [255, 220, 170]]) });
       // 第二世界：花燈泡飄花瓣、樹燈泡飄紅葉、水燈泡滴水
       else if (isW2() && L.tier >= 6 && L.tier <= 8) { const life = Math.max(0.5, pos.h / (L.tier === 8 ? 1.4 : 0.55)); G.fx.push({ type: 'spark', x: pos.x + rand(-0.35, 0.35), y: pos.y + rand(-0.35, 0.35), h: pos.h - 0.05, vx: rand(-0.15, 0.15), vy: rand(-0.15, 0.15), vh: L.tier === 8 ? -1.4 : -0.55, life, max: life, color: L.tier === 6 ? pick([[120, 180, 255], [200, 225, 255]]) : L.tier === 7 ? pick([[255, 80, 60], [255, 140, 60]]) : [200, 120, 255] }); }
       else if (L.tier === FIRE_TIER) G.fx.push({ type: 'ember', x: pos.x + rand(-0.15, 0.15), y: pos.y + rand(-0.15, 0.15), h: pos.h, vx: rand(-0.15, 0.15), vy: rand(-0.15, 0.15), vh: rand(0.5, 1.1), life: rand(0.8, 1.5), max: 1.5, color: pick([[255, 200, 60], [255, 120, 30], [255, 80, 20]]) });
@@ -3310,6 +3317,10 @@ function bulbSVG(t) {
   else if (t === HEAL_TIER) body = `<circle cx="18" cy="14" r="9" fill="#8cffaf" stroke="#2f9a55" stroke-width="1"/><path d="M18 9 V19 M13 14 H23" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>` +
     `<rect x="14" y="22" width="8" height="6" rx="1.5" fill="#9aa"/>`;
   else if (t === FIRE_TIER) body = `<path d="M18 4 C26 14 25 22 18 27 C11 22 10 14 18 4Z" fill="#ff6a10"/><path d="M18 12 C22 18 21 22 18 25 C15 22 14 18 18 12Z" fill="#ffe08a"/>`;
+  // 大白燈：白色的人形，一條面罩線加兩點微光
+  else if (t === BAYMAX_TIER) body = `<ellipse cx="18" cy="21" rx="8.5" ry="8" fill="#f1ece2" stroke="#c9bfae" stroke-width=".8"/><ellipse cx="18" cy="10" rx="6" ry="4.6" fill="#f3efe6" stroke="#c9bfae" stroke-width=".8"/>` +
+    `<path d="M14.5 10.2 H21.5" stroke="#2a2420" stroke-width="1.2" stroke-linecap="round"/><circle cx="14.6" cy="10.2" r="1" fill="#2a2420"/><circle cx="21.4" cy="10.2" r="1" fill="#2a2420"/>` +
+    `<path d="M10 17 L4 23 M26 17 L32 23" stroke="#e6dccb" stroke-width="3.5" stroke-linecap="round"/>`;
   // 第二世界：花燈泡（藍色繡球花）、樹燈泡（紅色楓樹）、水燈泡（紫色的水）
   else if (t === 6 && isW2()) body = [0, 60, 120, 180, 240, 300].map(a => `<ellipse cx="18" cy="8.6" rx="4.2" ry="6" fill="#6fb0ff" stroke="#dfeeff" stroke-width=".7" transform="rotate(${a} 18 15)"/>`).join('') +
     `<circle cx="18" cy="15" r="3.6" fill="#fff6c8"/>`;
@@ -3450,16 +3461,26 @@ function placeBelowToasts(el) {
   const min = $('toasts').getBoundingClientRect().bottom + 14;
   if (el.getBoundingClientRect().top < min) el.style.top = min + 'px';
   const big = $('bigText');
-  if (el === big) {
-    // 螢幕矮、提示又多的時候，大字會被推到下面的物品說明上：縮小一號，還是不夠就往上靠
-    const limit = $('bottom').getBoundingClientRect().top - 6;
-    big.classList.toggle('compact', big.getBoundingClientRect().bottom > limit);
-    if (big.getBoundingClientRect().bottom > limit) big.style.top = Math.max(min - 10, limit - big.offsetHeight) + 'px';
-    return;
-  }
+  if (el === big) { placeBig(big); return; }
   if (!big.classList.contains('show') || !el.firstElementChild) return;
   const b = big.getBoundingClientRect(), top = el.getBoundingClientRect().top, h = el.firstElementChild.offsetHeight;
   if (top < b.bottom && top + h > b.top) el.style.top = b.bottom + 8 + 'px';
+}
+// 大字：排在提示下面；螢幕矮、提示又多的時候會被推到下面的物品說明上 → 先縮小一號，還是放不下就把最舊的提示拿掉
+function placeBig(big) {
+  const box = $('toasts'), limit = () => $('bottom').getBoundingClientRect().top - 6;
+  const fit = () => {
+    big.style.top = '';
+    const min = box.getBoundingClientRect().bottom + 14;
+    if (big.getBoundingClientRect().top < min) big.style.top = min + 'px';
+    return big.getBoundingClientRect().bottom <= limit();
+  };
+  big.classList.remove('compact');
+  if (fit()) return;
+  big.classList.add('compact');
+  if (fit()) return;
+  while (box.children.length > 1) { box.firstChild.remove(); if (fit()) return; }
+  big.style.top = Math.max(0, limit() - big.offsetHeight) + 'px';   // 真的沒辦法：寧可壓到提示
 }
 let bigTimer = 0;
 function showBig(title, sub) {
