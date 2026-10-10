@@ -234,6 +234,36 @@ await scenario('monsters', '怪物模型（火柴人、鳥腳女和爬行女會�
   await shot('2-flashlight');
 });
 
+await scenario('monsters2', '第二世界怪物模型（草叢人、大嘴觸角蟲、眼花女孩、向日葵眼、千眼菇排成一排，手電筒開關各拍一張）', {}, async ({ page, shot, check }) => {
+  await page.goto(BASE + '?world=2&night=6&kit=1', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play');
+  await skipToDusk(page);
+  await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
+  // 在玩家前面排一排；草叢人站出來、向日葵眼盯著玩家，才看得到臉和眼睛
+  const n = await page.evaluate(() => {
+    G.enemies = []; G.flowers = [];
+    const p = G.p, c = Math.cos(p.face), s = Math.sin(p.face);
+    const at = (fwd, side) => [p.x + c * fwd - s * side, p.y + s * fwd + c * side];
+    const put = (kind, fwd, side, extra) => { const [x, y] = at(fwd, side); Object.assign(spawnEnemy(kind, { x, y }), { spawn: 0 }, extra); };
+    const plant = (ptype, fwd, side, extra) => { const [x, y] = at(fwd, side); G.flowers.push(Object.assign(newFlower(x, y, ptype), { grow: 1, face: Math.atan2(p.y - y, p.x - x) }, extra)); };
+    put('grass', 3.2, -2.2, { rise: 1, hidden: false, state: 'up', upT: 999 });
+    put('snail', 3.4, -0.8, { chew: 999 });
+    put('girl', 3.6, 0.6, { blind: 0, blindCd: 999 });
+    plant('sunflower', 3.0, 2.0, { lock: 1 });
+    plant('shroom', 4.6, 1.2, {});
+    Object.assign(p, { pitch: -0.08, inv: 999 });
+    return G.enemies.length + G.flowers.length;
+  });
+  check(n === 5, `要放好 5 隻怪物（現在 ${n} 隻）`);
+  await page.evaluate(() => { document.getElementById('hud').style.opacity = '0'; });
+  await sleep(1500);
+  await shot('1-lamp');
+  await page.keyboard.press('f');
+  await sleep(1500);
+  check((await state(page)).flash === true, '按 F 要打開手電筒');
+  await shot('2-flashlight');
+});
+
 await scenario('tablet', '平板觸控（Android 平板尺寸，用點的開新遊戲）', { isMobile: true, hasTouch: true }, async ({ page, shot, check }) => {
   await startFromMenu(page, 1, 'normal', true);
   const s = await state(page);

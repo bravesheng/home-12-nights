@@ -346,23 +346,37 @@ function awakenGarden() {
 // 臉和圖鑑縮圖（2D 畫法；3D 貼圖、驚嚇畫面、怪物圖鑑共用）
 // ====================================================================
 // 眼花女孩：短短的黑髮、流血的眼睛、右眼長出一根開著兩顆眼球花的樹枝、藍色衣領
-function drawGirlFace(c, S) {
+// bare：3D 用的臉（頭髮、衣服、樹枝和眼球花另外用 3D 做，左眼也是 3D 的眼球）：只畫臉、瀏海、眼窩、血淚和嘴
+function drawGirlFace(c, S, bare = false) {
   const r = seeded(5150);
   c.save(); c.scale(S / 512, S / 512); c.lineCap = 'round'; c.lineJoin = 'round';
-  // 後面的頭髮（到肩膀）
-  c.fillStyle = '#1a1414';
-  c.beginPath(); c.moveTo(256, 40);
-  c.bezierCurveTo(110, 40, 78, 150, 82, 280); c.bezierCurveTo(84, 360, 96, 420, 110, 450);
-  c.lineTo(402, 450); c.bezierCurveTo(416, 420, 428, 360, 430, 280); c.bezierCurveTo(434, 150, 402, 40, 256, 40); c.fill();
-  // 藍色上衣（V 領）
-  c.fillStyle = '#5f7fae';
-  c.beginPath(); c.moveTo(70, 512); c.quadraticCurveTo(110, 440, 200, 430); c.lineTo(256, 500); c.lineTo(312, 430); c.quadraticCurveTo(402, 440, 442, 512); c.fill();
-  c.strokeStyle = '#3f5a85'; c.lineWidth = 5; c.beginPath(); c.moveTo(200, 430); c.lineTo(256, 500); c.lineTo(312, 430); c.stroke();
-  // 脖子和臉
-  c.fillStyle = '#dcd2c6'; c.fillRect(222, 380, 68, 70);
+  if (!bare) {
+    // 後面的頭髮（到肩膀）
+    c.fillStyle = '#1a1414';
+    c.beginPath(); c.moveTo(256, 40);
+    c.bezierCurveTo(110, 40, 78, 150, 82, 280); c.bezierCurveTo(84, 360, 96, 420, 110, 450);
+    c.lineTo(402, 450); c.bezierCurveTo(416, 420, 428, 360, 430, 280); c.bezierCurveTo(434, 150, 402, 40, 256, 40); c.fill();
+    // 藍色上衣（V 領）
+    c.fillStyle = '#5f7fae';
+    c.beginPath(); c.moveTo(70, 512); c.quadraticCurveTo(110, 440, 200, 430); c.lineTo(256, 500); c.lineTo(312, 430); c.quadraticCurveTo(402, 440, 442, 512); c.fill();
+    c.strokeStyle = '#3f5a85'; c.lineWidth = 5; c.beginPath(); c.moveTo(200, 430); c.lineTo(256, 500); c.lineTo(312, 430); c.stroke();
+    // 脖子
+    c.fillStyle = '#dcd2c6'; c.fillRect(222, 380, 68, 70);
+  }
+  // 臉
   const fg = c.createRadialGradient(250, 260, 30, 256, 270, 190);
   fg.addColorStop(0, '#f1e9de'); fg.addColorStop(0.8, '#ddd2c4'); fg.addColorStop(1, '#b8ab9c');
   c.fillStyle = fg; c.beginPath(); c.ellipse(256, 268, 128, 160, 0, 0, Math.PI * 2); c.fill();
+  if (bare) {
+    // 3D 的臉：臉頰兩邊和眼窩暗一點（有立體感），額頭上方是頭皮（深色，3D 髮束之間不會露出皮膚）
+    c.save(); c.clip();
+    const sg = c.createLinearGradient(128, 0, 384, 0);
+    sg.addColorStop(0, 'rgba(60,40,40,.55)'); sg.addColorStop(0.3, 'rgba(60,40,40,0)'); sg.addColorStop(0.7, 'rgba(60,40,40,0)'); sg.addColorStop(1, 'rgba(60,40,40,.55)');
+    c.fillStyle = sg; c.fillRect(0, 0, 512, 512);
+    for (const ex of [200, 312]) { const eg = c.createRadialGradient(ex, 250, 20, ex, 250, 62); eg.addColorStop(0, 'rgba(70,30,40,.45)'); eg.addColorStop(1, 'rgba(70,30,40,0)'); c.fillStyle = eg; c.fillRect(ex - 62, 188, 124, 124); }
+    c.fillStyle = '#141216'; c.beginPath(); c.ellipse(256, 150, 134, 60, 0, Math.PI, 0); c.fill();
+    c.restore();
+  }
   // 瀏海
   for (let i = 0; i < 70; i++) {
     const x = 140 + r() * 232, g = 20 + r() * 30 | 0;
@@ -393,6 +407,7 @@ function drawGirlFace(c, S) {
   // 嘴：微微張開
   c.fillStyle = '#4a0a10'; c.beginPath(); c.ellipse(256, 360, 34, 14, 0, 0, 7); c.fill();
   c.strokeStyle = '#9a2a30'; c.lineWidth = 4; c.stroke();
+  if (bare) { c.restore(); return; }
   // 樹枝和兩顆眼球花
   c.strokeStyle = '#5c3a22'; c.lineWidth = 12;
   c.beginPath(); c.moveTo(318, 250); c.quadraticCurveTo(380, 210, 450, 120); c.stroke();
@@ -408,11 +423,12 @@ function drawGirlFace(c, S) {
   c.restore();
 }
 // 草叢人：皺皺的頭頂長出草、兩個黑洞眼睛、咧開的紅色大嘴和咖啡色的牙
-function drawGrassFace(c, S) {
+// bare：3D 用的臉，頭頂的草另外用會搖的 3D 草葉做
+function drawGrassFace(c, S, bare = false) {
   const r = seeded(9021);
   c.save(); c.scale(S / 512, S / 512); c.lineCap = 'round'; c.lineJoin = 'round';
   // 頭頂的草
-  for (let i = 0; i < 46; i++) {
+  for (let i = 0; i < (bare ? 0 : 46); i++) {
     const x = 150 + r() * 212, h = 70 + r() * 70, g = 110 + r() * 80 | 0;
     c.strokeStyle = `rgb(${g * 0.35 | 0},${g},${g * 0.45 | 0})`; c.lineWidth = 3 + r() * 3;
     c.beginPath(); c.moveTo(x, 120); c.quadraticCurveTo(x + (r() - 0.5) * 60, 120 - h * 0.6, x + (r() - 0.5) * 90, 120 - h); c.stroke();
