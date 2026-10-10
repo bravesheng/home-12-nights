@@ -419,6 +419,7 @@ function chestMonster(c) {
   const e = spawnEnemy(kind, pos || { x: c.x + 0.5, y: c.y + 0.5 });
   if (!e) { c.open = true; return; }
   e.spawn = 0.8; e.fromChest = true;
+  markSeen(kind);   // 寶箱跑出來的怪物也算見過
   if (c.lv === 4) setLevel(e, kind, Math.min(12, e.lv + 3));
   if (kind === 'momo') pickWander(e);
   puff(c.x + 0.5, c.y + 0.5, [15, 12, 14], 26, 0.6);
@@ -1036,4 +1037,61 @@ function endVictory3() {
   $('goText').innerHTML = `天亮了，列車慢慢停進終點站……月台上空無一人，只有你一個。<br>你在第三世界撐過了 ${LAST_NIGHT} 夜！<br>你搜索了 ${G.stats.searched} 次，驅散了 ${G.stats.dissolved} 個怪物。<br>最好的燈泡：${bulbName(G.stats.bestTier)}`;
   $('btnRetry').classList.add('hidden');
   $('gameover').classList.remove('hidden');
+}
+
+// ====================================================================
+// 怪物圖鑑的「見過」紀錄（三個世界都適用）：沒見過的怪物卡片上只有問號，名字和說明照樣顯示。
+// 怪物在你 8 格內、在畫面裡出現超過 1 秒，或是碰到你，就算見過；寶箱跑出來的怪物也算。
+// 紀錄存在 home99_progress_v1（跟解鎖世界的紀錄放一起），跨存檔、跨世界，刪存檔也不會清掉。
+// ====================================================================
+let seenCache = null;
+function seenSet() {
+  if (!seenCache) seenCache = new Set(Object.keys(readProg().seen || {}));
+  return seenCache;
+}
+function markSeen(key) {
+  const s = seenSet();
+  if (s.has(key)) return;
+  s.add(key);
+  const p = readProg();
+  p.seen = p.seen || {}; p.seen[key] = 1;
+  writeProg(p);
+}
+const seenKeyOf = t => (t.kind ? (t.kind === 'balloon' ? 'clown' : t.kind) : 'f:' + (t.ptype || 'eye'));
+const bookKey = m => (m.kind ? m.kind : 'f:' + m.flower);
+function updateSeen(dt) {
+  const p = G.p, s = seenSet();
+  for (const t of [...G.enemies, ...G.flowers]) {
+    if (t.dead || t.hidden || (!t.kind && t.grow < 1)) continue;
+    const key = seenKeyOf(t);
+    if (s.has(key)) continue;
+    const d = Math.hypot(t.x - p.x, t.y - p.y);
+    if (d < 1.2) { markSeen(key); continue; }
+    if (d < 8 && lookAngle(t.x, t.y) < 1.0 && castRay(p.x, p.y, Math.atan2(t.y - p.y, t.x - p.x), d) >= d - 0.05) {
+      t.seenT = (t.seenT || 0) + dt;
+      if (t.seenT >= 1) markSeen(key);
+    } else t.seenT = Math.max(0, (t.seenT || 0) - dt);
+  }
+}
+// 舊玩家第一次用新版打開：照存檔的進度把已經登場過的怪物標成見過（例如第一世界第 5 天：第 1～4 夜登場的都算），
+// 打贏過第一世界的人第一世界的怪物都算、打贏過第二世界的人第二世界的也算，才不會突然全部變問號
+function initSeen() {
+  const prog = readProg();
+  if (prog.seenInit) return;
+  prog.seen = prog.seen || {};
+  const mark = key => { prog.seen[key] = 1; };
+  const s = readSave();
+  if (s && s.day) {
+    const w = worldOf(s.world);
+    for (const m of BESTIARY) {
+      if (!monsterWorlds(m).includes(w)) continue;
+      const intro = (m.world || 1) === w ? m.night : 1;
+      if (intro < Math.min(s.day, LAST_NIGHT + 1)) mark(bookKey(m));
+    }
+  }
+  if (prog.w2) for (const m of BESTIARY) if ((m.world || 1) === 1) mark(bookKey(m));
+  if (prog.w3) for (const m of BESTIARY) if ((m.world || 1) <= 2 && monsterWorlds(m).includes(2)) mark(bookKey(m));
+  prog.seenInit = true;
+  writeProg(prog);
+  seenCache = null;
 }

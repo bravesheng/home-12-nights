@@ -1678,13 +1678,17 @@ function showBookPage(w) {
   for (const b of document.querySelectorAll('#bookTabs button')) b.classList.toggle('on', +b.dataset.w === w);
   const list = $('bookList');
   list.innerHTML = '';
-  const live = !!(window.Renderer && Renderer.book && Renderer.book.ok()), items = [];
+  const live = !!(window.Renderer && Renderer.book && Renderer.book.ok()), items = [], seen = seenSet();
   for (const m of BESTIARY) {
     if (!monsterWorlds(m).includes(w)) continue;
     const card = document.createElement('div');
     card.className = 'card';
     let pic;
-    if (live) {
+    if (!seen.has(bookKey(m))) {
+      // 沒見過的怪物：只有一個大大的問號（暗色的剪影），名字和說明照樣顯示
+      pic = document.createElement('div'); pic.className = 'stage unseen'; pic.innerHTML = '<span>？</span>';
+      card.classList.add('unseen');
+    } else if (live) {
       // 3D 怪物畫在這個框的位置上（render3d.js 每一幀照它在畫面上的位置畫）
       pic = document.createElement('div'); pic.className = 'stage';
       items.push({ el: pic, kind: m.kind, flower: m.flower });
@@ -1700,6 +1704,7 @@ function showBookPage(w) {
     list.appendChild(card);
   }
   if (live) Renderer.book.show(items);
+  $('bookUnseen').classList.toggle('hidden', !list.querySelector('.card.unseen'));
   $('bookNote').textContent = w === 3
     ? '第三世界的怪物最強，新怪物分成鬼將級、羅判級、判官級（最後一夜的大魔王）。第一世界的怪物（爬行女除外）和第二世界的大嘴觸角蟲、眼花女孩也都會來，第 1 夜就可能出現。'
     : w === 2
@@ -3018,6 +3023,7 @@ function update(dt) {
   updatePlayer(dt);
   if (mode !== 'play') return;
   if (isW3()) { updateWarmth3(dt); if (mode !== 'play') return; }
+  updateSeen(dt);
   updateTime(dt);
   if (mode !== 'play') return;
   updateEvents(dt);
@@ -3897,6 +3903,7 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 buildMap();
+initSeen();   // 舊玩家：照存檔的進度把已經登場過的怪物標成見過
 G = demoState();
 refreshTitle();
 // 測試用網址參數：?world=2&night=6（直接開某個世界的某一夜）、&kit=1（帶齊武器和燈泡）、?cut=1（直接播破關動畫）

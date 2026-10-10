@@ -484,31 +484,62 @@ await scenario('phone', '手機版面（橫放 852×393、直放 393×852：介�
   await shot('4-portrait');
 });
 
-await scenario('book', '怪物圖鑑（卡片上是會動的 3D 怪物：第一世界上下、第二世界上下各拍一張）', {}, async ({ page, shot, check }) => {
+await scenario('book', '怪物圖鑑（沒見過的只有問號；見過的卡片上是會動的 3D 怪物：三個世界各拍一張；舊存檔會照進度標成見過）', {}, async ({ page, shot, check }) => {
   await page.goto(BASE, { waitUntil: 'load' });
   await page.waitForSelector('#btnBook');
   await page.click('#btnBook');
-  await sleep(2500);
-  const stat = () => page.evaluate(() => ({ ok: Renderer.book.ok(), stages: document.querySelectorAll('#bookList .stage').length, cards: document.querySelectorAll('#bookList .card').length, rendered: Renderer.book.stats.rendered, built: Renderer.book.stats.built }));
+  await sleep(1500);
+  const stat = () => page.evaluate(() => ({ ok: Renderer.book.ok(), stages: document.querySelectorAll('#bookList .stage:not(.unseen)').length, unseen: document.querySelectorAll('#bookList .stage.unseen').length, cards: document.querySelectorAll('#bookList .card').length, rendered: Renderer.book.stats.rendered, built: Renderer.book.stats.built, note: !document.getElementById('bookUnseen').classList.contains('hidden') }));
+  // 全新的玩家：什麼都沒見過，每張卡片都是問號
   let s = await stat();
-  check(s.ok && s.stages === s.cards && s.cards > 0, `圖鑑的每張卡片都要用 3D 舞台（${s.stages}/${s.cards}）`);
+  check(s.cards > 0 && s.unseen === s.cards && s.stages === 0 && s.note, `沒見過的怪物要顯示問號（${s.unseen}/${s.cards}）`);
+  await shot('0-unseen');
+  // 見過第一世界的怪物（在你 8 格內出現超過 1 秒就算）：卡片變成 3D 怪物
+  await page.evaluate(() => { for (const m of BESTIARY) if ((m.world || 1) === 1) markSeen(m.kind || 'f:' + m.flower); showBookPage(1); });
+  await sleep(2500);
+  s = await stat();
+  check(s.ok && s.stages === s.cards && s.unseen === 0, `見過的怪物要用 3D 舞台（${s.stages}/${s.cards}）`);
   check(s.rendered > 0 && s.built > 0, `圖鑑要畫出 3D 怪物（畫了 ${s.rendered} 次、建了 ${s.built} 隻）`);
   await shot('1-world1');
   await page.evaluate(() => { document.querySelector('#book .panel').scrollTop = 99999; });
   await sleep(1500);
   await shot('1b-world1-scrolled');
+  // 第二世界：新怪物還沒見過是問號，第一世界來的怪物已經見過
   await page.click('#bookTabs button[data-w="2"]');
-  await sleep(2500);
-  const before = s.built;
+  await sleep(1500);
   s = await stat();
-  check(s.built > before, `切到第二世界要建出新的怪物（建了 ${s.built} 隻）`);
+  check(s.unseen === 5 && s.stages > 0, `第二世界的 5 隻新怪物要是問號、第一世界來的要有 3D（問號 ${s.unseen}、3D ${s.stages}）`);
+  const before = s.built;
+  await page.evaluate(() => { for (const m of BESTIARY) markSeen(m.kind || 'f:' + m.flower); showBookPage(2); });
+  await sleep(1500);
   await shot('2-world2');
-  // 往下捲：捲到面板外面的不畫，下面的要畫出來
+  // 往下捲：捲到面板外面的不畫，下面的第二世界怪物要建出新的模型
+  await page.evaluate(() => { document.querySelector('#book .panel').scrollTop = 99999; });
+  await sleep(2500);
+  s = await stat();
+  check(s.built > before && s.unseen === 0, `見過第二世界的怪物要建出新的模型（建了 ${s.built} 隻）`);
+  await shot('3-scrolled');
+  // 第三世界：4 隻新怪物（卡片上寫鬼將級／羅判級／判官級）
+  await page.click('#bookTabs button[data-w="3"]');
+  await sleep(2500);
+  s = await stat();
+  const grades = await page.evaluate(() => [...document.querySelectorAll('#bookList .card .grade')].map(e => e.textContent));
+  check(s.stages === s.cards && grades.length === 4 && grades.includes('判官級'), `第三世界要有 4 張寫著等級的卡片（${grades.join('、')}）`);
+  await shot('4-world3');
   await page.evaluate(() => { document.querySelector('#book .panel').scrollTop = 99999; });
   await sleep(1500);
-  await shot('3-scrolled');
+  await shot('5-world3-scrolled');
   await page.click('#btnBookBack');
   check(await page.evaluate(() => !document.getElementById('title').classList.contains('hidden')), '返回要回到主選單');
+  // 舊玩家：有存檔（第一世界第 5 天）但沒有見過的紀錄 → 第 1～4 夜登場的怪物自動標成見過，第 5 夜的「它」還是問號
+  await page.evaluate(() => {
+    localStorage.setItem('home99_progress_v1', JSON.stringify({ w2: false }));
+    localStorage.setItem('home99_save_v1', JSON.stringify({ v: 1, day: 5, diff: 'normal', world: 1, p: { x: 19.5, y: 23, hp: 100, san: 100, hunger: 100, bat: 100, flashLv: 1 }, inv: { bulb1: 1 }, sockets: [], lamps: [], containers: {}, stats: { searched: 0, dissolved: 0, bestTier: 1 } }));
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('#btnBook');
+  const mig = await page.evaluate(() => { const s = seenSet(); return { stick: s.has('stick'), momo: s.has('momo'), tall: s.has('tall'), grass: s.has('grass') }; });
+  check(mig.stick && mig.momo && !mig.tall && !mig.grass, `舊存檔要照進度標成見過（火柴人 ${mig.stick}、鳥腳女 ${mig.momo}、它 ${mig.tall}、草叢人 ${mig.grass}）`);
 });
 
 await scenario('cut', '破關開門動畫（?cut=1）', {}, async ({ page, shot, check }) => {
