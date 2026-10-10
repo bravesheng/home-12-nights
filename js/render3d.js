@@ -591,7 +591,7 @@ function setWorld() {
   windows.length = 0; decoFlowers.length = 0;
   frontDoorPanel = null; doorGlow = null; wallEyes = null; flowerEyes = null; ceilMat = null;
   if (backdrop) { disposeGroup(backdrop.g); backdrop = null; }
-  doorPanels.clear(); panes3 = []; walnutMat = stationMat = null; stopEyes = null;
+  doorPanels.clear(); panes3 = []; walnutMat = stationMat = null; stopEyes = null; curtains = [];
   for (const [c, r] of chestMap) { disposeGroup(r.g); chestMap.delete(c); }
   for (const k in furn3d) delete furn3d[k];
   buildHouse();
@@ -3603,7 +3603,7 @@ function updatePlaceGhost() {
 // ====================================================================
 let walnutTex, stationWallTex, carriageTex, ceil3Tex, doorPanelTex, carriageDoorTex, glassTex, skyFarTex, nearTex, yardTex, sheetTex, velvetTex;
 const midTexes = {};
-let backdrop = null, panes3 = [], walnutMat = null, stationMat = null;
+let backdrop = null, panes3 = [], walnutMat = null, stationMat = null, curtains = [];
 const doorPanels = new Map();
 // 窗戶的位置（牆格）：列車的北、東、西面，車站的南、東、西面
 const WINDOWS_W3 = [
@@ -3807,6 +3807,21 @@ function buildTrainWalls(list) {
     const pane = new THREE.Mesh(geo('pane3', () => new THREE.PlaneGeometry(0.7, 1.05)), pm);
     pane.position.set(0.5, 1.475, 0.5); if (!ns) pane.rotation.y = Math.PI / 2;
     g.add(pane); panes3.push(pm);
+    // 列車的窗戶：兩邊掛著暗紅絨布的窗簾，列車開的時候會微微飄（用頭髮的做法）
+    if (y < 26) {
+      const cm = hairMat(velvetTex, 0.55), S = [];
+      // 窗簾掛在車廂內側（北牆的內側是 +z、西牆是 +x、東牆是 -x）
+      const inward = y === 0 ? [0, 0, 1] : x === 0 ? [1, 0, 0] : [-1, 0, 0];
+      for (const side of [-1, 1]) for (let k = 0; k < 3; k++) {
+        const u = 0.5 + side * (0.42 + k * 0.05), zz = 1.04 + k * 0.01;
+        const pt = (uu, yy, off) => (ns ? [uu, yy, zz + off] : [zz + off, yy, uu]);
+        S.push({ a: pt(u, 2.15, 0), b: pt(u + side * 0.02, 1.5, 0.02), c: pt(u + side * 0.05, 0.75, 0.03), w: 0.09, f: ns ? 0 : Math.PI / 2, ph: k + side * 2, tp: 0.1 });
+      }
+      const cur = new THREE.Mesh(hairGeo(`curtain${x},${y}`, S), cm);
+      if (inward[0] < 0) { cur.position.x = 1; cur.scale.x = -1; }   // 東牆：翻到牆的內側
+      cur.userData.ownGeo = true; g.add(cur);
+      curtains.push(cm.userData.hair);
+    }
   }
 }
 // 包廂的滑門（打開時滑進旁邊的牆裡）和車站側的車門（晚上鎖起來）
@@ -3879,6 +3894,8 @@ function syncTrain3(dt, t, dark) {
   backdrop.moon.visible = night && sc !== 'tunnel';
   backdrop.moon.material.color.set(blood ? 0xff3a2a : 0xfff4d0);
   for (const pm of panes3) pm.opacity = cold ? 0.82 : 0.45;
+  // 窗簾：列車在開的時候飄得比較厲害
+  for (const u of curtains) { u.uHT.value = t; u.uHAmp.value = 0.012 + 0.03 * k; }
 }
 // 第三世界的黃銅燈泡、鍍金燈泡、水晶吊燈燈泡（發光的部分放進 res.bulbs 一起變色）
 function addTrainBulb(res, g, x, y, z, tier, s) {
@@ -4286,11 +4303,13 @@ function updateTrainFurniture(t) {
     sg.signTex.needsUpdate = true;
   }
   const alive = !!(mode === 'cutscene' && CUT && CUT.kind === 2 && CUT.alive);
+  const pt = G.ev && G.ev.paxTurn;
   for (const f of FURN) {
     const r = furn3d[f.id];
     if (!r || !r.pax) continue;
     for (const px of r.pax) {
       px.alive.visible = alive; px.dead.visible = !alive;
+      px.turn = pt && pt.id === f.id && px === r.pax[0] ? clamp(Math.min(pt.t / 3, (16 - pt.t) / 2), 0, 1) : 0;
       if (px.turn > 0) {
         px.g.getWorldPosition(_v);
         let want = Math.atan2(G.p.x - _v.x, G.p.y - _v.z) - px.base;

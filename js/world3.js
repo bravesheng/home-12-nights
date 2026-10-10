@@ -68,6 +68,15 @@ function updateDay3(dt) {
   if (!ev.whistled && G.t >= DAY_LEN - DUSK) { ev.whistled = true; Sound.play('whistle'); }
   if (!ev.lockWarned && G.t >= DAY_LEN - 3) { ev.lockWarned = true; lockStation(true); Sound.play('doorSlam'); toast('🚪 車站的門關上鎖住了，列車要開了。', 'warn'); }
   if (Math.random() < dt * 1.5) steamPuff();
+  dustMotes(dt);
+}
+// 空氣裡慢慢飄的灰塵光點（在玩家前面幾格的範圍，少量就好）
+function dustMotes(dt) {
+  if (Math.random() > dt * 3) return;
+  const p = G.p, a = p.face + rand(-0.7, 0.7), d = rand(1, 5);
+  const x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d;
+  if (isWall(Math.floor(x), Math.floor(y)) || isStationRoom(roomAt(x, y)) && G.cold) return;
+  G.fx.push({ type: 'spark', x, y, h: rand(0.4, 2.2), vx: rand(-0.04, 0.04), vy: rand(-0.04, 0.04), vh: rand(-0.03, 0.03), life: rand(3, 5), max: 5, color: [120, 105, 85] });
 }
 // 月台上一團一團飄過的蒸汽
 function steamPuff() {
@@ -89,6 +98,7 @@ function updateNight3(dt) {
   updateFire3(dt);
   if (mode !== 'play') return;
   if (ev.paxTurn) { ev.paxTurn.t += dt; if (ev.paxTurn.t > 16) ev.paxTurn = null; }
+  dustMotes(dt);
   ev.clackT -= dt;
   if (tr.k > 0.15 && ev.clackT <= 0) { ev.clackT = 0.56 / tr.k; Sound.play('clack', 0.3 * tr.k); }
 }
