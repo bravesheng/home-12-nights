@@ -19,9 +19,13 @@ let lmTex;
 // ====================================================================
 // 材質與幾何
 // ====================================================================
-function patchLM(m) {
+// shade（0～1）：模型自己的明暗。光照貼圖只有「這個位置多亮」、沒有方向，怪物沒被手電筒直射時會像紙片一樣平；
+// 加上「面向你的地方亮、側面和朝下的地方暗」，球才看得出是球。只給怪物用，牆、地板、家具不變（shade 0）
+function patchLM(m, shade = 0) {
+  const shadeU = { value: shade };
+  m.userData.shadeU = shadeU;
   m.onBeforeCompile = sh => {
-    sh.uniforms.uLM = uni.uLM; sh.uniforms.uLMSize = uni.uLMSize; sh.uniforms.uAmb = uni.uAmb;
+    sh.uniforms.uLM = uni.uLM; sh.uniforms.uLMSize = uni.uLMSize; sh.uniforms.uAmb = uni.uAmb; sh.uniforms.uShade = shadeU;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vLMPos;')
       .replace('#include <project_vertex>', `#include <project_vertex>
@@ -35,8 +39,10 @@ function patchLM(m) {
         lmN = normalize(mat3(modelMatrix) * lmN);
         vLMPos = lmWP.xyz + lmN * 0.3;`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vLMPos;\nuniform sampler2D uLM;\nuniform vec2 uLMSize;\nuniform float uAmb;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vLMPos;\nuniform sampler2D uLM;\nuniform vec2 uLMSize;\nuniform float uAmb;\nuniform float uShade;')
       .replace('#include <aomap_fragment>', `vec3 lmc = texture2D(uLM, vLMPos.xz / uLMSize).rgb * 2.0;
+        float lmUp = dot(normal, normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz)) * 0.5 + 0.5;
+        lmc *= mix(1.0, 0.3 + 0.42 * abs(dot(normal, geometryViewDir)) + 0.28 * lmUp, uShade);
         reflectedLight.indirectDiffuse += diffuseColor.rgb * (lmc + uAmb);
         #include <aomap_fragment>`);
   };
@@ -50,9 +56,9 @@ function lm(color, opts) {
   if (!m) { m = patchLM(new THREE.MeshLambertMaterial({ color, ...opts })); matCache.set(key, m); }
   return m;
 }
-const ownLM = (color, opts) => { const m = patchLM(new THREE.MeshLambertMaterial({ color, ...opts })); m.userData.own = true; return m; };
+const ownLM = (color, opts = {}) => { const { shade = 0, ...o } = opts; const m = patchLM(new THREE.MeshLambertMaterial({ color, ...o }), shade); m.userData.own = true; return m; };
 // 會反光的材質（濕濕的眼球）：被手電筒照到會有亮點
-const ownPhong = (color, opts) => { const m = patchLM(new THREE.MeshPhongMaterial({ color, ...opts })); m.userData.own = true; return m; };
+const ownPhong = (color, opts = {}) => { const { shade = 0, ...o } = opts; const m = patchLM(new THREE.MeshPhongMaterial({ color, ...o }), shade); m.userData.own = true; return m; };
 const ownBasic = opts => { const m = new THREE.MeshBasicMaterial(opts); m.userData.own = true; return m; };
 const ownSprite = (map, color, extra = {}) => {
   const m = new THREE.SpriteMaterial({ map, color, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false, ...extra });
@@ -98,6 +104,7 @@ function disposeGroup(g) {
   g.traverse(o => {
     if (o.material && o.material.userData.own) o.material.dispose();
     if (o.userData.ownGeo) o.geometry.dispose();
+    if (o.isInstancedMesh) o.dispose();
   });
 }
 
@@ -280,7 +287,8 @@ function makeTextures() {
 }
 
 // 第二世界：樹牆、藍天白雲天花板（萬物甦醒時雲會睜開眼睛）、草葉、牆上的眼睛、門外的光
-let treeWallTex, skyTex, skyEyeTex, bladeTex, wallEyeTex, doorGlowTex, clothTex, snailFaceTex, grassFaceTex, girlFaceTex, sunPetalTex, flowerEyeTex, capTex;
+let treeWallTex, skyTex, skyEyeTex, bladeTex, wallEyeTex, doorGlowTex, clothTex, grassFaceTex, girlFaceTex, sunPetalTex, flowerEyeTex, capTex;
+let grassStrandTex, snailSkinTex, gillTex, stemTex, sunDiscTex, pleatTex, bigEyeTex;
 function makeGardenTextures() {
   // 小眼球（球面貼圖：正面 u = 0.25 是瞳孔）
   flowerEyeTex = canvasTex(256, 128, (c) => {
@@ -289,18 +297,86 @@ function makeGardenTextures() {
     c.fillStyle = '#0d0808'; c.beginPath(); c.arc(64, 64, 9, 0, 7); c.fill();
     c.fillStyle = 'rgba(255,255,255,.85)'; c.beginPath(); c.arc(58, 58, 4, 0, 7); c.fill();
   }, true);
-  // 千眼菇的菇傘：紅色上面有很多眼睛
-  capTex = canvasTex(256, 128, (c) => {
-    c.fillStyle = '#c8303e'; c.fillRect(0, 0, 256, 128);
-    c.fillStyle = 'rgba(255,255,255,.08)'; for (let i = 0; i < 40; i++) c.fillRect(rnd() * 256, rnd() * 128, 3, 3);
-    for (let i = 0; i < 26; i++) {
-      const x = 8 + rnd() * 240, y = 10 + rnd() * 92, rr = 6 + rnd() * 5;
-      c.fillStyle = '#f6efe6'; c.beginPath(); c.ellipse(x, y, rr * 1.3, rr, 0, 0, 7); c.fill();
-      c.fillStyle = '#5a3a26'; c.beginPath(); c.arc(x, y, rr * 0.55, 0, 7); c.fill();
-      c.fillStyle = '#0d0808'; c.beginPath(); c.arc(x, y, rr * 0.25, 0, 7); c.fill();
-      c.strokeStyle = '#7a1a22'; c.lineWidth = 1.5; c.beginPath(); c.ellipse(x, y, rr * 1.3, rr, 0, 0, 7); c.stroke();
+  // 大一點的虹膜和瞳孔（千眼菇、大嘴觸角蟲的小眼球遠遠的也看得出是眼睛）
+  bigEyeTex = canvasTex(256, 128, (c) => {
+    paintEyeball(c, 256, 128);
+    c.fillStyle = '#4a2a16'; c.beginPath(); c.arc(64, 64, 25, 0, 7); c.fill();
+    c.strokeStyle = 'rgba(20,10,6,.7)'; c.lineWidth = 2.5; c.beginPath(); c.arc(64, 64, 24, 0, 7); c.stroke();
+    c.strokeStyle = 'rgba(120,70,30,.5)'; c.lineWidth = 1.2;
+    for (let i = 0; i < 36; i++) { const a = i / 36 * Math.PI * 2; c.beginPath(); c.moveTo(64 + Math.cos(a) * 12, 64 + Math.sin(a) * 12); c.lineTo(64 + Math.cos(a + 0.1) * 23, 64 + Math.sin(a + 0.1) * 23); c.stroke(); }
+    c.fillStyle = '#080404'; c.beginPath(); c.arc(64, 64, 11, 0, 7); c.fill();
+    c.fillStyle = 'rgba(255,255,255,.85)'; c.beginPath(); c.arc(57, 57, 4.5, 0, 7); c.fill();
+  }, true);
+  // 千眼菇的菇傘：暗紅色、中間深邊緣淡，有一塊一塊的斑和白色的疣（像毒蠅傘），從頂上往下的紋路；眼睛是 3D 的另外放
+  capTex = canvasTex(512, 256, (c) => {
+    const g = c.createLinearGradient(0, 0, 0, 256); g.addColorStop(0, '#6e1018'); g.addColorStop(0.55, '#b4222e'); g.addColorStop(1, '#cf4848');
+    c.fillStyle = g; c.fillRect(0, 0, 512, 256);
+    for (let i = 0; i < 400; i++) { c.fillStyle = `rgba(${40 + rnd() * 40 | 0},0,${rnd() * 20 | 0},${0.08 + rnd() * 0.14})`; c.beginPath(); c.ellipse(rnd() * 512, rnd() * 256, 6 + rnd() * 22, 3 + rnd() * 10, rnd() * 3, 0, 7); c.fill(); }
+    c.strokeStyle = 'rgba(60,5,10,.35)'; c.lineWidth = 2;
+    for (let i = 0; i < 48; i++) { const x = i / 48 * 512 + rnd() * 6; c.beginPath(); c.moveTo(x, 20 + rnd() * 30); c.quadraticCurveTo(x + (rnd() - 0.5) * 30, 150, x + (rnd() - 0.5) * 20, 256); c.stroke(); }
+    for (let i = 0; i < 34; i++) {
+      const x = rnd() * 512, y = 20 + rnd() * 200, rr = 5 + rnd() * 10;
+      c.fillStyle = 'rgba(80,10,15,.5)'; c.beginPath(); c.ellipse(x + 2, y + 3, rr * 1.2, rr * 0.8, 0, 0, 7); c.fill();
+      c.fillStyle = `rgb(${225 + rnd() * 25 | 0},${210 + rnd() * 30 | 0},${190 + rnd() * 30 | 0})`; c.beginPath(); c.ellipse(x, y, rr * 1.2, rr * 0.8, 0, 0, 7); c.fill();
+      c.fillStyle = 'rgba(255,255,255,.5)'; c.beginPath(); c.ellipse(x - rr * 0.3, y - rr * 0.3, rr * 0.5, rr * 0.3, 0, 0, 7); c.fill();
     }
   });
+  // 菇傘下面的菌褶、菇柄（奶油色、有纖維；向日葵和草叢人的莖也拿它染色用）
+  gillTex = canvasTex(256, 256, (c) => {
+    c.fillStyle = '#6a2a2e'; c.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 90; i++) { const a = i / 90 * Math.PI * 2; c.strokeStyle = i % 2 ? 'rgba(240,200,190,.55)' : 'rgba(30,5,8,.6)'; c.lineWidth = i % 2 ? 2 : 1.4; c.beginPath(); c.moveTo(128 + Math.cos(a) * 26, 128 + Math.sin(a) * 26); c.lineTo(128 + Math.cos(a) * 130, 128 + Math.sin(a) * 130); c.stroke(); }
+  });
+  stemTex = canvasTex(128, 128, (c) => {
+    const g = c.createLinearGradient(0, 0, 0, 128); g.addColorStop(0, '#f1e9cf'); g.addColorStop(1, '#cdbf96');
+    c.fillStyle = g; c.fillRect(0, 0, 128, 128);
+    for (let i = 0; i < 60; i++) { c.strokeStyle = `rgba(${120 + rnd() * 60 | 0},${100 + rnd() * 50 | 0},60,${0.15 + rnd() * 0.25})`; c.lineWidth = 1 + rnd() * 2; const x = rnd() * 128; c.beginPath(); c.moveTo(x, 0); c.quadraticCurveTo(x + (rnd() - 0.5) * 10, 64, x + (rnd() - 0.5) * 8, 128); c.stroke(); }
+    for (let i = 0; i < 25; i++) { c.fillStyle = `rgba(90,60,40,${0.1 + rnd() * 0.2})`; c.beginPath(); c.ellipse(rnd() * 128, rnd() * 128, 2 + rnd() * 6, 1 + rnd() * 3, 0, 0, 7); c.fill(); }
+  });
+  // 草叢人的草葉：像頭髮那樣一束一束（根在上面、葉尖在下面），根部深、葉尖淡，有幾片枯黃的
+  grassStrandTex = canvasTex(64, 256, (c) => {
+    for (let i = 0; i < 22; i++) {
+      const x = 32 + (rnd() + rnd() - 1) * 30, end = 150 + rnd() * 100, w = 3 + rnd() * 3, dead = rnd() < 0.15;
+      const xm = x + (rnd() - 0.5) * 16, xt = xm + (rnd() - 0.5) * 20;
+      const lo = dead ? '#6b5a2a' : `rgb(${30 + rnd() * 20 | 0},${70 + rnd() * 30 | 0},${28 + rnd() * 14 | 0})`;
+      const hi = dead ? '#c9ad5a' : `rgb(${70 + rnd() * 50 | 0},${150 + rnd() * 70 | 0},${50 + rnd() * 30 | 0})`;
+      const grad = c.createLinearGradient(0, 0, 0, end); grad.addColorStop(0, lo); grad.addColorStop(0.55, hi); grad.addColorStop(1, dead ? '#e0c878' : '#cfe08a');
+      c.fillStyle = grad; c.beginPath(); c.moveTo(x - w, 0); c.quadraticCurveTo(xm - w * 0.6, end * 0.5, xt, end); c.quadraticCurveTo(xm + w * 0.6, end * 0.5, x + w, 0); c.fill();
+      c.strokeStyle = 'rgba(20,50,20,.45)'; c.lineWidth = 0.8; c.beginPath(); c.moveTo(x, 0); c.quadraticCurveTo(xm, end * 0.5, xt, end * 0.96); c.stroke();
+    }
+  }, true);
+  grassStrandTex.wrapS = grassStrandTex.wrapT = THREE.ClampToEdgeWrapping;
+  // 大嘴觸角蟲的皮：粉紅色、上面淡下面深，一圈一圈的皺紋、斑點、小疙瘩和濕濕的亮點
+  snailSkinTex = canvasTex(256, 256, (c) => {
+    const g = c.createLinearGradient(0, 0, 0, 256); g.addColorStop(0, '#f0b3c2'); g.addColorStop(0.55, '#dd8ea2'); g.addColorStop(1, '#b86478');
+    c.fillStyle = g; c.fillRect(0, 0, 256, 256);
+    for (let y = 6; y < 256; y += 9 + rnd() * 6) {
+      c.strokeStyle = `rgba(120,40,70,${0.18 + rnd() * 0.2})`; c.lineWidth = 1.2 + rnd() * 1.5; c.beginPath(); c.moveTo(0, y);
+      for (let x = 0; x <= 256; x += 16) c.lineTo(x, y + Math.sin(x / 256 * Math.PI * 6 + y) * 3);
+      c.stroke();
+    }
+    for (let i = 0; i < 70; i++) { c.fillStyle = `rgba(150,50,80,${0.12 + rnd() * 0.22})`; c.beginPath(); c.ellipse(rnd() * 256, rnd() * 256, 3 + rnd() * 9, 2 + rnd() * 6, rnd() * 3, 0, 7); c.fill(); }
+    for (let i = 0; i < 120; i++) { const x = rnd() * 256, y = rnd() * 256, rr = 1.5 + rnd() * 3; c.fillStyle = 'rgba(90,20,50,.35)'; c.beginPath(); c.arc(x + 1, y + 1, rr, 0, 7); c.fill(); c.fillStyle = 'rgba(255,220,230,.5)'; c.beginPath(); c.arc(x - 0.5, y - 0.5, rr * 0.7, 0, 7); c.fill(); }
+    for (let i = 0; i < 40; i++) { c.fillStyle = `rgba(255,240,245,${0.1 + rnd() * 0.2})`; c.beginPath(); c.ellipse(rnd() * 256, rnd() * 256, 2 + rnd() * 5, 1 + rnd() * 2, rnd() * 3, 0, 7); c.fill(); }
+  });
+  // 向日葵眼的花盤：鋪滿葵花籽（一顆顆有亮面和暗面），中間是暗紅色的眼窩，血絲往外爬
+  sunDiscTex = canvasTex(256, 256, (c) => {
+    c.fillStyle = '#3a2412'; c.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 900; i++) {
+      const a = i * 2.39996, d = 8 + Math.sqrt(i) * 4.2; if (d > 128) break;
+      const x = 128 + Math.cos(a) * d, y = 128 + Math.sin(a) * d, sz = 2.6 + d * 0.022;
+      c.fillStyle = 'rgba(0,0,0,.4)'; c.beginPath(); c.ellipse(x + 1, y + 1.2, sz * 1.1, sz * 0.7, a, 0, 7); c.fill();
+      c.fillStyle = `rgb(${52 + rnd() * 30 | 0},${34 + rnd() * 20 | 0},${16 + rnd() * 10 | 0})`; c.beginPath(); c.ellipse(x, y, sz * 1.1, sz * 0.7, a, 0, 7); c.fill();
+      c.fillStyle = 'rgba(255,220,150,.3)'; c.beginPath(); c.ellipse(x - 0.8, y - 0.8, sz * 0.6, sz * 0.32, a, 0, 7); c.fill();
+    }
+    const g = c.createRadialGradient(128, 128, 22, 128, 128, 84); g.addColorStop(0, '#4a0c10'); g.addColorStop(0.6, 'rgba(90,20,24,.85)'); g.addColorStop(1, 'rgba(90,20,24,0)');
+    c.fillStyle = g; c.beginPath(); c.arc(128, 128, 84, 0, 7); c.fill();
+    drawVeins(c, 128, 128, 34, 112, 14, 4242, 0.6, 0);
+  }, true);
+  // 眼花女孩的百褶裙：一摺亮一摺暗
+  pleatTex = canvasTex(128, 64, (c) => {
+    for (let x = 0; x < 128; x += 16) { const g = c.createLinearGradient(x, 0, x + 16, 0); g.addColorStop(0, '#6d86b8'); g.addColorStop(0.5, '#4a5f84'); g.addColorStop(0.5, '#34446a'); g.addColorStop(1, '#5a709a'); c.fillStyle = g; c.fillRect(x, 0, 16, 64); }
+  });
+  pleatTex.repeat.set(4, 1);
   treeWallTex = canvasTex(64, 128, (c, w, h) => {
     c.fillStyle = '#2c5629'; c.fillRect(0, 0, w, h);
     const leaf = n => { for (let i = 0; i < n; i++) { c.fillStyle = ['#3c7a36', '#4f8f45', '#2a4f28', '#5ea050', '#356b30'][(rnd() * 5) | 0]; c.beginPath(); c.arc(rnd() * w, rnd() * h * 0.62, 4 + rnd() * 7, 0, 7); c.fill(); } };
@@ -351,15 +427,24 @@ function makeGardenTextures() {
     c.fillStyle = g; c.fillRect(0, 0, w, h);
   });
   clothTex = canvasTex(64, 64, (c) => { for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) { c.fillStyle = (x + y) % 2 ? '#e2394a' : '#fff4f0'; c.fillRect(x * 8, y * 8, 8, 8); } });
-  sunPetalTex = canvasTex(64, 64, (c) => {
-    c.fillStyle = '#f7d23a'; c.beginPath(); c.ellipse(32, 32, 30, 12, 0, 0, 7); c.fill();
-    c.strokeStyle = 'rgba(180,120,10,.6)'; c.lineWidth = 2; c.beginPath(); c.moveTo(4, 32); c.lineTo(60, 32); c.stroke();
+  // 向日葵眼的花瓣（根在下面、尖在上面）：根部橘褐色、往上變黃，有葉脈；尖端和邊緣枯掉變咖啡色，有幾個破洞
+  sunPetalTex = canvasTex(64, 128, (c) => {
+    const g = c.createLinearGradient(0, 128, 0, 0); g.addColorStop(0, '#8a4a10'); g.addColorStop(0.25, '#d9901e'); g.addColorStop(0.6, '#f3c22e'); g.addColorStop(1, '#e8b43a');
+    c.fillStyle = g; c.beginPath(); c.moveTo(32, 126); c.bezierCurveTo(2, 100, 2, 50, 32, 4); c.bezierCurveTo(62, 50, 62, 100, 32, 126); c.fill();
+    c.strokeStyle = 'rgba(140,70,10,.55)'; c.lineWidth = 1.2;
+    c.beginPath(); c.moveTo(32, 126); c.lineTo(32, 8); c.stroke();
+    for (let i = 0; i < 6; i++) { const y = 110 - i * 16; c.beginPath(); c.moveTo(32, y); c.quadraticCurveTo(20, y - 12, 10 + i * 2, y - 24); c.moveTo(32, y); c.quadraticCurveTo(44, y - 12, 54 - i * 2, y - 24); c.stroke(); }
+    c.globalCompositeOperation = 'source-atop';
+    const d = c.createLinearGradient(0, 0, 0, 44); d.addColorStop(0, 'rgba(70,30,10,.85)'); d.addColorStop(1, 'rgba(70,30,10,0)'); c.fillStyle = d; c.fillRect(0, 0, 64, 44);
+    for (let i = 0; i < 6; i++) { c.fillStyle = `rgba(90,40,15,${0.3 + rnd() * 0.4})`; c.beginPath(); c.ellipse(10 + rnd() * 44, 20 + rnd() * 90, 2 + rnd() * 4, 1.5 + rnd() * 3, rnd() * 3, 0, 7); c.fill(); }
+    c.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < 3; i++) { c.beginPath(); c.arc(12 + rnd() * 40, 10 + rnd() * 60, 1.5 + rnd() * 2.5, 0, 7); c.fill(); }
+    c.globalCompositeOperation = 'source-over';
   });
   sunPetalTex.wrapS = sunPetalTex.wrapT = THREE.ClampToEdgeWrapping;
   const faceT = draw => { const t = canvasTex(512, 512, c => draw(c, 512)); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; return t; };
-  snailFaceTex = faceT(drawSnailFace);
-  grassFaceTex = faceT(drawGrassFace);
-  girlFaceTex = faceT(drawGirlFace);
+  grassFaceTex = faceT((c, S) => drawGrassFace(c, S, true));   // 頭頂的草用 3D 草葉
+  girlFaceTex = faceT((c, S) => drawGirlFace(c, S, true));     // 頭髮、衣服、樹枝、左眼都是 3D 的
 }
 
 // ====================================================================
@@ -1488,7 +1573,7 @@ function syncCandles(t) {
 // ====================================================================
 // 第二批怪物的 3D 模型（火柴人、眼球花、爬行女、鳥腳女、小丑）
 // ====================================================================
-let stickFaceTex, momoFaceTex, crawlerFaceTex, clownFaceTex, eyeballTex, irisTex, leafTex, stripeTex, balloonTex, strandTex;
+let stickFaceTex, momoFaceTex, crawlerFaceTex, clownFaceTex, eyeballTex, irisTex, leafTex, stripeTex, balloonTex, strandTex, leafMatS;
 let staticTex, staticCv, staticCtx, staticImg, leafMat;
 function makeMonsterTextures() {
   const faceT = draw => { const t = canvasTex(512, 512, c => draw(c, 512)); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; return t; };
@@ -1543,6 +1628,7 @@ function makeMonsterTextures() {
   staticCtx = staticCv.getContext('2d'); staticImg = staticCtx.createImageData(80, 60);
   staticTex = new THREE.CanvasTexture(staticCv); staticTex.colorSpace = SRGB;
   leafMat = patchLM(new THREE.MeshLambertMaterial({ map: leafTex }));
+  leafMatS = patchLM(new THREE.MeshLambertMaterial({ map: leafTex }), 0.7);  // 向日葵眼的葉子（有明暗）
 }
 // 球面眼球貼圖（寬 W、高 H = W / 2，正面 u = 0.25 是瞳孔）：眼白越往後越紅、虹膜周圍淡淡的陰影、
 // 一塊一塊淡淡的充血，再畫上真實的血絲（drawVeins 在 game.js）；後面是比較粗的血管
@@ -1582,7 +1668,7 @@ function drawStatic() {
 }
 
 // 在兩點之間放一根細圓柱（手腳、莖、線）
-const UP = new THREE.Vector3(0, 1, 0);
+const UP = new THREE.Vector3(0, 1, 0), Z_AXIS = new THREE.Vector3(0, 0, 1), _qI = new THREE.Quaternion(), _v2 = new THREE.Vector3();
 function limb(g, a, b, r, mat) {
   const va = new THREE.Vector3(...a), vb = new THREE.Vector3(...b), dir = vb.clone().sub(va);
   const m = new THREE.Mesh(geo(`limb${r}`, () => new THREE.CylinderGeometry(r, r, 1, 7)), mat);
@@ -1626,9 +1712,10 @@ function hairGeo(key, strands, seg = 8) {
 }
 // 頭髮的材質：會被燈光照亮；uniform 每隻怪物各一份（material.userData.hair）
 // uHT 時間、uHAmp 自己飄的幅度、uHDrag 整片被甩的偏移（x 左右、y 前後）、uHLift 往上飄
-function hairMat() {
+// map 換成草葉貼圖就是會搖的草（草叢人）；shade 是自己的明暗
+function hairMat(map = strandTex, shade = 0) {
   const u = { uHT: { value: 0 }, uHAmp: { value: 0.015 }, uHDrag: { value: new THREE.Vector2() }, uHLift: { value: 0 } };
-  const m = ownLM('#ffffff', { map: strandTex, alphaTest: 0.35, side: THREE.DoubleSide, transparent: true });
+  const m = ownLM('#ffffff', { map, alphaTest: 0.35, side: THREE.DoubleSide, transparent: true, shade });
   const lmCompile = m.onBeforeCompile;
   m.onBeforeCompile = (sh, rd) => {
     lmCompile(sh, rd);
@@ -1853,68 +1940,124 @@ function buildClown(r, g) {
   r.mats.push(stripe, white, black, steel, str, faceMat);
 }
 // ---------- 第二世界：草叢人、大嘴觸角蟲、眼花女孩 ----------
-// 草叢人：平常只看得到一叢會動的長草；站起來時，長長的身體和臉從草裡升上來
+// 草叢人：平常只看得到一叢會動的長草（幾十片草葉各自搖）；站起來時，像樹幹一樣纏著藤蔓和鬚根的長身體和臉從草裡升上來
+// 臉是往前凸的曲面，被燈光照到才有明暗；頭頂的草也會搖
 function buildGrass(r, g) {
-  const bm = ownLM('#ffffff', { map: bladeTex, alphaTest: 0.45, side: THREE.DoubleSide, transparent: true });
+  const gm = hairMat(grassStrandTex, 0.6);
   r.tuft = new THREE.Group(); g.add(r.tuft);
-  for (let i = 0; i < 3; i++) {
-    const pl = new THREE.Mesh(geo('gtuft', () => new THREE.PlaneGeometry(0.95, 0.85)), bm);
-    pl.position.y = 0.42; pl.rotation.y = i / 3 * Math.PI; r.tuft.add(pl);
-  }
+  r.tuft.add(new THREE.Mesh(hairGeo('gtuft2', [...grassStrands(44, 0.34, 0.55, 1.05, 0.22, 4401), ...grassStrands(22, 0.2, 0.3, 0.55, 0.1, 4402)]), gm));
+  r.grassU = gm.userData.hair;
   r.body = new THREE.Group(); g.add(r.body);
-  const skin = ownLM('#8c8a6a', { transparent: true }), streak = ownLM('#a4323a', { transparent: true });
-  cyl(r.body, 0.11, 0.15, 1.25, 0, 0, 0, skin, 8);
+  const skin = ownLM('#a09a72', { map: stemTex, shade: 0.85, transparent: true }), streak = ownLM('#a4323a', { shade: 0.5, transparent: true });
+  const vine = ownLM('#3f6a2c', { shade: 0.7, transparent: true }), root = ownLM('#5a4a30', { shade: 0.7, transparent: true });
+  taper(r.body, [0, 0, 0], [0, 1.28, 0], 0.17, 0.11, skin, 10);
   limb(r.body, [0.06, 0.4, 0.13], [0.04, 1.1, 0.14], 0.02, streak);
-  for (const s of [-1, 1]) { limb(r.body, [s * 0.13, 1.1, 0.02], [s * 0.3, 0.75, 0.25], 0.03, skin); limb(r.body, [s * 0.3, 0.75, 0.25], [s * 0.22, 0.45, 0.45], 0.025, skin); }
-  const faceMat = ownBasic({ map: grassFaceTex, transparent: true, alphaTest: 0.3, color: 0xc9c3b0 });
-  r.face = new THREE.Mesh(geo('grassface', () => new THREE.PlaneGeometry(0.62, 0.62)), faceMat);
+  limb(r.body, [-0.07, 0.3, 0.12], [-0.05, 0.9, 0.13], 0.014, streak);
+  for (let i = 0; i < 10; i++) { const a0 = i * 0.9, a1 = a0 + 0.9, y0 = 0.1 + i * 0.1, rr = 0.155 - i * 0.0045; limb(r.body, [Math.cos(a0) * rr, y0, Math.sin(a0) * rr], [Math.cos(a1) * (rr - 0.0045), y0 + 0.1, Math.sin(a1) * (rr - 0.0045)], 0.016, vine); }
+  for (const s of [-1, 1]) {
+    taper(r.body, [s * 0.13, 1.1, 0.02], [s * 0.3, 0.75, 0.25], 0.035, 0.025, skin);
+    taper(r.body, [s * 0.3, 0.75, 0.25], [s * 0.22, 0.45, 0.45], 0.025, 0.018, skin);
+    for (let k = 0; k < 3; k++) limb(r.body, [s * 0.22, 0.45, 0.45], [s * (0.22 + (k - 1) * 0.05), 0.3, 0.52 + k * 0.02], 0.008, root);
+  }
+  for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; limb(r.body, [Math.cos(a) * 0.12, 0.3, Math.sin(a) * 0.12], [Math.cos(a) * 0.3, -0.1, Math.sin(a) * 0.3], 0.012, root); }
+  const faceMat = ownLM('#ffffff', { map: grassFaceTex, transparent: true, alphaTest: 0.3, shade: 0.6 });
+  r.face = new THREE.Mesh(faceGeo('grassface2', 0.62, 0.145, 0.24, -0.04, 0.07), faceMat);
   r.face.position.set(0, 1.5, 0.08); r.body.add(r.face);
-  r.mats.push(bm, skin, streak, faceMat);
+  const hm = hairMat(grassStrandTex, 0.6);
+  r.body.add(new THREE.Mesh(hairGeo('ghead', grassStrands(26, 0.1, 0.25, 0.45, 0.12, 4403, 1.63, 0.06, 0.6)), hm));
+  r.headU = hm.userData.hair;
+  r.mats.push(gm, skin, streak, vine, root, faceMat, hm);
 }
-// 大嘴觸角蟲：粉紅色的大肉團、4 根長著眼睛的觸角、滿口尖牙的大嘴、身體下面一排小芽
+// 大嘴觸角蟲：粉紅色的大肉團（蛞蝓形、濕濕的皮有皺紋和疙瘩，被手電筒照到會反光）、4 根長著眼睛的觸角、
+// 一圈肉唇和上下兩排尖牙的大嘴（3D 的，咬完會一張一合地嚼）、嘴邊兩顆嵌在肉裡的大眼睛、身體下面一排小芽
 function buildSnail(r, g) {
-  const skin = ownLM('#e8a2b2', { transparent: true }), skin2 = ownLM('#d98c9c', { transparent: true });
-  const eye = ownLM('#ffffff', { map: flowerEyeTex, emissive: 0x2a1a1a, transparent: true });
+  const skin = ownPhong('#ffffff', { map: snailSkinTex, specular: 0x664455, shininess: 22, shade: 0.8, transparent: true });
+  const skin2 = ownPhong('#ffd9e2', { map: snailSkinTex, specular: 0x664455, shininess: 22, shade: 0.8, transparent: true });
+  const lip = ownLM('#b84a62', { shade: 0.8, transparent: true }), inner = ownLM('#2a0408', { transparent: true }), tooth = ownLM('#efe4cf', { shade: 0.7, transparent: true });
+  const eye = wetEyeMat(bigEyeTex, 0x2a1a1a, 0x444444, { transparent: true });
+  const drool = ownPhong('#eef3d2', { transparent: true, opacity: 0.6, specular: 0xffffff, shininess: 50, depthWrite: false });
   r.body = new THREE.Group(); g.add(r.body);
-  sph(r.body, 0.5, 0, 0.36, -0.1, skin, 0.85, 0.62, 1.25, 16);
-  sph(r.body, 0.36, 0, 0.42, 0.32, skin2, 0.95, 0.85, 0.75, 14);
-  const faceMat = ownBasic({ map: snailFaceTex, transparent: true, alphaTest: 0.3, color: 0xd9c9c9 });
-  r.face = new THREE.Mesh(geo('snailface', () => new THREE.PlaneGeometry(0.78, 0.68)), faceMat);
-  r.face.position.set(0, 0.42, 0.6); r.face.rotation.x = -0.1; r.body.add(r.face);
+  const body = new THREE.Mesh(slugGeo(), skin); body.position.set(0, 0.27, -0.08); body.castShadow = true; body.receiveShadow = true; r.body.add(body);
+  sph(r.body, 0.36, 0, 0.42, 0.32, skin2, 0.95, 0.85, 0.75, 18);
+  // 背上的疙瘩
+  for (let i = 0; i < 16; i++) {
+    const a = i * 2.39, d = 0.25 + (i % 5) * 0.09, x = Math.cos(a) * d * 0.55, z = Math.sin(a) * d - 0.08, q = 1 - (x / 0.46) ** 2 - ((z + 0.08) / 0.68) ** 2;
+    if (q > 0.05) sph(r.body, 0.025 + (i % 3) * 0.01, x, 0.26 + 0.34 * Math.sqrt(q), z, skin2, 1, 0.7, 1, 6);
+  }
+  // 大嘴
+  r.mouth = new THREE.Group(); r.mouth.position.set(0, 0.36, 0.55); r.body.add(r.mouth);
+  sph(r.mouth, 0.2, 0, 0, 0, inner, 1.25, 0.72, 0.3, 14).castShadow = false;
+  const lipM = new THREE.Mesh(geo('snlip', () => new THREE.TorusGeometry(0.22, 0.035, 10, 24)), lip); lipM.scale.set(1.15, 0.7, 1); lipM.position.z = 0.06; r.mouth.add(lipM);
+  const toothG = geo('tooth', () => new THREE.ConeGeometry(0.018, 0.075, 6));
+  for (let i = 0; i < 11; i++) { const a = 0.2 + i / 10 * (Math.PI - 0.4), x = Math.cos(a) * 0.23; const th = new THREE.Mesh(toothG, tooth); th.position.set(x, Math.sin(a) * 0.14 - 0.01, 0.07); th.rotation.x = Math.PI; th.rotation.z = x * 0.6; r.mouth.add(th); }
+  for (let i = 0; i < 9; i++) { const a = Math.PI + 0.3 + i / 8 * (Math.PI - 0.6), x = Math.cos(a) * 0.22; const th = new THREE.Mesh(toothG, tooth); th.position.set(x, Math.sin(a) * 0.13 + 0.01, 0.07); th.rotation.z = -x * 0.6; r.mouth.add(th); }
+  for (const [x, len] of [[-0.09, 0.16], [0.06, 0.24], [0.15, 0.1]]) limb(r.mouth, [x, -0.11, 0.08], [x + 0.01, -0.11 - len, 0.07], 0.01, drool);
+  // 嘴邊的大眼睛：一圈肉的眼眶，眼球微微往外看
+  for (const s of [-1, 1]) {
+    const ring = new THREE.Mesh(geo('snlid', () => new THREE.TorusGeometry(0.07, 0.022, 8, 16)), skin2); ring.position.set(s * 0.27, 0.52, 0.47); ring.rotation.y = s * 0.5; r.body.add(ring);
+    const eb = new THREE.Mesh(geo('sneye', () => new THREE.SphereGeometry(0.068, 14, 10)), eye); eb.position.set(s * 0.27, 0.52, 0.47); eb.rotation.y = s * 0.25; r.body.add(eb);
+  }
+  // 觸角：一頭粗一頭細，尖端長著眼睛
   r.stalks = new THREE.Group(); r.stalks.position.set(0, 0.62, 0.12); r.body.add(r.stalks);
   for (const [x, z] of [[-0.3, 0.1], [-0.12, 0.2], [0.12, 0.2], [0.3, 0.1]]) {
-    limb(r.stalks, [x * 0.5, 0, 0], [x, 0.45, z], 0.025, skin2);
-    const e = new THREE.Mesh(geo('stalkeye', () => new THREE.SphereGeometry(0.065, 10, 8)), eye); e.position.set(x, 0.48, z); r.stalks.add(e);
+    taper(r.stalks, [x * 0.5, 0, 0], [x, 0.45, z], 0.04, 0.022, skin2, 8);
+    const ring = new THREE.Mesh(geo('snlid2', () => new THREE.TorusGeometry(0.05, 0.016, 8, 14)), skin2); ring.position.set(x, 0.47, z); r.stalks.add(ring);
+    const e = new THREE.Mesh(geo('stalkeye', () => new THREE.SphereGeometry(0.065, 12, 10)), eye); e.position.set(x, 0.47, z); r.stalks.add(e);
   }
-  const sprout = ownLM('#efe6d6', { transparent: true }), stem = ownLM('#7a8a6a', { transparent: true });
+  const sprout = ownLM('#efe6d6', { shade: 0.6, transparent: true }), stem = ownLM('#7a8a6a', { transparent: true });
   for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2; limb(r.body, [Math.cos(a) * 0.55, 0, Math.sin(a) * 0.62 - 0.1], [Math.cos(a) * 0.58, 0.12, Math.sin(a) * 0.66 - 0.1], 0.01, stem); sph(r.body, 0.035, Math.cos(a) * 0.58, 0.14, Math.sin(a) * 0.66 - 0.1, sprout, 1, 1, 1, 6); }
-  r.mats.push(skin, skin2, eye, faceMat, sprout, stem);
+  r.mats.push(skin, skin2, lip, inner, tooth, eye, drool, sprout, stem);
 }
-// 眼花女孩：藍色上衣和百褶裙、流血的眼睛、眼睛裡長出開著眼球花的樹枝
+// 眼花女孩：藍色上衣、白領子、百褶裙、白襪黑鞋，流血的手；短短的黑髮是一束一束會飄的 3D 髮束（瀏海、兩側、後面）
+// 臉是往前凸的曲面，被燈光照到才有明暗；左眼是真的眼球（濕濕的、會反光、會微微抖），右眼是黑洞，長出開著眼球花的樹枝
+function girlHair() {
+  const r = seeded(2024), S = [];
+  // 瀏海：兩層，從頭皮裡長出來、往前翻、垂到眉毛，一束一束長短不齊
+  for (const [z0, z1, dy] of [[0.02, 0.19, 0], [-0.01, 0.165, 0.02]]) for (let x = -0.16; x <= 0.161; x += 0.025) { const j = r(); S.push({ a: [x * 0.6, 1.75 + dy, z0], b: [x * 0.95, 1.77, z1 - 0.03], c: [x, 1.66 - j * 0.04, z1], w: 0.065, f: 0, ph: x * 9 + j, tp: 0.35 }); }
+  // 兩側：好幾層蓋住耳朵、垂到下巴
+  for (const s of [-1, 1]) for (let k = 0; k < 6; k++) { const j = r(); S.push({ a: [s * (0.11 + k * 0.012), 1.78, 0.06 - k * 0.05], b: [s * (0.2 + k * 0.006), 1.62, 0.07 - k * 0.05], c: [s * (0.21 + k * 0.012), 1.34 - j * 0.06, 0.05 - k * 0.05], w: 0.09, f: s * (1.1 + k * 0.15), ph: s * 2 + k, tp: 0.3 }); }
+  // 後面：從頭頂披到肩膀
+  for (let x = -0.15; x <= 0.151; x += 0.03) { const j = r(); S.push({ a: [x * 0.7, 1.8, -0.1], b: [x * 1.2, 1.62, -0.25], c: [x * 1.35, 1.32 - j * 0.06, -0.25], w: 0.09, f: Math.PI, ph: x * 7 + 3, tp: 0.3 }); }
+  return S;
+}
 function buildGirl(r, g) {
-  const top = ownLM('#5f7fae', { transparent: true }), skirt = ownLM('#4a5f84', { transparent: true }), skin = ownLM('#d8cfc4', { transparent: true });
-  const blood = ownLM('#a3121c', { transparent: true }), branch = ownLM('#5c3a22', { transparent: true }), petal = ownLM('#e88aa8', { transparent: true });
-  const eye = ownLM('#ffffff', { map: flowerEyeTex, emissive: 0x2a1a1a, transparent: true });
-  for (const s of [-1, 1]) limb(g, [s * 0.08, 0, 0], [s * 0.08, 0.62, 0], 0.035, skin);
-  const sk = new THREE.Mesh(geo('gskirt', () => new THREE.ConeGeometry(0.3, 0.45, 14, 1, true)), skirt); sk.position.y = 0.72; g.add(sk);
-  cyl(g, 0.16, 0.2, 0.5, 0, 0.92, 0, top, 12);
-  for (const s of [-1, 1]) { limb(g, [s * 0.2, 1.36, 0], [s * 0.26, 0.92, 0.06], 0.03, top); limb(g, [s * 0.26, 0.92, 0.06], [s * 0.27, 0.68, 0.1], 0.025, skin); sph(g, 0.045, s * 0.27, 0.64, 0.11, blood, 1, 1, 1, 8); }
-  const hairMat = ownBasic({ map: hairTex, transparent: true, alphaTest: 0.35 });
-  const hair = new THREE.Mesh(geo('girlhair', () => new THREE.PlaneGeometry(0.6, 0.75)), hairMat); hair.position.set(0, 1.5, -0.06); g.add(hair);
-  const faceMat = ownBasic({ map: girlFaceTex, transparent: true, alphaTest: 0.3, color: 0xc9c3bd });
-  r.face = new THREE.Mesh(geo('girlface', () => new THREE.PlaneGeometry(0.62, 0.62)), faceMat);
-  r.face.position.set(0, 1.62, 0.05); g.add(r.face);
+  const top = ownLM('#5f7fae', { shade: 0.75, transparent: true }), skirt = ownLM('#ffffff', { map: pleatTex, shade: 0.7, transparent: true }), skin = ownLM('#d8cfc4', { shade: 0.75, transparent: true });
+  const blood = ownLM('#a3121c', { shade: 0.6, transparent: true }), branch = ownLM('#5c3a22', { shade: 0.7, transparent: true }), petal = ownLM('#e88aa8', { shade: 0.7, transparent: true });
+  const eye = wetEyeMat(flowerEyeTex, 0x2a1a1a, 0x444444, { transparent: true }), white = ownLM('#f2efe8', { shade: 0.6, transparent: true });
+  const sock = ownLM('#eeeeee', { shade: 0.7, transparent: true }), shoe = ownLM('#222226', { shade: 0.7, transparent: true }), hemM = ownLM('#2f3f5c', { shade: 0.7, transparent: true });
+  for (const s of [-1, 1]) { limb(g, [s * 0.08, 0.1, 0], [s * 0.08, 0.62, 0], 0.035, skin); limb(g, [s * 0.08, 0.02, 0], [s * 0.08, 0.14, 0], 0.038, sock); sph(g, 0.05, s * 0.08, 0.03, 0.03, shoe, 1, 0.6, 1.5, 8); }
+  const sk = new THREE.Mesh(geo('gskirt2', () => new THREE.ConeGeometry(0.3, 0.45, 28, 1, true)), skirt); sk.position.y = 0.72; g.add(sk);
+  const hem = new THREE.Mesh(geo('ghem', () => new THREE.TorusGeometry(0.3, 0.012, 6, 28)), hemM); hem.rotation.x = Math.PI / 2; hem.position.y = 0.5; g.add(hem);
+  cyl(g, 0.16, 0.2, 0.5, 0, 0.92, 0, top, 14);
+  const collar = new THREE.Mesh(geo('gcollar', () => new THREE.TorusGeometry(0.15, 0.014, 6, 16)), white); collar.rotation.x = Math.PI / 2; collar.position.y = 1.41; g.add(collar);
+  limb(g, [0, 1.38, 0], [0, 1.5, 0], 0.045, skin);
+  for (const s of [-1, 1]) {
+    taper(g, [s * 0.2, 1.36, 0], [s * 0.26, 0.92, 0.06], 0.04, 0.03, top);
+    taper(g, [s * 0.26, 0.92, 0.06], [s * 0.27, 0.68, 0.1], 0.028, 0.022, skin);
+    sph(g, 0.045, s * 0.27, 0.64, 0.11, blood, 1, 1.1, 0.8, 8);
+    for (let k = -1; k <= 1; k++) limb(g, [s * 0.27, 0.62, 0.11], [s * 0.27 + k * 0.025, 0.54, 0.13], 0.008, blood);
+  }
+  // 頭：一顆黑色的頭皮（髮束之間不會露出皮膚，露出來的地方就是頭頂的頭髮），臉貼在頭的前面
+  const scalp = ownLM('#141216', { shade: 0.5, transparent: true });
+  sph(g, 0.175, 0, 1.65, -0.03, scalp, 1, 1.05, 1, 14);
+  const faceMat = ownLM('#ffffff', { map: girlFaceTex, transparent: true, alphaTest: 0.3, shade: 0.55 });
+  r.face = new THREE.Mesh(faceGeo('girlface2', 0.5, 0.13, 0.165, -0.012, 0.07), faceMat);
+  r.face.position.set(0, 1.62, 0.1); g.add(r.face);
+  r.eye = new THREE.Mesh(geo('geye', () => new THREE.SphereGeometry(0.04, 14, 10)), eye); r.eye.position.set(-0.055, 1.624, 0.146); g.add(r.eye);
+  const hairM = hairMat(strandTex, 0.5);
+  g.add(new THREE.Mesh(hairGeo('girlhair3', girlHair()), hairM));
+  r.hairU = hairM.userData.hair;
   // 從右眼長出來的樹枝和兩顆眼球花（被手電筒照到會閉起來）
   r.blooms = [];
-  limb(g, [0.06, 1.66, 0.1], [0.36, 1.9, 0.18], 0.018, branch);
-  limb(g, [0.24, 1.8, 0.15], [0.42, 1.72, 0.2], 0.014, branch);
+  taper(g, [0.055, 1.625, 0.15], [0.36, 1.9, 0.18], 0.022, 0.014, branch);
+  limb(g, [0.24, 1.8, 0.16], [0.42, 1.72, 0.2], 0.012, branch);
   for (const [x, y, z, s] of [[0.38, 1.94, 0.19, 1], [0.44, 1.71, 0.21, 0.8]]) {
     const bl = new THREE.Group(); bl.position.set(x, y, z); bl.scale.setScalar(s); g.add(bl);
     for (let i = 0; i < 7; i++) { const a = i / 7 * Math.PI * 2, p = sph(bl, 0.05, Math.cos(a) * 0.075, Math.sin(a) * 0.075, -0.01, petal, 1, 0.55, 0.4, 6); p.rotation.z = a; }
-    const e = new THREE.Mesh(geo('bloomeye', () => new THREE.SphereGeometry(0.055, 10, 8)), eye); bl.add(e);
+    const e = new THREE.Mesh(geo('bloomeye', () => new THREE.SphereGeometry(0.055, 12, 10)), eye); bl.add(e);
     r.blooms.push(bl);
   }
-  r.mats.push(top, skirt, skin, blood, branch, petal, eye, hairMat, faceMat);
+  r.mats.push(top, skirt, skin, blood, branch, petal, eye, white, sock, shoe, hemM, scalp, faceMat, hairM);
 }
 const NEW_BUILD = { stick: buildStick, momo: buildMomo, crawler: buildCrawler, balloon: buildBalloon, clown: buildClown, grass: buildGrass, snail: buildSnail, girl: buildGirl };
 
@@ -1984,10 +2127,14 @@ function syncNewMonster(e, r, t) {
       r.balloon.position.y = 2.12 + Math.sin(e.wob * 1.3) * 0.06;
       break;
     case 'grass': {
-      // 草叢一直在晃；站起來時身體和臉從草裡升上來
-      const k = e.rise || 0;
-      r.tuft.rotation.z = Math.sin(e.wob * (e.hidden ? 9 : 3)) * (e.hidden ? 0.12 : 0.05);
-      r.tuft.scale.set(1, e.hidden ? 0.9 + Math.abs(Math.sin(e.wob * 7)) * 0.2 : 1, 1);
+      // 草叢一直在晃：躲著走的時候每片草沙沙地抖，撲過來時草往後倒；站起來時身體和臉從草裡升上來，頭頂的草也在搖
+      const k = e.rise || 0, hidden = e.hidden, gu = r.grassU, hu = r.headU;
+      gu.uHT.value = t; hu.uHT.value = t;
+      gu.uHAmp.value += ((hidden ? 0.06 : 0.025) - gu.uHAmp.value) * Math.min(1, dt * 5);
+      hu.uHAmp.value = e.state === 'grab' ? 0.05 : 0.02;
+      gu.uHDrag.value.set(spring(r, 'gx', hidden ? Math.sin(e.wob * 9) * 0.03 : 0, dt), spring(r, 'gz', e.state === 'lunge' ? -0.12 : 0, dt));
+      r.tuft.rotation.z = Math.sin(e.wob * (hidden ? 9 : 3)) * (hidden ? 0.06 : 0.02);
+      r.tuft.scale.set(1, hidden ? 0.92 + Math.abs(Math.sin(e.wob * 7)) * 0.16 : 1, 1);
       r.body.visible = k > 0.02;
       r.body.position.y = -1.6 * (1 - k);
       r.body.rotation.x = e.state === 'lunge' ? 0.5 : e.state === 'grab' ? 0.12 + Math.sin(t * 20) * 0.04 : 0;
@@ -2001,7 +2148,7 @@ function syncNewMonster(e, r, t) {
       const st = e.retract > 0 ? 0.25 : 1;
       r.stalks.scale.y += (st - r.stalks.scale.y) * 0.2;
       r.stalks.rotation.z = Math.sin(t * 1.3) * 0.08;
-      r.face.scale.y = e.chew > 0 ? 0.85 + Math.abs(Math.sin(t * 14)) * 0.25 : 1;
+      r.mouth.scale.y = e.chew > 0 ? 0.55 + Math.abs(Math.sin(t * 14)) * 0.6 : 0.92 + 0.08 * Math.sin(t * 2);  // 嚼：一張一合
       r.g.position.y = 0;
       break;
     }
@@ -2011,13 +2158,79 @@ function syncNewMonster(e, r, t) {
       for (const bl of r.blooms) bl.scale.y += (shut * bl.scale.x - bl.scale.y) * 0.25;
       r.face.rotation.z = e.blind > 0 ? Math.sin(t * 6) * 0.15 : Math.sin(e.wob * 0.9) * 0.06;
       r.g.position.y = Math.sin(e.wob * 1.5) * 0.03;
+      // 眼球微微抖；頭髮走路時跟著晃、被照瞎了甩頭時甩得更厲害，追你時往後飄
+      r.eye.rotation.set(Math.sin(t * 9) * 0.05, Math.sin(t * 6.3) * 0.08 - 0.1, 0);
+      const moving = e.state === 'hunt' || e.blind > 0, hu = r.hairU;
+      hu.uHT.value = t;
+      hu.uHAmp.value += ((moving ? 0.03 : 0.012) - hu.uHAmp.value) * Math.min(1, dt * 4);
+      hu.uHDrag.value.set(spring(r, 'hx', e.blind > 0 ? Math.sin(t * 6) * 0.05 : Math.sin(e.wob * 1.5) * 0.01, dt), spring(r, 'hz', e.state === 'hunt' ? -0.03 : 0, dt));
+      hu.uHLift.value = spring(r, 'hl', e.state === 'hunt' ? 0.02 : 0, dt);
       break;
     }
   }
 }
 
-// 眼球和虹膜：濕濕的、被手電筒照到會反光
-const wetEyeMat = (map, emissive, specular = 0x444444) => ownPhong('#ffffff', { map, emissive, specular, shininess: 70 });
+// 眼球和虹膜：濕濕的、被手電筒照到會反光；自己有明暗（球的邊緣暗）
+const wetEyeMat = (map, emissive, specular = 0x444444, extra = {}) => ownPhong('#ffffff', { map, emissive, specular, shininess: 70, shade: 0.6, ...extra });
+// 一頭粗一頭細的圓柱（觸角、莖、手臂）
+function taper(g, a, b, r0, r1, mat, seg = 8) {
+  const va = new THREE.Vector3(...a), vb = new THREE.Vector3(...b), dir = vb.clone().sub(va);
+  const m = new THREE.Mesh(geo(`tp${r0},${r1},${seg}`, () => new THREE.CylinderGeometry(r1, r0, 1, seg)), mat);
+  m.scale.set(1, dir.length(), 1);
+  m.position.copy(va).add(vb).multiplyScalar(0.5);
+  m.quaternion.setFromUnitVectors(UP, dir.normalize());
+  m.castShadow = true;
+  g.add(m);
+  return m;
+}
+// 花瓣：根在 y=0、尖在 y=len，越往尖端越往 curl 的方向彎，中間微微凹（貼圖 v=0 是根、v=1 是尖）
+function petalGeo(key, w, len, curl) {
+  return geo(key, () => {
+    const g = new THREE.PlaneGeometry(w, len, 3, 8), p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const k = p.getY(i) / len + 0.5, x = p.getX(i) / (w / 2);
+      p.setY(i, k * len);
+      p.setZ(i, curl * k * k * k + x * x * w * 0.25 * (1 - k * 0.6));
+    }
+    g.computeVertexNormals();
+    return g;
+  });
+}
+// 微微凸起的圓盤（葵花籽那一面），貼圖照平面貼
+function domeGeo(key, R, h) {
+  return geo(key, () => {
+    const g = new THREE.RingGeometry(0, R, 28, 6), p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) { const x = p.getX(i) / R, y = p.getY(i) / R; p.setZ(i, h * Math.sqrt(Math.max(0, 1 - x * x - y * y))); }
+    g.computeVertexNormals();
+    return g;
+  });
+}
+// 眼皮：眼球前面半邊、從頭頂 th0 到 th1 的一片球殼（下眼皮用 scale.y = -1 翻過來）
+const lidGeo = (key, r, th0, th1) => geo(key, () => new THREE.SphereGeometry(r, 20, 8, 0, Math.PI, th0, th1 - th0));
+// 一叢草：n 片草葉長在半徑 R 的圓裡，高 h0～h1，往外倒 lean（用頭髮的做法，風吹會各自搖）
+function grassStrands(n, R, h0, h1, lean, seed, dy = 0, dz = 0, wk = 1) {
+  const r = seeded(seed), S = [];
+  for (let i = 0; i < n; i++) {
+    const a = r() * Math.PI * 2, d = Math.sqrt(r()) * R, bx = Math.cos(a) * d, bz = Math.sin(a) * d + dz;
+    const h = h0 + r() * (h1 - h0), out = lean * (0.5 + r()), ox = Math.cos(a) * out, oz = Math.sin(a) * out;
+    S.push({ a: [bx, dy, bz], b: [bx + ox * 0.4, dy + h * 0.6, bz + oz * 0.4], c: [bx + ox, dy + h, bz + oz], w: (0.05 + r() * 0.05) * wk, f: a + Math.PI / 2 + (r() - 0.5) * 0.6, ph: r() * 6, tp: 0.8 });
+  }
+  return S;
+}
+// 大嘴觸角蟲的身體：前面胖、後面尖的蛞蝓形，底部平、表面凹凸不平
+function slugGeo() {
+  return geo('slug', () => {
+    const g = new THREE.SphereGeometry(1, 30, 20), p = g.attributes.position, v = new THREE.Vector3();
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i);
+      const k = 1 + 0.06 * Math.sin(5 * v.y + 2 * v.z) * Math.cos(3 * v.x) + 0.035 * Math.sin(9 * v.z + 1.5) * Math.sin(7 * v.x);
+      const tail = v.z < -0.2 ? 1 - (-v.z - 0.2) / 0.8 * 0.45 : 1, flat = v.y < 0 ? 0.75 : 1;
+      p.setXYZ(i, v.x * k * 0.46 * tail, v.y * k * 0.34 * tail * flat, v.z * k * 0.68);
+    }
+    g.computeVertexNormals();
+    return g;
+  });
+}
 // 虹膜：微微凸起的圓片（像眼角膜），邊緣貼著眼球表面，中間不會被眼球的面穿過去（以前會露出一塊白色菱形）
 // ballR 眼球半徑、irisR 虹膜半徑、z0 眼球中心的 z
 function irisGeo(key, ballR, irisR, z0) {
@@ -2029,48 +2242,101 @@ function irisGeo(key, ballR, irisR, z0) {
     return g;
   });
 }
-// 向日葵眼：粗粗的莖、一圈黃色花瓣，中間是一顆布滿血絲的大眼睛
+// 向日葵眼：有點彎的粗莖、垂下來的葉子；花盤鋪滿葵花籽、兩圈彎彎的花瓣（有的枯掉捲起來）；
+// 中間是一圈暗紅色的眼眶，嵌著一顆布滿血絲的大眼睛，血管從眼睛爬到花盤上；上下眼皮會眨、被手電筒照到會瞇起來
 function buildSunflower(f, g) {
-  const stem = lm('#4f8a3a');
-  limb(g, [0, 0, 0], [0.05, 0.6, 0], 0.035, stem);
-  limb(g, [0.05, 0.6, 0], [0, 1.18, 0], 0.032, stem);
+  const r = seeded(Math.round(f.x * 131 + f.y * 17) + 7);
+  const stem = ownLM('#5a9a40', { map: stemTex, shade: 0.8 });
+  taper(g, [0, 0, 0], [0.04, 0.62, 0.01], 0.045, 0.036, stem, 10);
+  taper(g, [0.04, 0.62, 0.01], [0, 1.2, 0], 0.036, 0.028, stem, 10);
   for (const s of [-1, 1]) {
-    const leaf = new THREE.Mesh(geo('leaf', () => new THREE.SphereGeometry(1, 14, 8)), leafMat);
-    leaf.scale.set(0.24, 0.016, 0.1); leaf.position.set(s * 0.2, 0.55, 0); leaf.rotation.z = s * 0.45;
+    const leaf = new THREE.Mesh(geo('leaf', () => new THREE.SphereGeometry(1, 14, 8)), leafMatS);
+    leaf.scale.set(0.26, 0.018, 0.11); leaf.position.set(s * 0.2, 0.55, 0); leaf.rotation.z = -s * 0.4;
     g.add(leaf);
   }
   const eyeG = new THREE.Group(); eyeG.position.y = 1.32; eyeG.rotation.order = 'YXZ'; g.add(eyeG);
-  const disc = new THREE.Mesh(geo('sundisc', () => new THREE.CylinderGeometry(0.25, 0.25, 0.06, 20)), lm('#6a4a1a'));
-  disc.rotation.x = Math.PI / 2; eyeG.add(disc);
-  const pm = ownLM('#ffffff', { map: sunPetalTex, alphaTest: 0.3, side: THREE.DoubleSide, emissive: 0x2a2205 });
-  for (let i = 0; i < 14; i++) {
-    const a = i / 14 * Math.PI * 2, p = new THREE.Mesh(geo('sunpetal', () => new THREE.PlaneGeometry(0.26, 0.11)), pm);
-    p.position.set(Math.cos(a) * 0.33, Math.sin(a) * 0.33, -0.01); p.rotation.z = a; eyeG.add(p);
+  eyeG.add(new THREE.Mesh(domeGeo('sundome', 0.27, 0.05), ownLM('#ffffff', { map: sunDiscTex, shade: 0.7 })));
+  const back = new THREE.Mesh(geo('sunback', () => new THREE.CylinderGeometry(0.27, 0.2, 0.08, 20)), ownLM('#3f6a2c', { shade: 0.7 }));
+  back.rotation.x = Math.PI / 2; back.position.z = -0.045; eyeG.add(back);
+  const pm = ownLM('#ffffff', { map: sunPetalTex, alphaTest: 0.4, side: THREE.DoubleSide, shade: 0.7 });
+  for (const [n, rad, len, w, z, curl, off, tilt] of [[18, 0.24, 0.3, 0.11, -0.012, -0.08, 0, -0.2], [13, 0.22, 0.22, 0.09, 0.005, 0.05, 0.5, 0.15]]) {
+    for (let i = 0; i < n; i++) {
+      const a = (i + off) / n * Math.PI * 2, wilt = r() < 0.25, p = new THREE.Mesh(petalGeo(`sunpetal${len}`, w, len, curl), pm);
+      p.position.set(Math.cos(a) * rad, Math.sin(a) * rad, z);
+      p.rotation.order = 'ZYX';
+      p.rotation.z = a - Math.PI / 2 + (r() - 0.5) * 0.25;
+      p.rotation.x = tilt + (r() - 0.5) * 0.4 + (wilt ? -0.9 : 0);
+      p.scale.set(0.85 + r() * 0.3, wilt ? 0.6 + r() * 0.3 : 0.9 + r() * 0.25, 1);
+      eyeG.add(p);
+    }
   }
+  const flesh = ownLM('#5a2a26', { shade: 0.85 });
+  const rim = new THREE.Mesh(geo('sunrim', () => new THREE.TorusGeometry(0.165, 0.04, 10, 24)), flesh); rim.position.z = 0.04; eyeG.add(rim);
   const eyeMat = wetEyeMat(eyeballTex, 0x1a1414);
   const ball = new THREE.Mesh(geo('suneye', () => new THREE.SphereGeometry(0.19, 24, 16)), eyeMat);
   ball.position.z = 0.02; eyeG.add(ball);
   const irisMat = wetEyeMat(irisTex, 0x141010, 0x777777);
   const iris = new THREE.Mesh(irisGeo('suniris', 0.19, 0.085, 0.02), irisMat);
   eyeG.add(iris);
-  return { g, eyeG, ball, iris, eyeMat, irisMat, pm };
+  const lidMat = ownLM('#6a3a30', { shade: 0.9 }), lids = [];
+  for (const s of [1, -1]) { const l = new THREE.Mesh(lidGeo('sunlid', 0.2, 0, 1.05), lidMat); l.position.z = 0.02; l.scale.y = s; eyeG.add(l); lids.push(l); }
+  const vein = ownLM('#8a1e26', { shade: 0.6 });
+  for (let i = 0; i < 5; i++) { const a = -0.3 - i * 0.6 - r() * 0.3, x0 = Math.cos(a) * 0.15, y0 = Math.sin(a) * 0.15; limb(eyeG, [x0, y0, 0.12], [x0 * 1.7, y0 * 1.7, 0.05], 0.006, vein); }
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return { g, eyeG, ball, iris, eyeMat, irisMat, pm, lids };
 }
-// 千眼菇：奶油色的粗菇柄、長滿眼睛的紅色菇傘，邊緣滴下藍色和紅色的水
+// 千眼菇：奶油色的粗菇柄（有纖維、底部一圈菌托）、下面有菌褶的暗紅色菇傘，上面嵌著十幾顆眼睛（每顆都會轉過來盯著你，
+// 周圍一圈肉色的眼眶，被手電筒照到會閉成一條縫）；每顆眼睛都在哭，眼淚沿著菇傘流到邊緣，一滴一滴掉下來
+const SH_A = 0.72, SH_B = 0.72 * 0.72, SH_Y = 1.08;  // 菇傘：半徑、壓扁後的高度、底部的高度
 function buildShroom(f, g) {
-  cyl(g, 0.17, 0.22, 1.12, 0, 0, 0, lm('#efe6c8'), 12);
-  const capMat = ownLM('#ffffff', { map: capTex, emissive: 0x200508 });
-  const cap = new THREE.Mesh(geo('shcap', () => new THREE.SphereGeometry(0.72, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2)), capMat);
-  cap.scale.y = 0.72; cap.position.y = 1.08; cap.castShadow = true; g.add(cap);
-  const under = new THREE.Mesh(geo('shunder', () => new THREE.CircleGeometry(0.72, 24)), lm('#8a3a3a'));
-  under.rotation.x = Math.PI / 2; under.position.y = 1.08; g.add(under);
-  const drips = [];
-  for (let i = 0; i < 9; i++) {
-    const a = i / 9 * Math.PI * 2 + 0.2, dm = ownBasic({ color: i % 2 ? 0x4a7ae0 : 0xd43a4a, transparent: true, opacity: 0.85 });
-    const d = new THREE.Mesh(geo('drip', () => new THREE.CylinderGeometry(0.012, 0.018, 1, 5)), dm);
-    d.position.set(Math.cos(a) * 0.66, 1.0, Math.sin(a) * 0.66); g.add(d);
-    drips.push({ d, ph: Math.random() * 6 });
+  const r = seeded(Math.round(f.x * 131 + f.y * 17) + 7);
+  const stemM = ownLM('#ffffff', { map: stemTex, shade: 0.8 });
+  cyl(g, 0.17, 0.25, 1.12, 0, 0, 0, stemM, 14);
+  const volva = new THREE.Mesh(geo('shvolva', () => new THREE.TorusGeometry(0.24, 0.06, 8, 16)), stemM); volva.rotation.x = Math.PI / 2; volva.position.y = 0.06; g.add(volva);
+  const capMat = ownLM('#ffffff', { map: capTex, emissive: 0x200508, shade: 0.75 });
+  const cap = new THREE.Mesh(geo('shcap2', () => new THREE.SphereGeometry(SH_A, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2)), capMat);
+  cap.scale.y = 0.72; cap.position.y = SH_Y; cap.castShadow = true; g.add(cap);
+  const under = new THREE.Mesh(geo('shunder2', () => new THREE.CircleGeometry(SH_A, 28)), ownLM('#ffffff', { map: gillTex, shade: 0.5 }));
+  under.rotation.x = Math.PI / 2; under.position.y = SH_Y - 0.005; g.add(under);
+  // 眼睛的位置（th 從頂上算的角度、ph 繞一圈的角度）、那裡的法線
+  const N = 15, eyes = [];
+  for (let i = 0; i < N; i++) {
+    const th = 0.5 + r() * 0.85, ph = i / N * Math.PI * 2 + r() * 0.3;
+    const p = new THREE.Vector3(SH_A * Math.sin(th) * Math.cos(ph), SH_Y + SH_B * Math.cos(th), SH_A * Math.sin(th) * Math.sin(ph));
+    const n = new THREE.Vector3(Math.sin(th) * Math.cos(ph) / SH_A, Math.cos(th) / SH_B, Math.sin(th) * Math.sin(ph) / SH_A).normalize();
+    eyes.push({ th, ph, p, n, s: 0.75 + r() * 0.5, ph2: r() * 6 });
   }
-  return { g, capMat, drips };
+  const balls = new THREE.InstancedMesh(geo('sheye', () => new THREE.SphereGeometry(0.065, 14, 10)), wetEyeMat(bigEyeTex, 0x1a1414), N);
+  const lids = new THREE.InstancedMesh(geo('shlid', () => new THREE.TorusGeometry(0.065, 0.022, 8, 14)), ownLM('#7a2028', { shade: 0.8 }), N);
+  for (let i = 0; i < N; i++) {
+    const e = eyes[i];
+    _q.setFromUnitVectors(Z_AXIS, e.n);
+    _m4.compose(_v.copy(e.p).addScaledVector(e.n, 0.012), _q, _v2.setScalar(e.s)); lids.setMatrixAt(i, _m4);
+  }
+  g.add(balls); g.add(lids);
+  // 眼淚：每顆眼睛一條薄薄的帶子，沿著菇傘的經線流到邊緣、再垂下來一點
+  const pos = [], uv = [], idx = [];
+  for (const e of eyes) {
+    const base = pos.length / 3, steps = 8, w = 0.013 * e.s, sx = -Math.sin(e.ph), sz = Math.cos(e.ph);
+    for (let i = 0; i <= steps + 1; i++) {
+      const k = Math.min(1, i / steps), th = e.th + 0.07 + (Math.PI / 2 - e.th - 0.07) * k, ww = w * (1 + k * 0.8) * (i > steps ? 0.5 : 1);
+      const nx = Math.sin(th) * Math.cos(e.ph) / SH_A, ny = Math.cos(th) / SH_B, nz = Math.sin(th) * Math.sin(e.ph) / SH_A, nl = Math.hypot(nx, ny, nz);
+      const x = SH_A * Math.sin(th) * Math.cos(e.ph) + nx / nl * 0.006, y = SH_Y + SH_B * Math.cos(th) + ny / nl * 0.006 - (i > steps ? 0.05 : 0), z = SH_A * Math.sin(th) * Math.sin(e.ph) + nz / nl * 0.006;
+      pos.push(x - sx * ww, y, z - sz * ww, x + sx * ww, y, z + sz * ww);
+      uv.push(0, k, 1, k);
+      if (i <= steps) { const nn = base + i * 2; idx.push(nn, nn + 2, nn + 1, nn + 1, nn + 2, nn + 3); }
+    }
+  }
+  const tg = new THREE.BufferGeometry();
+  tg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  tg.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  tg.setIndex(idx); tg.computeVertexNormals();
+  const tearMat = ownPhong('#e4f2ff', { transparent: true, opacity: 0.55, emissive: 0x2a3a50, specular: 0xffffff, shininess: 60, side: THREE.DoubleSide, depthWrite: false });
+  const tears = new THREE.Mesh(tg, tearMat); tears.userData.ownGeo = true; g.add(tears);
+  const drops = new THREE.InstancedMesh(geo('shdrop', () => new THREE.SphereGeometry(0.018, 8, 6)), ownPhong('#e8f4ff', { transparent: true, opacity: 0.85, emissive: 0x223044, specular: 0xffffff, shininess: 80 }), N);
+  g.add(drops);
+  g.traverse(o => { if (o.isMesh) { o.castShadow = o !== tears && o !== drops; o.receiveShadow = true; } });
+  return { g, capMat, eyes, balls, lids, drops, tearMat };
 }
 // 眼球花：綠色的莖和兩片葉子，花是一顆會轉過來盯著你的大眼球
 const flowerMap = new Map();
@@ -2115,8 +2381,10 @@ function syncFlowers(t) {
       else { r.eyeG.rotation.y = Math.sin(t * 0.3 + f.x); r.eyeG.rotation.x = 0.9; }
       const glare = f.lock >= SUN_LOCK ? 0.25 + 0.2 * Math.sin(t * 12) : 0;
       r.eyeMat.emissive.setRGB(0.1 + glare, 0.08, 0.08);
-      const squint = 1 - Math.min(1, (f.burn || 0)) * 0.5;
-      r.ball.scale.y = squint; r.iris.scale.y = squint;
+      // 眼皮：被手電筒燒到瞇起來、盯著你時睜大、偶爾眨一下；白天閉著睡覺
+      const blink = Math.sin(t * 0.9 + f.x * 2.7) > 0.975 ? 1 : 0;
+      const k = !awake ? 0.85 : Math.max(Math.min(1, f.burn || 0) * 0.55, blink) - (f.lock >= SUN_LOCK ? 0.12 : 0);
+      r.lids[0].rotation.x = -0.35 + 0.92 * k; r.lids[1].rotation.x = 0.35 - 0.92 * k;
       continue;
     }
     if (f.ptype === 'shroom') {
@@ -2124,7 +2392,27 @@ function syncFlowers(t) {
       const shut = f.shut > 0 || !awake;
       r.capMat.emissive.setRGB(shut ? 0.03 : f.spore ? 0.35 + 0.15 * Math.sin(t * 10) : 0.12, shut ? 0.0 : 0.04, shut ? 0.01 : 0.06);
       r.capMat.color.setRGB(shut ? 0.55 : 1, shut ? 0.45 : 1, shut ? 0.45 : 1);
-      for (const dr of r.drips) { const len = 0.12 + 0.18 * Math.abs(Math.sin(t * 1.5 + dr.ph)); dr.d.scale.y = len; dr.d.position.y = 1.0 - len / 2; }
+      // 每顆眼睛都轉過來盯著你（不會轉進菇傘裡）；閉起來時縮成一條縫、縮進眼眶裡
+      const s = Math.max(0.05, f.grow), lx = dx / s, lz = dz / s, ly = EYE / s;
+      for (let i = 0; i < r.eyes.length; i++) {
+        const e = r.eyes[i];
+        _v.set(lx - e.p.x, ly - e.p.y, lz - e.p.z).normalize();
+        const dn = _v.dot(e.n);
+        if (dn < 0.3) _v.addScaledVector(e.n, 0.3 - dn).normalize();
+        _q.setFromUnitVectors(Z_AXIS, _v);
+        _m4.compose(_v2.copy(e.p).addScaledVector(e.n, shut ? 0.004 : 0.024), _q, _v.set(e.s, e.s * (shut ? 0.18 : 1), e.s * (shut ? 0.6 : 1)));
+        r.balls.setMatrixAt(i, _m4);
+      }
+      r.balls.instanceMatrix.needsUpdate = true;
+      // 眼淚一直流；淚珠從眼睛滑到菇傘邊緣，再掉到地上
+      r.tearMat.opacity = 0.5 + 0.15 * Math.sin(t * 1.7 + f.x);
+      for (let i = 0; i < r.eyes.length; i++) {
+        const e = r.eyes[i], k = (t * 0.25 + e.ph2) % 1.4;
+        if (k < 1) { const th = e.th + 0.07 + (Math.PI / 2 - e.th - 0.07) * k; _v.set(SH_A * Math.sin(th) * Math.cos(e.ph), SH_Y + SH_B * Math.cos(th), SH_A * Math.sin(th) * Math.sin(e.ph)).addScaledVector(e.n, 0.012); }
+        else _v.set(SH_A * Math.cos(e.ph), SH_Y - (k - 1) / 0.4 * SH_Y, SH_A * Math.sin(e.ph));
+        _m4.compose(_v, _qI, _v2.setScalar(k < 1 ? 1 : 1.3)); r.drops.setMatrixAt(i, _m4);
+      }
+      r.drops.instanceMatrix.needsUpdate = true;
       continue;
     }
     if (awake) {
