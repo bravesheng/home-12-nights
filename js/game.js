@@ -3099,15 +3099,8 @@ function gameOver(cause = '') {
 function victory() {
   // 第一世界破關：播開門動畫，走進第二世界；第二世界破關：坐上末班列車；第三世界：列車到站
   if (isW3()) { victory3(); return; }
-  if (!isW2()) { startCutscene(); return; }
-  mode = 'over';
-  Sound.setDrone(0);
-  Sound.play('win');
-  try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }
-  $('goTitle').textContent = '🌸 你走出了夢核花園！';
-  $('goText').innerHTML = `花園裡的眼睛一個一個閉上，天花板上的雲慢慢散開了。<br>你在第二世界撐過了 ${LAST_NIGHT} 夜！<br>你搜索了 ${G.stats.searched} 次，驅散了 ${G.stats.dissolved} 個怪物。<br>最好的燈泡：${bulbName(G.stats.bestTier)}`;
-  $('btnRetry').classList.add('hidden');
-  $('gameover').classList.remove('hidden');
+  if (isW2()) { startCutscene2(); return; }
+  startCutscene();
 }
 
 // ====================================================================
@@ -3143,6 +3136,8 @@ function cutCaption(title, sub) {
 }
 function updateCutscene(dt) {
   const c = CUT;
+  if (c.kind === 2) { updateCutscene2(dt); return; }   // 第二到第三世界（js/world3.js）
+  if (c.kind === 3) { updateCutscene3(dt); return; }   // 第三世界破關：終點站
   c.t += dt;
   G.time += dt;
   if (!c.switched) G.t = Math.min(G.t + dt * 1.6, DAY_LEN - DUSK - 1); // 天慢慢亮起來
@@ -3184,7 +3179,10 @@ function updateCutscene(dt) {
   fade.style.opacity = Math.max(white, black).toFixed(3);
 }
 function skipCutscene() {
-  if (mode !== 'cutscene' || !CUT || CUT.t >= CUT_SWITCH) return;
+  if (mode !== 'cutscene' || !CUT) return;
+  if (CUT.kind === 2) { skipCutscene2(); return; }
+  if (CUT.kind === 3) { CUT.t = Math.max(CUT.t, 5.6); return; }
+  if (CUT.t >= CUT_SWITCH) return;
   CUT.t = CUT_SWITCH;
 }
 function endCutscene() {

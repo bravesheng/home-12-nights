@@ -519,6 +519,31 @@ await scenario('cut', '破關開門動畫（?cut=1）', {}, async ({ page, shot,
   await shot('1-cutscene');
 });
 
+await scenario('cut2', '第二到第三世界的過場動畫（?cut=2）：月台上車、睡著、醒來乘客都死了、進第三世界第 1 天', {}, async ({ page, shot, check }) => {
+  await page.goto(BASE + '?cut=2', { waitUntil: 'load' });
+  await sleep(2000);
+  let s = await state(page);
+  check(s.mode === 'cutscene' && !(await page.$('#cutscene.hidden')), `要在播動畫（現在 mode：${s.mode}）`);
+  // 低 FPS 下動畫時間走很慢，直接撥到月台那一段、醒來那一段各拍一張
+  await page.evaluate(() => { CUT.t = CUT2.walk + 0.3; });
+  await sleep(1500);
+  const c1 = await page.evaluate(() => ({ world: curWorld, alive: CUT.alive, text: document.getElementById('cutText').textContent, x: Math.round(CUT.cam.x), y: Math.round(CUT.cam.y) }));
+  check(c1.world === 3 && c1.alive && c1.text.includes('旅行'), `月台那一段要在第三世界、乘客還活著（世界 ${c1.world}、字幕「${c1.text}」）`);
+  await shot('1-platform');
+  await page.evaluate(() => { CUT.t = CUT2.wake + 1.5; });
+  await sleep(1500);
+  const c2 = await page.evaluate(() => ({ alive: CUT.alive, moving: CUT.moving, k: G.train.k, text: document.getElementById('cutText').textContent }));
+  check(!c2.alive && c2.moving && c2.k > 0 && c2.text.includes('死了'), `醒來那一段乘客要蓋著白布、列車在開（字幕「${c2.text}」）`);
+  await shot('2-wake');
+  await page.evaluate(() => { CUT.t = CUT2.end - 0.2; });
+  await page.waitForFunction(() => mode === 'play', null, { timeout: 30000 });
+  s = await state(page);
+  check(s.day === 1 && s.phase === 'day' && s.hud, `動畫結束要進第三世界第 1 天早上（現在：${s.label}）`);
+  check(await page.evaluate(() => w3Unlocked() && Object.keys(G.inv).length > 5), '第三世界要解鎖、背包要帶過去');
+  await sleep(800);
+  await shot('3-day1');
+});
+
 await scenario('offline', '離線（快取後斷網，重新打開並開新遊戲）', {}, async ({ page, ctx, shot, check }) => {
   await page.goto(BASE, { waitUntil: 'load' });
   // 遊戲只在 https 註冊 service worker，本機測試這裡手動註冊

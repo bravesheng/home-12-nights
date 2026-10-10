@@ -417,17 +417,6 @@ function chestMonster(c) {
   if (!G.ev.chestMonTip) { G.ev.chestMonTip = 1; toast('☀️ 白天也會戰鬥：寶箱跑出來的怪物會追你，打倒一樣算驅散。天黑時留在車站的怪物不會上車。', 'warn'); }
 }
 
-// 第三世界破關：列車到站了，天亮了
-function victory3() {
-  mode = 'over';
-  Sound.setDrone(0);
-  Sound.play('win');
-  try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }
-  $('goTitle').textContent = '🚂 列車到站了';
-  $('goText').innerHTML = `天亮了，列車慢慢停進終點站……月台上空無一人，只有你一個。<br>你在第三世界撐過了 ${LAST_NIGHT} 夜！<br>你搜索了 ${G.stats.searched} 次，驅散了 ${G.stats.dissolved} 個怪物。<br>最好的燈泡：${bulbName(G.stats.bestTier)}`;
-  $('btnRetry').classList.add('hidden');
-  $('gameover').classList.remove('hidden');
-}
 
 // ====================================================================
 // 寒寂之境（第 3、7、10、12 天）：整天下雪、零下 100 度，多了「體溫」。體溫歸零就死。
@@ -888,3 +877,153 @@ function thumbWarlord(c, S) {
   c.save(); c.scale(S / 200, S / 200); c.strokeStyle = '#8a8f96'; c.lineWidth = 9; c.beginPath(); c.moveTo(150, 110); c.lineTo(178, 196); c.stroke(); c.restore();
 }
 function thumbTaowu(c, S) { c.save(); c.scale(S / 200, S / 200); c.translate(8, 8); drawTaowuFace(c, 184); c.restore(); }
+
+// ====================================================================
+// 第二到第三世界的過場動畫（照故事：「我出去旅行，不小心睡著了，醒來時火車上的人已經都死了，只剩我一個……」）
+// 1. 天亮，花園的眼睛閉上 → 2. 淡出 → 3. 黃昏的月台、一列黑色的列車：走上月台、進交誼車廂、在絨布座位上坐下（車上還有別的乘客）
+// → 4. 畫面變黑，只剩車輪的聲音 → 5. 醒來：燈昏黃會閃、乘客全都蓋著白布、窗外一片黑 → 6. 大字「第三世界：末班列車」→ 第 1 天早上
+// 大約 17 秒，點一下畫面可以跳過。做法跟第一到第二世界一樣：直接用遊戲的 3D 場景，鏡頭走設定好的路線
+// ====================================================================
+const CUT2 = { door: 2.6, fadeIn: 3.4, walk: 4.2, sit: 8.6, black: 9.6, wake: 11.6, title: 14.6, end: 17.2 };
+const CUT2_SEAT = { x: 16.2, y: 22.2, lookX: 14.5, lookY: 21.4 };
+function startCutscene2() {
+  unlockW3();
+  // 帶進第三世界的東西：背包、裝好的燈泡和燈具、硬幣、手電筒等級
+  const inv = { ...G.inv };
+  const put = (id, n = 1) => { inv[id] = (inv[id] || 0) + n; };
+  for (const o of [...G.sockets, ...G.lamps]) if (o.bulb) put('bulb' + o.bulb);
+  for (const l of G.lamps) put(lampItemId(l.type));
+  CUT = { kind: 2, t: 0, switched: false, doorK: 0, alive: false, moving: false, clackT: 0, carry: { inv, coins: G.coins, flashLv: G.p.flashLv, diff: G.diff, stats: G.stats } };
+  mode = 'cutscene';
+  for (const e of G.enemies) puff(e.x, e.y);
+  G.enemies = []; G.flowers = []; G.ghosts = []; G.fireballs = []; G.shots = []; G.bombs = [];
+  G.phase = 'day'; G.t = 0; G.power = true; G.p.flash = false;
+  G.ev.knock = 0; G.ev.tvOn = false; G.ev.closet = 0; G.ev.blood = false;
+  Sound.setDrone(0); Sound.play('win');
+  releaseInputs();
+  if (document.pointerLockElement) document.exitPointerLock();
+  $('hud').classList.add('hidden');
+  $('cutscene').classList.remove('hidden');
+  cutCaption(`🌅 你撐過了 ${LAST_NIGHT} 夜！`, '花園裡的眼睛，一個一個閉上了……');
+}
+// 換成第三世界：黃昏，列車停在第一站；乘客都還活著
+function cut2Switch(c) {
+  if (c.switched) return;
+  c.switched = true;
+  newGame(c.carry.diff, 3, c.carry);
+  mode = 'cutscene';
+  $('hud').classList.add('hidden');
+  G.t = DAY_LEN - DUSK + 6;
+  c.alive = true;
+  cutCaption('我出去旅行……', '');
+  Sound.play('steam');
+}
+// 睡著了：畫面變黑，列車開了（晚上、風景捲動、車輪聲）
+function cut2Sleep(c) {
+  if (c.slept) return;
+  cut2Switch(c);
+  c.slept = true;
+  cutCaption('不小心睡著了……', '');
+  G.phase = 'night'; G.t = 30; startNight3(); G.ev.schedule = []; G.train.k = 1; c.moving = true;
+}
+function updateCutscene2(dt) {
+  const c = CUT, K = CUT2, ease = k => k * k * (3 - 2 * k);
+  c.t += dt; G.time += dt;
+  const t = c.t, S = CUT2_SEAT, seatFace = Math.atan2(S.lookY - S.y, S.lookX - S.x);
+  let black = 0;
+  const wheels = () => { c.clackT -= dt; if (c.clackT <= 0) { c.clackT = 0.56; Sound.play('clack', 0.35); } };
+  if (t < K.door) {
+    // 1. 天亮了：鏡頭停在原地
+    G.t = Math.min(G.t + dt * 1.6, DAY_LEN - DUSK - 1);
+    c.cam = { x: G.p.x, y: G.p.y, h: 0, face: G.p.face, pitch: G.p.pitch };
+  } else if (t < K.fadeIn) {
+    // 2. 淡出
+    black = Math.min(1, (t - K.door) / 0.7);
+    if (t >= K.door + 0.75) cut2Switch(c);
+  } else if (t < K.sit) {
+    // 3. 月台：看著列車、走向車門、走進交誼車廂、在絨布座位上坐下
+    cut2Switch(c);
+    black = t < K.fadeIn + 0.8 ? 1 - (t - K.fadeIn) / 0.8 : 0;
+    const w = ease(clamp((t - K.walk) / (K.sit - K.walk), 0, 1));
+    const pts = [[22.5, 29.8, 0], [22.5, 25.5, 0], [22.5, 23.4, 0], [S.x, S.y, -0.5]];
+    const seg = w * 3, i = Math.min(2, Math.floor(seg)), k = seg - i, a = pts[i], b = pts[i + 1];
+    const x = a[0] + (b[0] - a[0]) * k, y = a[1] + (b[1] - a[1]) * k, h = a[2] + (b[2] - a[2]) * k;
+    c.cam = { x, y, h, face: i < 2 ? -Math.PI / 2 : seatFace, pitch: 0.02 + Math.sin(t * 1.3) * 0.01 };
+    if (Math.random() < dt * 5) steamPuff();
+  } else if (t < K.wake) {
+    // 4. 畫面慢慢變黑，只剩車輪的聲音；列車開了
+    cut2Switch(c);
+    black = Math.min(1, (t - K.sit) / 1.0);
+    if (t >= K.black) cut2Sleep(c);
+    if (c.moving) wheels();
+    c.cam = { x: S.x, y: S.y, h: -0.5, face: seatFace, pitch: 0.02 };
+  } else if (t < K.end) {
+    // 5. 醒來：燈昏黃會閃、乘客全都蓋著白布不動、窗外一片黑；慢慢坐直、環顧四周
+    cut2Sleep(c);
+    if (!c.woke) { c.woke = true; c.alive = false; cutCaption('醒來時，火車上的人已經都死了……', '只剩我一個。'); }
+    black = t < K.wake + 1.2 ? 1 - (t - K.wake) / 1.2 : t > K.end - 1.2 ? (t - (K.end - 1.2)) / 1.2 : 0;
+    const look = ease(clamp((t - K.wake - 1) / 2.5, 0, 1));
+    c.cam = { x: S.x, y: S.y, h: -0.5 + look * 0.5, face: seatFace + look * 1.5, pitch: 0.02 + Math.sin(t * 1.1) * 0.01 };
+    wheels();
+    if (t >= K.title && !c.titled) { c.titled = true; cutCaption('第三世界：末班列車', '白天下車找燃料和寶箱，晚上顧好火爐讓列車一直開'); Sound.play('whistle'); }
+  } else { endCutscene2(); return; }
+  const fade = $('cutFade');
+  fade.style.background = '#000';
+  fade.style.opacity = black.toFixed(3);
+}
+function skipCutscene2() {
+  const c = CUT;
+  if (!c || c.t >= CUT2.end - 1.2) return;
+  cut2Switch(c);
+  c.t = CUT2.end - 1.2;
+}
+function endCutscene2() {
+  cut2Switch(CUT);
+  // 第 1 天早上，列車停在第一個車站
+  G.phase = 'day'; G.t = 0; G.train.k = 0; G.train.state = 'run'; G.ev.schedule = [];
+  Object.assign(G.p, { x: 19.5, y: 23, face: -Math.PI / 2, pitch: 0 });
+  lockStation(false);
+  CUT = null; $('cutscene').classList.add('hidden'); $('cutFade').style.opacity = '0'; $('hud').classList.remove('hidden'); cutCaption('');
+  mode = 'play'; invDirty = true; lockPointer();
+  saveGame();
+  showBig('第 1 天', '下車去車站找燃料和物資');
+  toast('🚂 第三世界解鎖了！之後在主選單「新遊戲」也可以直接選第三世界。', 'good');
+}
+
+// ====================================================================
+// 第三世界破關：天亮了，列車慢慢停進終點站 → 結局畫面
+// ====================================================================
+function victory3() {
+  CUT = { kind: 3, t: 0 };
+  mode = 'cutscene';
+  Sound.setDrone(0);
+  releaseInputs();
+  if (document.pointerLockElement) document.exitPointerLock();
+  $('hud').classList.add('hidden');
+  $('cutscene').classList.remove('hidden');
+  cutCaption('🌅 天亮了', '列車慢慢停進終點站……');
+  Sound.play('whistle');
+  for (const e of G.enemies) puff(e.x, e.y);
+  G.enemies = [];
+}
+function updateCutscene3(dt) {
+  const c = CUT;
+  c.t += dt; G.time += dt;
+  G.train.k = Math.max(0, 1 - c.t / 3.5);
+  G.t = Math.min(NIGHT_LEN - 0.01, NIGHT_LEN - 4 + c.t);   // 天慢慢亮
+  if (G.train.k > 0.1) { c.clackT = (c.clackT || 0) - dt; if (c.clackT <= 0) { c.clackT = 0.56 / G.train.k; Sound.play('clack', 0.3 * G.train.k); } }
+  c.cam = { x: G.p.x, y: G.p.y, h: 0, face: G.p.face + Math.sin(c.t * 0.4) * 0.1, pitch: 0.03 };
+  const white = clamp((c.t - 3.5) / 1.8, 0, 1), fade = $('cutFade');
+  fade.style.background = '#fff6e6'; fade.style.opacity = white.toFixed(3);
+  if (c.t >= 5.6) endVictory3();
+}
+function endVictory3() {
+  CUT = null; $('cutscene').classList.add('hidden'); $('cutFade').style.opacity = '0'; cutCaption('');
+  mode = 'over';
+  Sound.play('win');
+  try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }
+  $('goTitle').textContent = '🚂 列車到站了';
+  $('goText').innerHTML = `天亮了，列車慢慢停進終點站……月台上空無一人，只有你一個。<br>你在第三世界撐過了 ${LAST_NIGHT} 夜！<br>你搜索了 ${G.stats.searched} 次，驅散了 ${G.stats.dissolved} 個怪物。<br>最好的燈泡：${bulbName(G.stats.bestTier)}`;
+  $('btnRetry').classList.add('hidden');
+  $('gameover').classList.remove('hidden');
+}
