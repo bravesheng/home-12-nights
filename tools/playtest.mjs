@@ -222,6 +222,32 @@ await scenario('w3', '第三世界第 1 天（下車到月台、天黑前車站�
   s = await state(page);
   check(s.y > 25.6, `白天要能從車站的門走下月台（現在 y=${s.y.toFixed(1)}）`);
   await shot('2-platform');
+  // 寶箱：每天在車站放 6 個（LV1×3、LV2×2、LV3×1）；走到櫃箱前面開它（直接呼叫開箱的函式，不用等按住 E）
+  const ch = await page.evaluate(() => {
+    const list = G.chests3.map(c => c.lv), c = G.chests3.find(c => c.lv === 1);
+    Object.assign(G.p, { x: c.x + 0.5 + Math.cos(c.face + Math.PI / 2) * 1.0, y: c.y + 0.5 + Math.sin(c.face + Math.PI / 2) * 1.0 });
+    G.p.face = Math.atan2(c.y + 0.5 - G.p.y, c.x + 0.5 - G.p.x);
+    const solid = isSolid(c.x, c.y), before = G.coins;
+    Math.random = () => 0.99;   // 這次一定開出物資，不跳怪物
+    openChest3(c);
+    return { list, solid, opened: c.open, coins: G.coins - before, modal: mode === 'modal' };
+  });
+  check(ch.list.length === 6 && ch.list.filter(l => l === 1).length === 3, `第 1 天要放 6 個寶箱（現在：${ch.list.join(',')}）`);
+  check(ch.solid && ch.opened && ch.coins > 0 && ch.modal, `櫃箱要擋路、開了要有東西（開了 ${ch.opened}、硬幣 +${ch.coins}）`);
+  await sleep(600);
+  await shot('2b-chest');
+  await page.evaluate(() => { closeModal(); });
+  // 火爐：站在火爐前面丟木柴，火力要增加
+  const fire = await page.evaluate(() => {
+    const f = FURN_BY_ID.firebox;
+    Object.assign(G.p, { x: f.x + 1, y: f.y + f.h + 0.6, face: -Math.PI / 2 });
+    const n0 = G.fire.queue.length, w0 = G.inv.wood || 0;
+    G.selId = 'wood';
+    useSelected();
+    return { n0, n1: G.fire.queue.length, w0, w1: G.inv.wood || 0, left: G.fire.queue.reduce((s, q) => s + q.left, 0), bar: !document.getElementById('fireBar').classList.contains('hidden') };
+  });
+  check(fire.n1 === fire.n0 + 1 && fire.w1 === fire.w0 - 1 && fire.left >= 25, `對著火爐用木柴要丟進去（火爐 ${fire.n0}→${fire.n1}，木柴 ${fire.w0}→${fire.w1}）`);
+  check(fire.bar, '第三世界要顯示 🔥 火力條');
   // 天黑前 3 秒車站鎖門：門變成牆，還留在車站的人會被拉回車上
   await page.evaluate(() => { Object.assign(G.p, { x: 8.5, y: 29.5 }); G.t = DAY_LEN - 3.2; });
   await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
@@ -233,6 +259,37 @@ await scenario('w3', '第三世界第 1 天（下車到月台、天黑前車站�
   check(lay.length === 0, '天黑時版面重疊：' + lay.join('、'));
   await sleep(1200);
   await shot('3-night');
+});
+
+await scenario('w3stop', '第三世界第 2 夜火爐是空的（?world=3&night=2&fire=0）：列車減速、停下來被攻擊，補燃料後重新開動', {}, async ({ page, shot, check }) => {
+  await page.goto(BASE + '?world=3&night=2&kit=1&fire=0', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play');
+  await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
+  // 火爐是空的：列車先減速，5 秒後停下來（低 FPS 下遊戲時間走很慢，直接把時間撥快）
+  await page.evaluate(() => { G.train.t = TRAIN_STOP_DELAY + 1; });
+  await page.waitForFunction(() => G.train.state === 'stopped', null, { timeout: 30000 });
+  const hp0 = await page.evaluate(() => G.p.hp);
+  await sleep(2500);
+  const st = await page.evaluate(() => ({ state: G.train.state, hp: G.p.hp, k: G.train.k, fx: +document.getElementById('stopfx').style.opacity, alert: document.getElementById('alert').textContent }));
+  check(st.state === 'stopped' && st.hp < hp0, `列車停下來要一直扣血（${hp0.toFixed(0)} → ${st.hp.toFixed(0)}）`);
+  check(st.fx > 0 && st.alert.includes('列車停了'), '列車停了要有畫面效果和提示');
+  const lay = await overlaps(page);
+  check(lay.length === 0, '列車停下時版面重疊：' + lay.join('、'));
+  await shot('1-stopped');
+  // 丟燃料：列車 4 秒後重新開動
+  const re = await page.evaluate(() => {
+    const f = FURN_BY_ID.firebox;
+    Object.assign(G.p, { x: f.x + 1, y: f.y + f.h + 0.6, face: -Math.PI / 2 });
+    G.selId = 'charcoal'; useSelected();
+    const starting = G.train.state;
+    G.train.t = TRAIN_RESTART + 1;
+    return { starting };
+  });
+  check(re.starting === 'starting', `補燃料後列車要準備重新開動（現在：${re.starting}）`);
+  await page.waitForFunction(() => G.train.state === 'run', null, { timeout: 30000 });
+  check(true, '');
+  await sleep(1000);
+  await shot('2-running');
 });
 
 await scenario('monsters', '怪物模型（火柴人、鳥腳女和爬行女會動的頭髮、眼球花，手電筒開關各拍一張）', {}, async ({ page, shot, check }) => {

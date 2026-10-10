@@ -590,7 +590,8 @@ function setWorld() {
   windows.length = 0; decoFlowers.length = 0;
   frontDoorPanel = null; doorGlow = null; wallEyes = null; flowerEyes = null; ceilMat = null;
   if (backdrop) { disposeGroup(backdrop.g); backdrop = null; }
-  doorPanels.clear(); panes3 = []; walnutMat = stationMat = null;
+  doorPanels.clear(); panes3 = []; walnutMat = stationMat = null; stopEyes = null;
+  for (const [c, r] of chestMap) { disposeGroup(r.g); chestMap.delete(c); }
   for (const k in furn3d) delete furn3d[k];
   buildHouse();
   buildFurniture();
@@ -681,7 +682,7 @@ function buildHouse() {
   if (archFlowers.length) addInstancedFlowers(archFlowers, 0.05, ['#ff9ec8', '#ffffff', '#fff3a8', '#c9a8ff']);
 
   if (w2) { buildGardenDeco(list); return; }
-  if (w3) { buildBackdrop(); return; }
+  if (w3) { buildBackdrop(); buildStopEyes(); return; }
   // 窗戶（白天透進光、晚上一片漆黑）
   const W = [['n', 17.5], ['n', 27.5], ['n', 38.5], ['e', 19.5], ['e', 22.5], ['e', 12.5], ['w', 23.5], ['e', 30.5], ['s', 21.5], ['s', 28.5]];
   const frameMat = lm('#d8d2c8');
@@ -3855,6 +3856,78 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
   }
   return false;
 }
+// ---------- 寶箱：櫃箱（舊木頭、鐵皮包角）、鐵寶箱（生鏽）、銀寶箱（發黑、有花紋）、鉑寶箱（幾乎沒磨損、微微發光） ----------
+const chestMap = new Map();
+let chestTexes = null;
+function makeChestTextures() {
+  const mk = (base, draw) => canvasTex(128, 128, (c, w, h) => { c.fillStyle = base; c.fillRect(0, 0, w, h); draw(c, w, h); });
+  chestTexes = {
+    1: mk('#6b4a2e', (c, w, h) => { for (let i = 0; i < 40; i++) { c.strokeStyle = `rgba(20,10,5,${0.2 + rnd() * 0.4})`; c.lineWidth = 1 + rnd(); const y = rnd() * h; c.beginPath(); c.moveTo(0, y); c.lineTo(w, y + (rnd() - 0.5) * 6); c.stroke(); } c.fillStyle = '#4a4a4e'; c.fillRect(0, 0, 14, h); c.fillRect(w - 14, 0, 14, h); }),
+    2: mk('#4a4a50', (c, w, h) => { for (let i = 0; i < 60; i++) { c.fillStyle = `rgba(150,70,30,${0.2 + rnd() * 0.5})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 3 + rnd() * 12, 2 + rnd() * 6, rnd() * 3, 0, 7); c.fill(); } c.fillStyle = '#2a2a2e'; for (let x = 8; x < w; x += 16) { c.beginPath(); c.arc(x, 8, 2.5, 0, 7); c.fill(); c.beginPath(); c.arc(x, h - 8, 2.5, 0, 7); c.fill(); } }),
+    3: mk('#8a8f96', (c, w, h) => { c.strokeStyle = 'rgba(40,40,48,.55)'; c.lineWidth = 2; for (let i = 0; i < 6; i++) { c.beginPath(); c.arc(20 + i * 18, 64, 12, 0, 7); c.stroke(); } for (let i = 0; i < 40; i++) { c.fillStyle = `rgba(20,20,26,${0.15 + rnd() * 0.4})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 4 + rnd() * 14, 3 + rnd() * 8, rnd() * 3, 0, 7); c.fill(); } }),
+    4: mk('#dfe3e8', (c, w, h) => { const g = c.createLinearGradient(0, 0, w, h); g.addColorStop(0, 'rgba(255,255,255,.5)'); g.addColorStop(0.5, 'rgba(200,210,230,0)'); g.addColorStop(1, 'rgba(255,255,255,.4)'); c.fillStyle = g; c.fillRect(0, 0, w, h); c.strokeStyle = 'rgba(120,130,150,.5)'; c.lineWidth = 2; c.strokeRect(10, 10, w - 20, h - 20); }),
+  };
+}
+function buildChest3(c) {
+  if (!chestTexes) makeChestTextures();
+  const g = new THREE.Group(); g.position.set(c.x + 0.5, 0, c.y + 0.5); g.rotation.y = c.face || 0; scene.add(g);
+  const m = c.lv === 4 ? ownPhong('#ffffff', { map: chestTexes[4], specular: 0xffffff, shininess: 60 }) : c.lv === 3 ? ownPhong('#ffffff', { map: chestTexes[3], specular: 0x888888, shininess: 25 }) : ownLM('#ffffff', { map: chestTexes[c.lv] });
+  const edge = lm(c.lv === 1 ? '#4a4a4e' : c.lv === 2 ? '#2a2a2e' : c.lv === 3 ? '#5a5e66' : '#c9cfd8');
+  const W = 0.82, D = 0.6, H = 0.42;
+  const body = new THREE.Mesh(BOX, m); body.scale.set(W, H, D); body.position.set(0, H / 2, 0); body.castShadow = true; body.receiveShadow = true; g.add(body);
+  for (const s of [-1, 1]) box(g, s * W / 2 - 0.03, s * W / 2 + 0.03, 0, H + 0.02, -D / 2 - 0.01, D / 2 + 0.01, edge, false);
+  // 蓋子：鉸鏈在後面（-z），打開時往後翻
+  const piv = new THREE.Group(); piv.position.set(0, H, -D / 2); g.add(piv);
+  const lid = new THREE.Mesh(BOX, m); lid.scale.set(W, 0.14, D); lid.position.set(0, 0.07, D / 2); lid.castShadow = true; piv.add(lid);
+  box(piv, -0.05, 0.05, 0.02, 0.12, D - 0.02, D + 0.03, edge, false);   // 鎖
+  const inside = ownSprite(glowTex, c.lv === 4 ? 0xcfe0ff : 0xffd060); inside.position.set(0, H + 0.1, 0); inside.scale.setScalar(0.7); inside.visible = false; g.add(inside);
+  const glow = c.lv === 4 ? ownSprite(glowTex, 0xdfe8ff) : null;
+  if (glow) { glow.position.set(0, H / 2, 0); glow.scale.setScalar(1.4); g.add(glow); }
+  return { g, piv, inside, glow, k: c.open || c.out ? 1 : 0 };
+}
+function syncChests3(t) {
+  const seen = new Set();
+  for (const c of G.chests3 || []) {
+    seen.add(c);
+    let r = chestMap.get(c);
+    if (!r) { r = buildChest3(c); chestMap.set(c, r); }
+    const target = c.open || c.out ? 1 : 0;
+    r.k += (target - r.k) * 0.15;
+    r.piv.rotation.x = -1.6 * r.k;
+    r.inside.visible = c.out && !c.open;
+    if (r.inside.visible) r.inside.material.opacity = 0.5 + 0.3 * Math.sin(t * 5);
+    if (r.glow) r.glow.material.opacity = (c.open ? 0.15 : 0.45) + 0.2 * Math.sin(t * 2);
+  }
+  for (const [c, r] of chestMap) if (!seen.has(c)) { disposeGroup(r.g); chestMap.delete(c); }
+}
+// ---------- 列車停下來：窗外貼著一雙雙發亮的眼睛和手 ----------
+let stopEyes = null;
+function buildStopEyes() {
+  stopEyes = new THREE.Group(); houseGroup.add(stopEyes);
+  const hand = ownLM('#8a8278', { transparent: true, opacity: 0.9 });
+  for (const [x, y] of WINDOWS_W3) {
+    if (y >= 26) continue;   // 只有列車的窗戶
+    const ns = y === 0;
+    for (let i = 0; i < 2; i++) {
+      const g = new THREE.Group();
+      const ox = ns ? x + 0.3 + i * 0.4 : (x === 0 ? -0.15 : x + 1.15), oz = ns ? -0.15 : y + 0.3 + i * 0.4;
+      g.position.set(ox, 1.3 + rnd() * 0.5, oz);
+      const e = ownSprite(glowTex, rnd() < 0.5 ? 0xffd9a0 : 0xff6a50); e.scale.setScalar(0.07 + rnd() * 0.05); g.add(e);
+      const e2 = e.clone(); e2.position.x = ns ? 0.09 : 0; e2.position.z = ns ? 0 : 0.09; g.add(e2);
+      if (rnd() < 0.6) { const h = box(g, -0.06, 0.06, -0.3, -0.1, -0.02, 0.02, hand, false); if (!ns) h.rotation.y = Math.PI / 2; for (let k = 0; k < 4; k++) { const f = box(g, -0.05 + k * 0.03, -0.035 + k * 0.03, -0.1, 0.02, -0.01, 0.01, hand, false); if (!ns) f.rotation.y = Math.PI / 2; } }
+      g.userData.ph = rnd() * 6;
+      stopEyes.add(g);
+    }
+  }
+  stopEyes.visible = false;
+}
+function syncStopEyes(t) {
+  if (!stopEyes) return;
+  const on = isW3() && G.train && (G.train.state === 'stopped' || G.train.state === 'starting') && G.phase === 'night';
+  stopEyes.visible = on;
+  if (!on) return;
+  for (const g of stopEyes.children) { const k = Math.sin(t * 3 + g.userData.ph); g.visible = k > -0.6; g.position.y += Math.sin(t * 7 + g.userData.ph) * 0.002; }
+}
 // 每一幀：火爐的火、煤氣燈閃爍、站牌的站名、乘客（過場動畫時活著；夜晚事件讓某個乘客的頭慢慢轉過來看你）
 function updateTrainFurniture(t) {
   const fb3 = furn3d.firebox;
@@ -4079,6 +4152,7 @@ function render(dt) {
   syncFireballs(t);
   syncProjectiles(t);
   syncWorld2(t);
+  if (isW3()) { syncChests3(t); syncStopEyes(t); }
   syncStun(t);
   syncHpBars();
   syncGhosts();

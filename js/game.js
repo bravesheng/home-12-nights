@@ -169,6 +169,7 @@ function newGame(diff = 'normal', world = 1, carry = null) {
   G.diff = DIFFS[diff] ? diff : 'normal';
   G.sockets.find(s => s.id === 's_living').bulb = 1;
   for (const f of FURN) if (f.loot) G.containers[f.id] = { items: [] };
+  if (world === 3) startDay3(1);   // 列車停在第一站、放今天的寶箱
   refillContainers(0.6);
   G.containers.kdrawer.items = ['pan', 'chocolate']; // 第一天廚房抽屜（第二世界是野餐箱）一定有平底鍋
   prepareDay();
@@ -276,6 +277,7 @@ function refillContainers(chance = 0.35) {
   for (const f of FURN) {
     if (!f.loot) continue;
     const c = G.containers[f.id];
+    if (isW3() && (f.loot === 'fuel' || f.loot === 'coal' || f.loot === 'cushions')) { refillPile(f, c); continue; }   // 木堆、煤袋、椅墊每天補滿
     const food = f.loot === 'food'; // 冰箱、櫥櫃幾乎每天都會補滿食物
     if (c.items.length || Math.random() > Math.min(0.95, (food ? 0.8 : chance) * k)) continue;
     const n = food ? 1 + (Math.random() < 0.6) + (Math.random() < 0.3) : 1 + (Math.random() < 0.2 * k);
@@ -321,6 +323,7 @@ function nextCard() {
 function addItem(id, n = 1) {
   G.inv[id] = (G.inv[id] || 0) + n;
   if (!G.selId || !G.inv[G.selId]) G.selId = id;
+  if (id === 'bulb' + BAYMAX_TIER) G.baymaxGot = (G.baymaxGot || 0) + n;   // 整個遊戲最多拿到 2 顆
   const it = ITEMS[id];
   if (it.kind === 'bulb' && it.tier > G.stats.bestTier) G.stats.bestTier = it.tier;
   invDirty = true;
@@ -424,6 +427,8 @@ function buildLights() {
     const k = c.life < 10 ? c.life / 10 : 1;
     L.push({ x: c.x, y: c.y, r: 2.6 * (0.6 + 0.4 * k), tier: 0, room: c.room, f: (0.85 + 0.12 * Math.random()) * k, candle: true });
   }
+  // 列車停下來的時候，所有車廂的燈都變暗
+  if (isW3() && G.train && (G.train.state === 'stopped' || G.train.state === 'starting')) for (const l of L) if (!l.fire) l.f *= 0.45;
   G.lights = L;
 }
 function lightAt(x, y, minTier = 0) {
@@ -2479,6 +2484,7 @@ function triggerEvent(type) {
       break;
     }
     case 'awaken': awakenGarden(); break;
+    case 'tender': tenderRaid(); break;   // 第三世界：煤水車被撬開
     case 'woman': {
       if (G.enemies.some(e => e.kind === 'woman') || bossFull() || !spawnEnemy('woman')) break;
       Sound.play('sob', 0.5);
@@ -3259,6 +3265,7 @@ function updateOverlays() {
   $('dizzyfx').style.opacity = dz.toFixed(3); $('dizzyfx').classList.toggle('on', dz > 0.01);
   $('sporefx').style.opacity = sp.toFixed(3); $('sporefx').classList.toggle('on', sp > 0.01);
   $('healfx').style.opacity = G.power && p.hp < 100 && healAt(p.x, p.y) ? '1' : '0';
+  if (isW3()) overlays3();
 }
 function updatePrompt() {
   const t = G.target, el = $('prompt');
@@ -3409,6 +3416,7 @@ function updateHUD() {
   setBar('batFill', p.bat); setBar('stamFill', p.stam);
   const ft = flTier(), fe = $('flashTier');
   if (fe.textContent !== ft.short) { fe.textContent = ft.short; fe.style.color = ft.color; fe.style.borderColor = ft.color; fe.title = ft.name; }
+  hud3();
   if (invDirty) renderHotbar();
   drawMinimap();
   updateOverlays();
