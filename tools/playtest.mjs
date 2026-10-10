@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // 自動試玩測試：用無頭 Chromium 開遊戲跑幾個情境，截圖並檢查有沒有錯誤
 // 用法：node tools/playtest.mjs [截圖資料夾，預設 playtest-out]
+// 只跑某幾個情境：PT_ONLY=w3,w3cold node tools/playtest.mjs（情境名稱是 scenario() 的第一個參數）
 // 需要 Node 18 以上和 Playwright（雲端 session 已內建；自己電腦上：npm i -g playwright && npx playwright install chromium）
 // 有 JS 錯誤、檔案載入失敗或檢查沒過，結束代碼就不是 0
 // 注意：無頭瀏覽器沒有 GPU，3D 用軟體算，FPS 很低，只能抓錯誤，看不出平板上順不順
@@ -53,7 +54,9 @@ const browser = await chromium.launch({
 
 // ---------- 共用工具 ----------
 const results = [];
+const ONLY = process.env.PT_ONLY ? process.env.PT_ONLY.split(',') : null;
 async function scenario(name, title, ctxOpts, fn) {
+  if (ONLY && !ONLY.includes(name)) return;
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, ...ctxOpts });
   const page = await ctx.newPage();
   const problems = [];
@@ -206,6 +209,125 @@ await scenario('w2', '第二世界第 6 夜＋全套裝備（?world=2&night=6&ki
   await shot('2-night');
 });
 
+await scenario('w3', '第三世界第 1 天（下車到月台、天黑前車站鎖門、留在車站會被拉回車上）', {}, async ({ page, shot, check }) => {
+  await page.goto(BASE + '?world=3&diff=normal', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play');
+  await sleep(2500);
+  let s = await state(page);
+  check(s.hud && s.day === 1, `要從第 1 天開始（現在：${s.label}）`);
+  check(await page.evaluate(() => ROOMS.find(r => r.id === 'attic').name === '機車室' && DOORS.length === 14 && document.body.classList.contains('w3')), '第三世界要換成列車的房間名字，多兩扇車站的門');
+  await shot('1-start');
+  // 下車：站在車站門的北邊往南走，白天要走得下月台
+  await page.evaluate(() => { Object.assign(G.p, { x: 5.5, y: 24.3, face: Math.PI / 2, pitch: 0.05 }); });
+  await page.keyboard.down('w');
+  await page.waitForFunction(() => G.p.y > 25.6, null, { timeout: 20000 }).catch(() => {});
+  await page.keyboard.up('w');
+  s = await state(page);
+  check(s.y > 25.6, `白天要能從車站的門走下月台（現在 y=${s.y.toFixed(1)}）`);
+  await shot('2-platform');
+  // 寶箱：每天在車站放 6 個（LV1×3、LV2×2、LV3×1）；走到櫃箱前面開它（直接呼叫開箱的函式，不用等按住 E）
+  const ch = await page.evaluate(() => {
+    const list = G.chests3.map(c => c.lv), c = G.chests3.find(c => c.lv === 1);
+    Object.assign(G.p, { x: c.x + 0.5 + Math.cos(c.face + Math.PI / 2) * 1.0, y: c.y + 0.5 + Math.sin(c.face + Math.PI / 2) * 1.0 });
+    G.p.face = Math.atan2(c.y + 0.5 - G.p.y, c.x + 0.5 - G.p.x);
+    const solid = isSolid(c.x, c.y), before = G.coins;
+    Math.random = () => 0.99;   // 這次一定開出物資，不跳怪物
+    openChest3(c);
+    return { list, solid, opened: c.open, coins: G.coins - before, modal: mode === 'modal' };
+  });
+  check(ch.list.length === 6 && ch.list.filter(l => l === 1).length === 3, `第 1 天要放 6 個寶箱（現在：${ch.list.join(',')}）`);
+  check(ch.solid && ch.opened && ch.coins > 0 && ch.modal, `櫃箱要擋路、開了要有東西（開了 ${ch.opened}、硬幣 +${ch.coins}）`);
+  await sleep(600);
+  await shot('2b-chest');
+  await page.evaluate(() => { closeModal(); });
+  // 火爐：站在火爐前面丟木柴，火力要增加
+  const fire = await page.evaluate(() => {
+    const f = FURN_BY_ID.firebox;
+    Object.assign(G.p, { x: f.x + 1, y: f.y + f.h + 0.6, face: -Math.PI / 2 });
+    const n0 = G.fire.queue.length, w0 = G.inv.wood || 0;
+    G.selId = 'wood';
+    useSelected();
+    return { n0, n1: G.fire.queue.length, w0, w1: G.inv.wood || 0, left: G.fire.queue.reduce((s, q) => s + q.left, 0), bar: !document.getElementById('fireBar').classList.contains('hidden') };
+  });
+  check(fire.n1 === fire.n0 + 1 && fire.w1 === fire.w0 - 1 && fire.left >= 25, `對著火爐用木柴要丟進去（火爐 ${fire.n0}→${fire.n1}，木柴 ${fire.w0}→${fire.w1}）`);
+  check(fire.bar, '第三世界要顯示 🔥 火力條');
+  // 天黑前 3 秒車站鎖門：門變成牆，還留在車站的人會被拉回車上
+  await page.evaluate(() => { Object.assign(G.p, { x: 8.5, y: 29.5 }); G.t = DAY_LEN - 3.2; });
+  await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
+  await sleep(400);
+  const d = await page.evaluate(() => ({ locked: DOORS.filter(d => d.locked).length, y: G.p.y, solid: isSolid(5, 25), wall: isWall(22, 25) }));
+  check(d.locked === 3 && d.solid && d.wall, `天黑時車站的三扇門要鎖住、變成牆（鎖了 ${d.locked} 扇）`);
+  check(d.y < 25, `留在車站的玩家要被拉回車上（現在 y=${d.y.toFixed(1)}）`);
+  const lay = await overlaps(page);
+  check(lay.length === 0, '天黑時版面重疊：' + lay.join('、'));
+  await sleep(1200);
+  await shot('3-night');
+});
+
+await scenario('w3stop', '第三世界第 2 夜火爐是空的（?world=3&night=2&fire=0）：列車減速、停下來被攻擊，補燃料後重新開動', {}, async ({ page, shot, check }) => {
+  await page.goto(BASE + '?world=3&night=2&kit=1&fire=0', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play');
+  await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
+  // 火爐是空的：列車先減速，5 秒後停下來（低 FPS 下遊戲時間走很慢，直接把時間撥快）
+  await page.evaluate(() => { G.train.t = TRAIN_STOP_DELAY + 1; });
+  await page.waitForFunction(() => G.train.state === 'stopped', null, { timeout: 30000 });
+  const hp0 = await page.evaluate(() => G.p.hp);
+  await sleep(2500);
+  const st = await page.evaluate(() => ({ state: G.train.state, hp: G.p.hp, k: G.train.k, fx: +document.getElementById('stopfx').style.opacity, alert: document.getElementById('alert').textContent }));
+  check(st.state === 'stopped' && st.hp < hp0, `列車停下來要一直扣血（${hp0.toFixed(0)} → ${st.hp.toFixed(0)}）`);
+  check(st.fx > 0 && st.alert.includes('列車停了'), '列車停了要有畫面效果和提示');
+  const lay = await overlaps(page);
+  check(lay.length === 0, '列車停下時版面重疊：' + lay.join('、'));
+  await shot('1-stopped');
+  // 丟燃料：列車 4 秒後重新開動
+  const re = await page.evaluate(() => {
+    const f = FURN_BY_ID.firebox;
+    Object.assign(G.p, { x: f.x + 1, y: f.y + f.h + 0.6, face: -Math.PI / 2 });
+    G.selId = 'charcoal'; useSelected();
+    const starting = G.train.state;
+    G.train.t = TRAIN_RESTART + 1;
+    return { starting };
+  });
+  check(re.starting === 'starting', `補燃料後列車要準備重新開動（現在：${re.starting}）`);
+  await page.waitForFunction(() => G.train.state === 'run', null, { timeout: 30000 });
+  check(true, '');
+  await sleep(1000);
+  await shot('2-running');
+});
+
+await scenario('w3cold', '第三世界寒寂之境（?world=3&night=3&cold）：體溫條、在車站體溫會掉、大白燈抱住你會回體溫', {}, async ({ page, shot, check }) => {
+  await page.goto(BASE + '?world=3&night=3&kit=1&cold', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play');
+  await sleep(2000);
+  // 站在月台上：體溫每秒掉 2 點（低 FPS 下遊戲時間走得慢，直接比較前後）
+  const t0 = await page.evaluate(() => { Object.assign(G.p, { x: 8.5, y: 29.5, face: -Math.PI / 2 }); return { cold: G.cold, temp: G.p.temp, bar: !document.getElementById('tempBar').classList.contains('hidden') }; });
+  check(t0.cold && t0.bar, '&cold 要是寒寂之境，狀態列要顯示 🌡️ 體溫');
+  await sleep(3000);
+  const t1 = await page.evaluate(() => ({ temp: G.p.temp, frost: G.frost, snow: G.fx.length }));
+  check(t1.temp < t0.temp, `在車站體溫要一直掉（${t0.temp} → ${t1.temp.toFixed(1)}）`);
+  check(t1.snow > 0, '寒寂之境的車站要下雪');
+  await shot('1-platform');
+  // 大白燈：放一盞落地燈裝上大白燈，走到大白面前會被抱住、體溫回升
+  const h0 = await page.evaluate(() => {
+    Object.assign(G.p, { x: 20.5, y: 21.2, face: -Math.PI / 2, pitch: -0.1 });
+    G.selId = 'lamp_floor'; useSelected(); installBulb(G.lamps[0], BAYMAX_TIER);
+    Object.assign(G.p, { x: 20.5, y: 20.3 }); G.p.temp = 40;
+    return { ok: G.lamps[0].bulb === BAYMAX_TIER, temp: G.p.temp };
+  });
+  check(h0.ok, '落地燈要能裝上大白燈');
+  await sleep(3000);
+  const h1 = await page.evaluate(() => ({ hugged: G.hugged, hug: G.hug, temp: G.p.temp, frost: G.frost }));
+  check(h1.hugged && h1.hug > 0.5, `走到大白面前要被抱住（hug=${h1.hug.toFixed(2)}）`);
+  check(h1.temp > h0.temp, `被大白抱住體溫要回升（${h0.temp} → ${h1.temp.toFixed(1)}）`);
+  await shot('1b-hug');
+  const lay = await overlaps(page);
+  check(lay.length === 0, '寒寂之境時版面重疊：' + lay.join('、'));
+  // 退後幾步看大白（抱著的時候鏡頭在它身體裡面）
+  await page.evaluate(() => { Object.assign(G.p, { x: 20.5, y: 23.0, face: -Math.PI / 2, pitch: -0.05 }); document.getElementById('hud').style.opacity = '0'; });
+  await sleep(1500);
+  await shot('2-baymax');
+});
+
 await scenario('monsters', '怪物模型（火柴人、鳥腳女和爬行女會動的頭髮、眼球花，手電筒開關各拍一張）', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=1&night=6&kit=1', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
@@ -262,6 +384,45 @@ await scenario('monsters2', '第二世界怪物模型（草叢人、大嘴觸角
   await sleep(1500);
   check((await state(page)).flash === true, '按 F 要打開手電筒');
   await shot('2-flashlight');
+});
+
+await scenario('monsters3', '第三世界怪物模型（克蘿諾斯・蕈裂衣、熔岩暴君、墮落戰神、檮杌・九瞳排成一排，旁邊站著大白燈的大白；手電筒開關各拍一張）', {}, async ({ page, shot, check }) => {
+  await page.goto(BASE + '?world=3&night=6&kit=1', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play');
+  await skipToDusk(page);
+  await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
+  // 在交誼車廂排一排（pose：不追、不咬人，只做待機的動作）；落地燈裝上大白燈
+  const n = await page.evaluate(() => {
+    G.enemies = []; G.ev.schedule = [];
+    Object.assign(G.p, { x: 19.5, y: 23.4, face: -Math.PI / 2, pitch: -0.06, inv: 999 });
+    const put = (kind, x, y, extra) => Object.assign(spawnEnemy(kind, { x, y }), { spawn: 0, pose: true, face: Math.PI / 2 }, extra);
+    put('kronos', 16.4, 19.6, { thrust: 0.3 });
+    put('tyrant', 18.3, 18.6);
+    put('warlord', 20.6, 18.8);
+    put('taowu', 22.6, 19.6);
+    G.p.x = 15.0; G.p.y = 22.6; G.selId = 'lamp_floor'; useSelected(); installBulb(G.lamps[0], BAYMAX_TIER);
+    Object.assign(G.p, { x: 19.5, y: 23.6, face: -Math.PI / 2 });
+    return G.enemies.length + G.lamps.filter(l => l.bulb === BAYMAX_TIER).length;
+  });
+  check(n === 5, `要放好 4 隻怪物和大白（現在 ${n}）`);
+  await page.evaluate(() => { document.getElementById('hud').style.opacity = '0'; });
+  await sleep(1500);
+  const alive = await page.evaluate(() => G.enemies.map(e => e.kind));
+  check(alive.length === 4, `擺姿勢的怪物不能自己消失（剩 ${alive.join(',')}）`);
+  await shot('1-lamp');
+  await page.keyboard.press('f');
+  await sleep(1500);
+  check((await state(page)).flash === true, '按 F 要打開手電筒');
+  await shot('2-flashlight');
+  // 檮杌的眼睛：手電筒照著牠，眼睛要一顆一顆閉上
+  const eyes = await page.evaluate(() => {
+    const e = G.enemies.find(e => e.kind === 'taowu');
+    Object.assign(G.p, { x: e.x, y: e.y + 2.2, face: -Math.PI / 2, flash: true, bat: 100 });
+    e.eyeProg = 0;   // 牠擺著姿勢不動（pose），眼睛的判定照常
+    for (let i = 0; i < 40; i++) updateTaowu(e, 0.05);
+    return { shut: e.eyes.filter(x => x.shut).length, lit: e.lit };
+  });
+  check(eyes.shut >= 1, `手電筒照著檮杌，眼睛要閉上（閉了 ${eyes.shut} 顆）`);
 });
 
 await scenario('tablet', '平板觸控（Android 平板尺寸，用點的開新遊戲）', { isMobile: true, hasTouch: true }, async ({ page, shot, check }) => {
@@ -323,31 +484,62 @@ await scenario('phone', '手機版面（橫放 852×393、直放 393×852：介�
   await shot('4-portrait');
 });
 
-await scenario('book', '怪物圖鑑（卡片上是會動的 3D 怪物：第一世界上下、第二世界上下各拍一張）', {}, async ({ page, shot, check }) => {
+await scenario('book', '怪物圖鑑（沒見過的只有問號；見過的卡片上是會動的 3D 怪物：三個世界各拍一張；舊存檔會照進度標成見過）', {}, async ({ page, shot, check }) => {
   await page.goto(BASE, { waitUntil: 'load' });
   await page.waitForSelector('#btnBook');
   await page.click('#btnBook');
-  await sleep(2500);
-  const stat = () => page.evaluate(() => ({ ok: Renderer.book.ok(), stages: document.querySelectorAll('#bookList .stage').length, cards: document.querySelectorAll('#bookList .card').length, rendered: Renderer.book.stats.rendered, built: Renderer.book.stats.built }));
+  await sleep(1500);
+  const stat = () => page.evaluate(() => ({ ok: Renderer.book.ok(), stages: document.querySelectorAll('#bookList .stage:not(.unseen)').length, unseen: document.querySelectorAll('#bookList .stage.unseen').length, cards: document.querySelectorAll('#bookList .card').length, rendered: Renderer.book.stats.rendered, built: Renderer.book.stats.built, note: !document.getElementById('bookUnseen').classList.contains('hidden') }));
+  // 全新的玩家：什麼都沒見過，每張卡片都是問號
   let s = await stat();
-  check(s.ok && s.stages === s.cards && s.cards > 0, `圖鑑的每張卡片都要用 3D 舞台（${s.stages}/${s.cards}）`);
+  check(s.cards > 0 && s.unseen === s.cards && s.stages === 0 && s.note, `沒見過的怪物要顯示問號（${s.unseen}/${s.cards}）`);
+  await shot('0-unseen');
+  // 見過第一世界的怪物（在你 8 格內出現超過 1 秒就算）：卡片變成 3D 怪物
+  await page.evaluate(() => { for (const m of BESTIARY) if ((m.world || 1) === 1) markSeen(m.kind || 'f:' + m.flower); showBookPage(1); });
+  await sleep(2500);
+  s = await stat();
+  check(s.ok && s.stages === s.cards && s.unseen === 0, `見過的怪物要用 3D 舞台（${s.stages}/${s.cards}）`);
   check(s.rendered > 0 && s.built > 0, `圖鑑要畫出 3D 怪物（畫了 ${s.rendered} 次、建了 ${s.built} 隻）`);
   await shot('1-world1');
   await page.evaluate(() => { document.querySelector('#book .panel').scrollTop = 99999; });
   await sleep(1500);
   await shot('1b-world1-scrolled');
+  // 第二世界：新怪物還沒見過是問號，第一世界來的怪物已經見過
   await page.click('#bookTabs button[data-w="2"]');
-  await sleep(2500);
-  const before = s.built;
+  await sleep(1500);
   s = await stat();
-  check(s.built > before, `切到第二世界要建出新的怪物（建了 ${s.built} 隻）`);
+  check(s.unseen === 5 && s.stages > 0, `第二世界的 5 隻新怪物要是問號、第一世界來的要有 3D（問號 ${s.unseen}、3D ${s.stages}）`);
+  const before = s.built;
+  await page.evaluate(() => { for (const m of BESTIARY) markSeen(m.kind || 'f:' + m.flower); showBookPage(2); });
+  await sleep(1500);
   await shot('2-world2');
-  // 往下捲：捲到面板外面的不畫，下面的要畫出來
+  // 往下捲：捲到面板外面的不畫，下面的第二世界怪物要建出新的模型
+  await page.evaluate(() => { document.querySelector('#book .panel').scrollTop = 99999; });
+  await sleep(2500);
+  s = await stat();
+  check(s.built > before && s.unseen === 0, `見過第二世界的怪物要建出新的模型（建了 ${s.built} 隻）`);
+  await shot('3-scrolled');
+  // 第三世界：4 隻新怪物（卡片上寫鬼將級／羅判級／判官級）
+  await page.click('#bookTabs button[data-w="3"]');
+  await sleep(2500);
+  s = await stat();
+  const grades = await page.evaluate(() => [...document.querySelectorAll('#bookList .card .grade')].map(e => e.textContent));
+  check(s.stages === s.cards && grades.length === 4 && grades.includes('判官級'), `第三世界要有 4 張寫著等級的卡片（${grades.join('、')}）`);
+  await shot('4-world3');
   await page.evaluate(() => { document.querySelector('#book .panel').scrollTop = 99999; });
   await sleep(1500);
-  await shot('3-scrolled');
+  await shot('5-world3-scrolled');
   await page.click('#btnBookBack');
   check(await page.evaluate(() => !document.getElementById('title').classList.contains('hidden')), '返回要回到主選單');
+  // 舊玩家：有存檔（第一世界第 5 天）但沒有見過的紀錄 → 第 1～4 夜登場的怪物自動標成見過，第 5 夜的「它」還是問號
+  await page.evaluate(() => {
+    localStorage.setItem('home99_progress_v1', JSON.stringify({ w2: false }));
+    localStorage.setItem('home99_save_v1', JSON.stringify({ v: 1, day: 5, diff: 'normal', world: 1, p: { x: 19.5, y: 23, hp: 100, san: 100, hunger: 100, bat: 100, flashLv: 1 }, inv: { bulb1: 1 }, sockets: [], lamps: [], containers: {}, stats: { searched: 0, dissolved: 0, bestTier: 1 } }));
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('#btnBook');
+  const mig = await page.evaluate(() => { const s = seenSet(); return { stick: s.has('stick'), momo: s.has('momo'), tall: s.has('tall'), grass: s.has('grass') }; });
+  check(mig.stick && mig.momo && !mig.tall && !mig.grass, `舊存檔要照進度標成見過（火柴人 ${mig.stick}、鳥腳女 ${mig.momo}、它 ${mig.tall}、草叢人 ${mig.grass}）`);
 });
 
 await scenario('cut', '破關開門動畫（?cut=1）', {}, async ({ page, shot, check }) => {
@@ -356,6 +548,31 @@ await scenario('cut', '破關開門動畫（?cut=1）', {}, async ({ page, shot,
   const s = await state(page);
   check(s.mode === 'cutscene' && !(await page.$('#cutscene.hidden')), `要在播動畫（現在 mode：${s.mode}）`);
   await shot('1-cutscene');
+});
+
+await scenario('cut2', '第二到第三世界的過場動畫（?cut=2）：月台上車、睡著、醒來乘客都死了、進第三世界第 1 天', {}, async ({ page, shot, check }) => {
+  await page.goto(BASE + '?cut=2', { waitUntil: 'load' });
+  await sleep(2000);
+  let s = await state(page);
+  check(s.mode === 'cutscene' && !(await page.$('#cutscene.hidden')), `要在播動畫（現在 mode：${s.mode}）`);
+  // 低 FPS 下動畫時間走很慢，直接撥到月台那一段、醒來那一段各拍一張
+  await page.evaluate(() => { CUT.t = CUT2.walk + 0.3; });
+  await sleep(1500);
+  const c1 = await page.evaluate(() => ({ world: curWorld, alive: CUT.alive, text: document.getElementById('cutText').textContent, x: Math.round(CUT.cam.x), y: Math.round(CUT.cam.y) }));
+  check(c1.world === 3 && c1.alive && c1.text.includes('旅行'), `月台那一段要在第三世界、乘客還活著（世界 ${c1.world}、字幕「${c1.text}」）`);
+  await shot('1-platform');
+  await page.evaluate(() => { CUT.t = CUT2.wake + 1.5; });
+  await sleep(1500);
+  const c2 = await page.evaluate(() => ({ alive: CUT.alive, moving: CUT.moving, k: G.train.k, text: document.getElementById('cutText').textContent }));
+  check(!c2.alive && c2.moving && c2.k > 0 && c2.text.includes('死了'), `醒來那一段乘客要蓋著白布、列車在開（字幕「${c2.text}」）`);
+  await shot('2-wake');
+  await page.evaluate(() => { CUT.t = CUT2.end - 0.2; });
+  await page.waitForFunction(() => mode === 'play', null, { timeout: 30000 });
+  s = await state(page);
+  check(s.day === 1 && s.phase === 'day' && s.hud, `動畫結束要進第三世界第 1 天早上（現在：${s.label}）`);
+  check(await page.evaluate(() => w3Unlocked() && Object.keys(G.inv).length > 5), '第三世界要解鎖、背包要帶過去');
+  await sleep(800);
+  await shot('3-day1');
 });
 
 await scenario('offline', '離線（快取後斷網，重新打開並開新遊戲）', {}, async ({ page, ctx, shot, check }) => {

@@ -12,6 +12,8 @@ const NIGHT_DARK = 0.94;
 const INTRO = { stick: 1, blob: 2, flower: 2, woman: 3, clown: 3, tv: 4, momo: 4, tall: 5 };
 // 第二世界的新怪物：一夜登場一隻
 const INTRO2 = { sunflower: 1, shroom: 2, grass: 3, snail: 4, girl: 5 };
+// 第三世界的新怪物：克蘿諾斯・蕈裂衣、熔岩暴君、墮落戰神、檮杌・九瞳（最後一夜也一定來）
+const INTRO3 = { kronos: 1, tyrant: 4, warlord: 7, taowu: 10 };
 const PROG_KEY = 'home99_progress_v1';   // 已解鎖的世界（跟存檔分開，破關刪存檔時不會被刪掉）
 
 const $ = id => document.getElementById(id);
@@ -41,6 +43,7 @@ const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 // 地圖
 // ====================================================================
 let tiles, roomGrid, doorGrid, furnGrid, solid, mapCv;
+let dynSolid = null;   // 每天會變的障礙物（第三世界車站裡的寶箱）
 const FURN_BY_ID = {}; FURN.forEach(f => (FURN_BY_ID[f.id] = f));
 const FRONT_DOOR = DOORS.find(d => d.front);
 const ROOM_CLIP = {};
@@ -50,31 +53,39 @@ const ROOM_CLIP = {};
 // ====================================================================
 let curWorld = 1;                       // 現在畫面上蓋好的是哪個世界
 const isW2 = () => curWorld === 2;
-const HOUSE = () => (isW2() ? '花園' : '屋子');
-// 換世界：換家具清單、房間名字和地板，再重新蓋地圖和 3D 場景
+const isW3 = () => curWorld === 3;
+const HOUSE = () => (isW3() ? '列車' : isW2() ? '花園' : '屋子');
+const worldOf = w => (w === 3 ? 3 : w === 2 ? 2 : 1);
+// 換世界：換家具清單、門、房間名字和地板，再重新蓋地圖和 3D 場景
 function applyWorld(w) {
-  w = w === 2 ? 2 : 1;
+  w = worldOf(w);
   if (w === curWorld && tiles) return;
   curWorld = w;
   FURN.length = 0;
   FURN.push(...furnForWorld(w));
   for (const k in FURN_BY_ID) delete FURN_BY_ID[k];
   for (const f of FURN) FURN_BY_ID[f.id] = f;
-  for (const r of ROOMS) Object.assign(r, w === 2 ? r.w2 : r.w1);
+  DOORS.length = 0;
+  DOORS.push(...doorsForWorld(w));
+  for (const d of DOORS) { d.locked = false; d.closed = false; }
+  for (const r of ROOMS) Object.assign(r, w === 3 ? r.w3 : w === 2 ? r.w2 : r.w1);
   buildMap();
   fixFlows.clear();
   flow = null;
   bookBuilt = false;
   document.body.classList.toggle('w2', w === 2);
+  document.body.classList.toggle('w3', w === 3);
   if (window.Renderer && Renderer.setWorld) Renderer.setWorld(w);
 }
 function readProg() { try { return JSON.parse(localStorage.getItem(PROG_KEY)) || {}; } catch (e) { return {}; } }
 function writeProg(p) { try { localStorage.setItem(PROG_KEY, JSON.stringify(p)); } catch (e) { /* 無法存檔時忽略 */ } }
 const w2Unlocked = () => !!readProg().w2;
+const w3Unlocked = () => !!readProg().w3;
 function unlockW2() { const p = readProg(); p.w2 = true; writeProg(p); }
+function unlockW3() { const p = readProg(); p.w2 = true; p.w3 = true; writeProg(p); }
 
 function buildMap() {
-  tiles = grid(0); roomGrid = grid(null); doorGrid = grid(null); furnGrid = grid(null); solid = grid(true);
+  tiles = grid(0); roomGrid = grid(null); doorGrid = grid(null); furnGrid = grid(null); solid = grid(true); dynSolid = null;
   for (const r of ROOMS)
     for (let y = r.y; y < r.y + r.h; y++)
       for (let x = r.x; x < r.x + r.w; x++) { tiles[y][x] = 1; roomGrid[y][x] = r; }
@@ -107,9 +118,15 @@ function isWall(tx, ty) {
   if (!inMap(tx, ty)) return true;
   if (tiles[ty][tx] === 0) return true;
   const d = doorGrid[ty][tx];
-  return !!(d && d.front);
+  return !!(d && (d.front || d.locked || d.closed));   // 鎖住、關上的門跟牆一樣
 }
-const isSolid = (tx, ty) => !inMap(tx, ty) || solid[ty][tx];
+const isSolid = (tx, ty) => !inMap(tx, ty) || solid[ty][tx] || !!(dynSolid && dynSolid[ty][tx]);
+// 門關上或打開（鎖住的車站門、第三世界可以關的包廂門）：關上的門跟牆一樣擋人、擋光、擋怪物
+function setDoor(d, closed, locked = d.locked) {
+  d.closed = closed; d.locked = locked;
+  solid[d.y][d.x] = !!(closed || locked);
+  fixFlows.clear(); flow = null;
+}
 function rectDist(px, py, r) {
   const nx = clamp(px, r.x, r.x + r.w), ny = clamp(py, r.y, r.y + r.h);
   return Math.hypot(px - nx, py - ny);
@@ -126,7 +143,7 @@ let flow = null, flowTimer = 0;
 function freshState(world = curWorld) {
   return {
     day: 1, phase: 'day', t: 0, time: 0, power: true, diff: 'normal', world,
-    p: { x: 19.5, y: 23, hp: 100, san: 100, hunger: 100, bat: 100, stam: 100, flash: false, face: -Math.PI / 2, pitch: 0, inv: 0, hurt: 0, batWarned: false, flashLv: 1, z: 0, vz: 0, grabbed: null },
+    p: { x: 19.5, y: 23, hp: 100, san: 100, hunger: 100, bat: 100, stam: 100, flash: false, face: -Math.PI / 2, pitch: 0, inv: 0, hurt: 0, batWarned: false, flashLv: 1, z: 0, vz: 0, grabbed: null, temp: 100, stunT: 0, slowT: 0 },
     inv: {}, selId: null,
     sockets: SOCKETS.map(s => ({ kind: 'socket', type: 'socket', id: s.id, x: s.x, y: s.y, room: s.room, bulb: 0, dying: 0 })),
     lamps: [], candles: [], containers: {}, flowers: [],
@@ -134,6 +151,8 @@ function freshState(world = curWorld) {
     shots: [], bombs: [], booms: [], wcd: 0, swingT: 0, spray: 0,
     seeds: [], trails: [], seedlings: [], dizzy: 0, spore: 0,
     enemies: [], fx: [], ghosts: [], lights: [],
+    // 第三世界：火爐裡的燃料、列車的狀態、車站的寶箱、熔岩、寒寂之境、大白燈
+    fire: { queue: [] }, train: { state: 'run', k: 1, t: 0, stopT: 0 }, chests3: [], lava: [], cold: false, baymaxGot: 0, hug: 0, timeFlash: 0, frost: 0,
     ev: { schedule: [], blood: false, knock: 0, knockTick: 0, phone: 0, phoneTick: 0, closet: 0, closetTick: 0, closetLight: 0,
           bedTimer: 0, bedCd: 0, bedWarned: false, duskWarned: false, ghostT: 5, beatT: 0, whisperT: 10,
           tvOn: false, tvT: 0, alarm: 0, deliveryAt: -1, delivery: 0, dTick: 0 },
@@ -150,6 +169,7 @@ function newGame(diff = 'normal', world = 1, carry = null) {
   G.diff = DIFFS[diff] ? diff : 'normal';
   G.sockets.find(s => s.id === 's_living').bulb = 1;
   for (const f of FURN) if (f.loot) G.containers[f.id] = { items: [] };
+  if (world === 3) startDay3(1);   // 列車停在第一站、放今天的寶箱
   refillContainers(0.6);
   G.containers.kdrawer.items = ['pan', 'chocolate']; // 第一天廚房抽屜（第二世界是野餐箱）一定有平底鍋
   prepareDay();
@@ -164,9 +184,11 @@ function newGame(diff = 'normal', world = 1, carry = null) {
     if (G.diff === 'easy') { addItem('bandage', 2); addItem('firecracker', 2); }
     G.selId = 'bulb1';
   }
+  if (world === 3) addItem('wood', 3);   // 第三世界：第 1 夜要燒的木柴，不然會不夠
   saveGame();
   startPlay();
-  if (world === 2) showBig('第二世界：夢核花園', '第 1 天：白天趕快找燈泡');
+  if (world === 3) showBig('第三世界：末班列車', '第 1 天：下車去車站找燃料和物資');
+  else if (world === 2) showBig('第二世界：夢核花園', '第 1 天：白天趕快找燈泡');
   else showBig('第 1 天', '白天趕快找燈泡');
 }
 
@@ -193,6 +215,9 @@ function saveGame() {
     flowers: G.flowers.map(f => ({ x: f.x, y: f.y, lv: f.lv, pt: f.ptype || 'eye', g: Math.round(f.grow * 100) / 100 })),
     coins: G.coins, chests: G.chests, gift: G.gift, treasure: G.treasure, stock: G.stock,
     pickups: G.pickups.map(pk => ({ x: pk.x, y: pk.y, id: pk.id, n: pk.n })), delivery: G.ev.deliveryAt,
+    // 第三世界
+    fire: G.fire.queue.map(q => ({ id: q.id, left: Math.round(q.left) })), temp: Math.round(G.p.temp), baymaxGot: G.baymaxGot || 0,
+    chests3: G.chests3.map(c => ({ x: c.x, y: c.y, lv: c.lv, open: !!c.open, out: !!c.out })),
   };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch (e) { /* 無法存檔時忽略 */ }
 }
@@ -202,8 +227,8 @@ function readSave() {
 function loadGame() {
   const s = readSave();
   if (!s) return false;
-  const world = s.world === 2 ? 2 : 1;           // 舊存檔沒有世界，當成第一世界
-  if (world === 2) unlockW2();
+  const world = worldOf(s.world);                // 舊存檔沒有世界，當成第一世界
+  if (world === 3) unlockW3(); else if (world === 2) unlockW2();
   applyWorld(world);
   G = freshState(world);
   G.diff = DIFFS[s.diff] ? s.diff : 'normal'; // 舊存檔沒有難度，當成普通
@@ -226,6 +251,11 @@ function loadGame() {
   G.pickups = (s.pickups || []).map(pk => ({ ...pk, t: Math.random() * 6 }));
   G.ev.deliveryAt = s.delivery === undefined ? -1 : s.delivery;
   if (s.stock && s.stock.length) G.stock = s.stock; else makeStock();
+  // 第三世界：火爐、體溫、大白燈的數量、今天的寶箱（舊存檔沒有這些就用預設）
+  G.fire.queue = (s.fire || []).filter(q => ITEMS[q.id] && ITEMS[q.id].kind === 'fuel').map(q => ({ id: q.id, left: q.left }));
+  G.p.temp = s.temp === undefined ? 100 : s.temp;
+  G.baymaxGot = s.baymaxGot || 0;
+  if (world === 3) loadDay3(s.chests3 || []);
   return true;
 }
 
@@ -247,6 +277,7 @@ function refillContainers(chance = 0.35) {
   for (const f of FURN) {
     if (!f.loot) continue;
     const c = G.containers[f.id];
+    if (isW3() && (f.loot === 'fuel' || f.loot === 'coal' || f.loot === 'cushions')) { refillPile(f, c); continue; }   // 木堆、煤袋、椅墊每天補滿
     const food = f.loot === 'food'; // 冰箱、櫥櫃幾乎每天都會補滿食物
     if (c.items.length || Math.random() > Math.min(0.95, (food ? 0.8 : chance) * k)) continue;
     const n = food ? 1 + (Math.random() < 0.6) + (Math.random() < 0.3) : 1 + (Math.random() < 0.2 * k);
@@ -254,13 +285,14 @@ function refillContainers(chance = 0.35) {
   }
 }
 // 名字和說明會跟著世界變（第二世界的花、樹、水燈泡）
-const bulbName = t => (isW2() && BULBS_W2[t] ? BULBS_W2[t].name : BULBS[t].name);
+const bulbVariant = t => (isW3() ? BULBS_W3[t] : isW2() ? BULBS_W2[t] : null);
+const bulbName = t => (bulbVariant(t) ? bulbVariant(t).name : BULBS[t].name);
 function itemName(id) { const it = ITEMS[id]; return it.kind === 'bulb' ? bulbName(it.tier) : it.name; }
 function itemDesc(id) {
   const it = ITEMS[id];
-  if (it.kind !== 'bulb') return it.desc;
-  const t = it.tier, w2 = isW2() && BULBS_W2[t];
-  return `${RARITY[bulbRarity(t)].name}燈泡・` + (BULBS[t].special ? '特殊燈泡。' : `第 ${t} 級。`) + (w2 ? w2.desc : BULBS[t].desc);
+  if (it.kind !== 'bulb') return it.desc + (isW3() && it.warm ? `、體溫 +${it.warm}` : '');
+  const t = it.tier, v = bulbVariant(t);
+  return `${RARITY[bulbRarity(t)].name}燈泡・` + (BULBS[t].special ? '特殊燈泡。' : `第 ${t} 級。`) + (v ? v.desc : BULBS[t].desc);
 }
 // 燈泡的稀有度標籤（視窗、物品欄用）
 const rarityOfItem = id => (ITEMS[id] && ITEMS[id].kind === 'bulb' ? bulbRarity(ITEMS[id].tier) : null);
@@ -291,6 +323,7 @@ function nextCard() {
 function addItem(id, n = 1) {
   G.inv[id] = (G.inv[id] || 0) + n;
   if (!G.selId || !G.inv[G.selId]) G.selId = id;
+  if (id === 'bulb' + BAYMAX_TIER) G.baymaxGot = (G.baymaxGot || 0) + n;   // 整個遊戲最多拿到 2 顆
   const it = ITEMS[id];
   if (it.kind === 'bulb' && it.tier > G.stats.bestTier) G.stats.bestTier = it.tier;
   invDirty = true;
@@ -386,6 +419,7 @@ function buildLights() {
   G.lamps.forEach(l => add(l, LAMP_TYPES[l.type].mult));
   if (G.stock && merchantHere()) L.push({ x: MERCHANT_POS.x + 0.3, y: MERCHANT_POS.y, r: 3.2, tier: 0, room: roomGrid[29][11], f: 0.85 + Math.random() * 0.08, color: [255, 190, 110] });
   if (G.ev && G.ev.tvOn) L.push({ x: 15, y: 15.9, r: 2.6, tier: 0, room: roomGrid[16][15], f: 0.55 + Math.random() * 0.35, color: [140, 170, 255], tv: true });
+  if (isW3()) addLights3(L);   // 火爐的火光、月台的煤氣燈
   for (const b of G.booms || []) L.push({ x: b.x, y: b.y, r: 4.5, tier: 0, room: b.room, f: b.life / 0.35 * 1.3, color: [255, 190, 110] });
   // 破關動畫：前門打開，門外透進粉紅色的光
   if (mode === 'cutscene' && CUT && CUT.doorK > 0) L.push({ x: 1.2, y: 12.5, r: 3 + CUT.doorK * 5, tier: 0, room: roomGrid[12][1], f: CUT.doorK * 1.4, color: [255, 205, 235] });
@@ -393,6 +427,8 @@ function buildLights() {
     const k = c.life < 10 ? c.life / 10 : 1;
     L.push({ x: c.x, y: c.y, r: 2.6 * (0.6 + 0.4 * k), tier: 0, room: c.room, f: (0.85 + 0.12 * Math.random()) * k, candle: true });
   }
+  // 列車停下來的時候，所有車廂的燈都變暗
+  if (isW3() && G.train && (G.train.state === 'stopped' || G.train.state === 'starting')) for (const l of L) if (!l.fire) l.f *= 0.45;
   G.lights = L;
 }
 function lightAt(x, y, minTier = 0) {
@@ -508,10 +544,12 @@ function pathDir(e, f, gx, gy, wobble = 0.35) {
   return { x: vx * c - vy * s, y: vx * s + vy * c };
 }
 const chaseDir = e => pathDir(e, flow, G.p.x, G.p.y);
+// 晚上生怪的房間：第三世界不在車站生（列車開走了，車站鎖起來）
+const spawnRooms = () => (isW3() ? ROOMS.filter(r => !isStationRoom(r)) : ROOMS);
 function findSpawn(minDist = 9) {
   if (!flow) computeFlow();
   for (let i = 0; i < 80; i++) {
-    const r = pick(ROOMS);
+    const r = pick(spawnRooms());
     const x = r.x + Math.floor(Math.random() * r.w), y = r.y + Math.floor(Math.random() * r.h);
     if (isSolid(x, y)) continue;
     const d = flow[y][x];
@@ -528,19 +566,22 @@ const FL_DPS = 1;                // 手電筒每秒對怪物造成的傷害（�
 const BASE_HP = {
   shadow: 1, fast: 0.8, blob: 1.3, stick: 1.5, balloon: 0.8, flower: 1.5, woman: 4, momo: 4, crawler: 3.5, clown: 4, tall: 6,
   sunflower: 1.2, shroom: 2.5, grass: 1.6, snail: 5, girl: 4.5,
+  kronos: 3.2, tyrant: 7, warlord: 6, taowu: 12,
 };
 const MONSTER_NAME = {
   shadow: '黑影', fast: '衣櫃怪', blob: '黑球', stick: '火柴人', balloon: '紅氣球', flower: '眼球花', woman: '血淚女', momo: '鳥腳女', crawler: '爬行女', clown: '小丑', tall: '它',
   sunflower: '向日葵眼', shroom: '千眼菇', grass: '草叢人', snail: '大嘴觸角蟲', girl: '眼花女孩',
+  kronos: '克蘿諾斯・蕈裂衣', tyrant: '熔岩暴君', warlord: '墮落戰神', taowu: '檮杌・九瞳',
 };
-const BOSSES = ['woman', 'momo', 'crawler', 'clown', 'tall', 'snail', 'girl'];
+const BOSSES = ['woman', 'momo', 'crawler', 'clown', 'tall', 'snail', 'girl', 'tyrant', 'warlord', 'taowu'];
 // 長在地上的植物怪（眼球花、向日葵眼、千眼菇）放在 G.flowers，用 ptype 分種類
 const plantKind = t => (t.ptype === 'sunflower' ? 'sunflower' : t.ptype === 'shroom' ? 'shroom' : 'flower');
 const kindOf = t => t.kind || plantKind(t);
+// 第二世界的怪物比第一世界高 2 級，第三世界再高 2 級
 function rollLevel() {
-  let lv = 1 + Math.floor((G.day - 1) / 2) + (Math.random() < 0.35 ? 1 : 0) + D().lv + (isW2() ? 2 : 0);
+  let lv = 1 + Math.floor((G.day - 1) / 2) + (Math.random() < 0.35 ? 1 : 0) + D().lv + (isW3() ? 4 : isW2() ? 2 : 0);
   if (G.ev && G.ev.blood) lv++;
-  return clamp(lv, 1, isW2() ? 10 : 8);
+  return clamp(lv, 1, isW3() ? 12 : isW2() ? 10 : 8);
 }
 function setLevel(m, kind, lv) {
   m.lv = lv;
@@ -549,15 +590,17 @@ function setLevel(m, kind, lv) {
   return m;
 }
 const initHp = (m, kind) => setLevel(m, kind, rollLevel());
-function hurtMonster(t, dmg) {
+// src：是哪種攻擊（flash 手電筒、pan、shot 彈珠、spray 聖水槍、salt、bomb 鞭炮、fire 火球、angel 天使）；第三世界的怪物各有弱點
+function hurtMonster(t, dmg, src = 'flash') {
   if (t.dead || !(t.hp > 0)) return;
+  if (t.kind && GRADE3[t.kind]) { dmg *= monsterDmgMult(t, src); if (dmg <= 0) return; }
   t.hp -= dmg * (kindOf(t) === 'tall' ? 0.5 : 1); // 「它」很耐打
   t.hitT = 0.3;
   if (t.hp <= 0) defeatMonster(t);
 }
 // 手電筒照著怪物時每一幀呼叫
 function flashHurt(t, dt) {
-  hurtMonster(t, FL_DPS * flTier().dmg * dt);
+  hurtMonster(t, FL_DPS * flTier().dmg * dt, 'flash');
   if (Math.random() < dt * 12) G.fx.push({ type: 'spark', x: t.x + rand(-0.2, 0.2), y: t.y + rand(-0.2, 0.2), h: targetH(t) + rand(-0.3, 0.3), vx: rand(-0.4, 0.4), vy: rand(-0.4, 0.4), vh: rand(0, 0.8), life: 0.4, max: 0.4, color: [255, 240, 200] });
 }
 function defeatMonster(t) {
@@ -571,6 +614,10 @@ function defeatMonster(t) {
   else if (kind === 'snail') { puff(t.x, t.y, [235, 150, 175], 24, 0.6); Sound.play('dissolve'); }
   else if (kind === 'balloon') { puff(t.x, t.y, [200, 20, 30], 12, 1.8); Sound.play('pop'); }
   else if (kind === 'stick') { puff(t.x, t.y, [40, 30, 20], 16, 1); Sound.play('burn'); }
+  else if (kind === 'kronos') { puff(t.x, t.y, [120, 70, 170], 18, 1.2); Sound.play('crack'); for (let i = 0; i < 2; i++) G.pickups.push({ x: t.x + rand(-0.4, 0.4), y: t.y + rand(-0.4, 0.4), id: 'charcoal', n: 1, t: Math.random() * 6 }); }
+  else if (kind === 'tyrant') { puff(t.x, t.y, [60, 40, 30], 26, 1.5); Sound.play('crack'); Sound.play('hiss', 0.5); G.shake = Math.max(G.shake, 0.6); }
+  else if (kind === 'warlord') { puff(t.x, t.y, [200, 195, 185], 20, 1.4); Sound.play('armor'); Sound.play('dissolve'); }
+  else if (kind === 'taowu') { puff(t.x, t.y, [90, 40, 120], 30, 1.4); Sound.play('roar', 0.5); Sound.play('dissolve'); }
   else { puff(t.x, t.y, [10, 6, 16], 18, targetH(t)); Sound.play('dissolve'); }
   if (kind === 'blob' && t.target) t.target.eaten = 0;
   if (kind === 'crawler') { G.ev.tvOn = false; G.ev.tvT = 0; }
@@ -580,6 +627,7 @@ function defeatMonster(t) {
     blob: '⚫ 黑球被打散了！', stick: '✏️ 火柴人被燒掉了！', balloon: '🎈 氣球破了！小丑找不到你了。', flower: '🌼 眼球花枯萎了。',
     woman: '😢 血淚女消散了！', momo: '🐦 鳥腳女被打跑了！', crawler: '📺 爬行女被打倒了，電視也關掉了！', clown: '🤡 小丑被打倒了！', tall: '👁️ 你打倒了「它」！',
     sunflower: '🌻 向日葵眼枯萎了。', shroom: '🍄 千眼菇被打爛了！', grass: '🌿 草叢人被打倒了！', snail: '🐌 大嘴觸角蟲被打倒了！', girl: '👧 眼花女孩消散了！',
+    kronos: '🍄 蕈裂衣的蘑菇傘碎了！掉了 2 塊木炭。', tyrant: '🪨 熔岩暴君碎成了一堆石頭！', warlord: '⚔️ 墮落戰神倒下了，斗篷散落一地。', taowu: '👁️ 你打倒了檮杌・九瞳！',
   }[kind];
   if (msg && (BOSSES.includes(kind) || !G.ev['kill_' + kind])) { G.ev['kill_' + kind] = 1; toast(`${msg}（Lv.${t.lv}）`, 'good'); }
 }
@@ -601,6 +649,11 @@ function spawnEnemy(kind, at) {
   if (kind === 'grass') Object.assign(e, { state: 'hidden', hidden: true, cd: 3, rise: 0, rustleT: 1, upT: 0, escape: 0, shine: 0, grabT: 0, lungeX: 0, lungeY: 0 });
   if (kind === 'snail') Object.assign(e, { retract: 0, retractCd: 0, chew: 0, trailT: 0 });
   if (kind === 'girl') Object.assign(e, { state: 'wander', blind: 0, blindCd: 0, plantT: rand(8, 14), humT: 2, seen: false, lost: 0 });
+  // 第三世界的新怪物（js/world3.js）
+  if (kind === 'kronos') Object.assign(e, { cd: 2, retreat: 0, thrust: 0, hits: 0, limpT: 0, cackleT: 2, face: 0 });
+  if (kind === 'tyrant') Object.assign(e, { cd: 0, cooled: 0, stomp: 0, walked: 0, lavaT: 0.5, hum: 0, face: 0 });
+  if (kind === 'warlord') Object.assign(e, { cd: 0, swing: 0, state: 'patrol', waitT: 0, stepT: 0, dragT: 1, face: Math.PI });
+  if (kind === 'taowu') Object.assign(e, { cd: 0, roarT: 4, roar: 0, pounce: 0, pounceA: 0, blind: 0, eyes: Array.from({ length: TAOWU_EYES }, () => ({ shut: false })), eyeProg: 0, reopenT: 3, lit: false, wanderT: 0, wa: 0, stepT: 0, face: 0 });
   G.enemies.push(e);
   return e;
 }
@@ -653,7 +706,7 @@ function hurtPlayer(e) {
 // caught：算不算「被抓到」（會影響早晨禮物）；被種子打到之類的小傷不算
 function damage(hp, san, caught = true) {
   const p = G.p;
-  p.hp -= hp * D().dmg * (G.inv.amulet ? 0.5 : 1); // 護身符：只扣一半的血
+  p.hp -= hp * D().dmg * (G.inv.amulet ? 0.5 : 1) * (G.hugged ? 0.5 : 1); // 護身符、被大白抱著：只扣一半的血（可以疊）
   p.san -= san * D().san;
   p.hurt = caught ? 1 : Math.max(p.hurt, 0.5); G.shake = Math.max(G.shake, caught ? 0.4 : 0.15);
   if (caught && G.nightStats && G.phase === 'night') G.nightStats.caught++;
@@ -1210,6 +1263,7 @@ const SPECIAL_AI = {
   woman: (e, dt) => updateWoman(e, dt), blob: (e, dt) => updateBlob(e, dt), stick: updateStick,
   momo: updateMomo, crawler: updateCrawler, balloon: updateBalloon, clown: updateClown,
   grass: updateGrass, snail: updateSnail, girl: updateGirl,   // 第二世界（js/world2.js）
+  kronos: updateKronos, tyrant: updateTyrant, warlord: updateWarlord, taowu: updateTaowu,   // 第三世界（js/world3.js）
 };
 
 // ====================================================================
@@ -1589,21 +1643,28 @@ function thumbClown(c, S) {
 const BESTIARY = [
   { name: '黑影', night: 1, kind: 'shadow', draw: thumbShadow('#ff3344'), desc: '到處追你，燈光也擋不住牠。手電筒照著牠會一直扣血，平底鍋一敲就散掉。' },
   { name: '火柴人', night: INTRO.stick, kind: 'stick', draw: thumbStick, desc: '會穿牆，一邊吹口哨一邊朝你揮手走過來，走得很慢。紙做的身體被手電筒照到就會燒起來。' },
-  { name: '衣櫃怪', night: 2, kind: 'fast', draw: thumbShadow('#ffd23a', true), w1only: true, desc: '衣櫃晃動時沒去按住 E 壓住門，就會衝出來，速度很快。' },
+  { name: '衣櫃怪', night: 2, kind: 'fast', draw: thumbShadow('#ffd23a', true), in: [1, 3], desc: '衣櫃晃動時沒去按住 E 壓住門，就會衝出來，速度很快。' },
   { name: '黑球', night: INTRO.blob, kind: 'blob', draw: thumbBlob, desc: '不追你，專門去吃燈，每吃一次燈泡降一級，特殊燈泡會直接被吃掉。用手電筒照牠、用彈弓打牠。' },
   { name: '眼球花', night: INTRO.flower, flower: 'eye', draw: thumbFlower, desc: '長在屋子裡、白天也不會消失。被它盯 3 秒它就會尖叫，把黑影叫過來。用手電筒照它、用平底鍋打它，或走過去按住 E 拔掉。' },
   { name: '血淚女', night: INTRO.woman, kind: 'woman', draw: drawWomanFace, desc: '你看著她，她就不會動；但一直盯著她，理智會快速下降。看著她走過去，用平底鍋或聖水槍打她！' },
   { name: '小丑', night: INTRO.clown, kind: 'clown', draw: thumbClown, desc: '先會飄來一顆紅氣球，用手電筒照破或用武器打破它。讓氣球碰到你，小丑就會拿著刀出現在你背後！撒鹽巴可以把他推開。' },
-  { name: '爬行女', night: INTRO.tv, kind: 'crawler', draw: drawCrawlerFace, w1only: true, desc: '客廳的電視自己打開後，不快點關掉，她就會從螢幕裡爬出來。關掉電視或把她打倒都可以。' },
+  { name: '爬行女', night: INTRO.tv, kind: 'crawler', draw: drawCrawlerFace, in: [1], desc: '客廳的電視自己打開後，不快點關掉，她就會從螢幕裡爬出來。關掉電視或把她打倒都可以。' },
   { name: '鳥腳女', night: INTRO.momo, kind: 'momo', draw: drawMomoFace, desc: '眼睛不好，靠聲音找你，一跳一跳地追過來。別奔跑，輕輕推搖桿慢慢走。鞭炮很吵會把她引過去！手電筒照到她的眼鏡會讓她暫時看不見。' },
   { name: '它', night: INTRO.tall, kind: 'tall', draw: thumbTall, desc: '高大又非常耐打，手電筒和武器對它只有一半效果。靠聖水槍、鞭炮、天使和火球一起對付它。' },
   // 第二世界：夢核花園
-  { world: 2, name: '向日葵眼', night: INTRO2.sunflower, flower: 'sunflower', draw: thumbSunflower, desc: '長在地上不會動，會轉向最亮的光。你開著手電筒被它看到，它就會盯著你、往你腳邊吐種子。關掉手電筒走過去打它或按住 E 拔掉；種子吐過來時跳起來就打不到。' },
-  { world: 2, name: '千眼菇', night: INTRO2.shroom, flower: 'shroom', draw: thumbShroom, desc: '長滿眼睛的大蘑菇，不會動，四面八方都看得到。靠近它會撒孢子，理智掉很快、畫面變得暈暈的。用手電筒照它，眼睛就會閉起來。每天早上旁邊會再長出一朵小的，要趕快打掉！' },
-  { world: 2, name: '草叢人', night: INTRO2.grass, kind: 'grass', draw: thumbGrass, desc: '躲在草裡移動，只看得到一叢草在晃。靠近時會突然撲出來抓你的腳：撲過來的瞬間跳起來就抓不到；被抓住就連按「跳」5 下掙脫。用手電筒照晃動的草叢可以把牠逼出來。' },
-  { world: 2, name: '大嘴觸角蟲', night: INTRO2.snail, kind: 'snail', draw: thumbSnail, desc: '爬得很慢但非常耐打，爬過的地方留下黏液，踩到會變慢（跳過去就沒事）。用手電筒照牠，觸角會縮回去、停 2 秒；🧂鹽巴對牠的傷害是 3 倍！' },
-  { world: 2, name: '眼花女孩', night: INTRO2.girl, kind: 'girl', draw: thumbGirl, desc: '第二世界的大魔王。靠樹枝上的兩顆眼球花看東西，被盯著會「眼花」，畫面晃、走路歪。她還會種下眼睛種子，長大就變成向日葵眼（還沒長大前可以踩掉）。手電筒照她會變瞎子，聖水槍特別有效。' },
+  { world: 2, in: [2], name: '向日葵眼', night: INTRO2.sunflower, flower: 'sunflower', draw: thumbSunflower, desc: '長在地上不會動，會轉向最亮的光。你開著手電筒被它看到，它就會盯著你、往你腳邊吐種子。關掉手電筒走過去打它或按住 E 拔掉；種子吐過來時跳起來就打不到。' },
+  { world: 2, in: [2], name: '千眼菇', night: INTRO2.shroom, flower: 'shroom', draw: thumbShroom, desc: '長滿眼睛的大蘑菇，不會動，四面八方都看得到。靠近它會撒孢子，理智掉很快、畫面變得暈暈的。用手電筒照它，眼睛就會閉起來。每天早上旁邊會再長出一朵小的，要趕快打掉！' },
+  { world: 2, in: [2], name: '草叢人', night: INTRO2.grass, kind: 'grass', draw: thumbGrass, desc: '躲在草裡移動，只看得到一叢草在晃。靠近時會突然撲出來抓你的腳：撲過來的瞬間跳起來就抓不到；被抓住就連按「跳」5 下掙脫。用手電筒照晃動的草叢可以把牠逼出來。' },
+  { world: 2, in: [2, 3], name: '大嘴觸角蟲', night: INTRO2.snail, kind: 'snail', draw: thumbSnail, desc: '爬得很慢但非常耐打，爬過的地方留下黏液，踩到會變慢（跳過去就沒事）。用手電筒照牠，觸角會縮回去、停 2 秒；🧂鹽巴對牠的傷害是 3 倍！' },
+  { world: 2, in: [2, 3], name: '眼花女孩', night: INTRO2.girl, kind: 'girl', draw: thumbGirl, desc: '第二世界的大魔王。靠樹枝上的兩顆眼球花看東西，被盯著會「眼花」，畫面晃、走路歪。她還會種下眼睛種子，長大就變成向日葵眼（還沒長大前可以踩掉）。手電筒照她會變瞎子，聖水槍特別有效。' },
+  // 第三世界：末班列車（鬼將級 ＜ 羅判級 ＜ 判官級）
+  { world: 3, in: [3], name: '克蘿諾斯・蕈裂衣', grade: '鬼將級', night: INTRO3.kronos, kind: 'kronos', draw: thumbKronos, desc: '戴著裂開蘑菇傘的駝背矮人，在包廂和走道裡一跛一跛地遊蕩，離你 2.5 格就用骨矛刺你。被刺中夜晚的時鐘會倒退 10 秒，被刺 3 次以上牠會噴孢子讓你變慢。牠怕光：手電筒照蘑菇傘牠會冒煙往後退；有燒的火爐牠不敢靠近，機車室是安全的。鹽巴和平底鍋都有效，打倒會掉 2 塊木炭。' },
+  { world: 3, in: [3], name: '熔岩暴君', grade: '羅判級', night: INTRO3.tyrant, kind: 'tyrant', draw: thumbTyrant, desc: '2.6 公尺的岩石巨人，縫隙透出熔岩光。走得慢但非常耐打，每走 5 步跺一次腳，2 格內會被震倒（跳起來就不會）；走過的地毯會燒出熔岩，踩到會扣血，15 秒後才冷卻。手電筒對岩石沒用：用聖水槍噴牠會「嘶——」地冷卻，3 秒內不會動，這時用平底鍋敲會碎掉一塊（大傷害）；鞭炮也有效。寒寂之境時牠身邊 3 格很溫暖，但靠近就會被打。' },
+  { world: 3, in: [3], name: '墮落戰神', grade: '羅判級', night: INTRO3.warlord, kind: 'warlord', draw: thumbWarlord, desc: '披著破斗篷、骷髏臉的高大戰士，拖著一把比人還長的大劍。牠只在走道裡走，看到你就衝過來，2 格內橫掃一劍把你打飛撞牆。牠不進包廂：躲進包廂、對著門按 E 關上就安全（牠會在門外等 10 秒再走）。正面有盔甲，傷害只有一半；從背後打傷害 3 倍。鞭炮會讓牠停下來。看到牠把劍舉高就趕快退開。' },
+  { world: 3, in: [3], name: '檮杌・九瞳', grade: '判官級', night: INTRO3.taowu, kind: 'taowu', draw: thumbTaowu, desc: '第三世界的大魔王，最後一夜一定會來。四腳的紫黑色巨獸，臉上聚著九顆眼睛，看得到一切，永遠知道你在哪裡，會撞壞關上的門，靠近時撲過來咬，每 15 秒咆哮一次讓理智大掉。用手電筒照牠的臉，被照到的眼睛會一顆一顆閉上（巨光手電筒最快）；九顆都閉上牠就瞎了 10 秒，亂撞、所有傷害 3 倍。聖水槍、鞭炮、火球、天使全部有效。' },
 ];
+// 這隻怪物會在哪些世界出現（圖鑑分頁用）
+const monsterWorlds = m => m.in || [1, 2, 3];
 let bookBuilt = false, bookFrom = 'title', bookWorld = 1;
 function openBook(from) {
   bookFrom = from;
@@ -1617,13 +1678,17 @@ function showBookPage(w) {
   for (const b of document.querySelectorAll('#bookTabs button')) b.classList.toggle('on', +b.dataset.w === w);
   const list = $('bookList');
   list.innerHTML = '';
-  const live = !!(window.Renderer && Renderer.book && Renderer.book.ok()), items = [];
+  const live = !!(window.Renderer && Renderer.book && Renderer.book.ok()), items = [], seen = seenSet();
   for (const m of BESTIARY) {
-    if ((m.world || 1) === 2 ? w !== 2 : (w === 2 && m.w1only)) continue;
+    if (!monsterWorlds(m).includes(w)) continue;
     const card = document.createElement('div');
     card.className = 'card';
     let pic;
-    if (live) {
+    if (!seen.has(bookKey(m))) {
+      // 沒見過的怪物：只有一個大大的問號（暗色的剪影），名字和說明照樣顯示
+      pic = document.createElement('div'); pic.className = 'stage unseen'; pic.innerHTML = '<span>？</span>';
+      card.classList.add('unseen');
+    } else if (live) {
       // 3D 怪物畫在這個框的位置上（render3d.js 每一幀照它在畫面上的位置畫）
       pic = document.createElement('div'); pic.className = 'stage';
       items.push({ el: pic, kind: m.kind, flower: m.flower });
@@ -1633,22 +1698,25 @@ function showBookPage(w) {
       m.draw(pic.getContext('2d'), 176);
     }
     const info = document.createElement('div');
-    const when = m.world === 2 ? `第 ${m.night} 夜起` : w === 2 ? '第 1 夜起' : `第 ${m.night} 夜起`;
-    info.innerHTML = `<h4>${m.name}<span class="night">${when}</span></h4><p>${m.desc}</p>`;
+    const when = (m.world || 1) === w ? `第 ${m.night} 夜起` : '第 1 夜起';
+    info.innerHTML = `<h4>${m.name}${m.grade ? `<span class="night grade">${m.grade}</span>` : ''}<span class="night">${when}</span></h4><p>${m.desc}</p>`;
     card.append(pic, info);
     list.appendChild(card);
   }
   if (live) Renderer.book.show(items);
-  $('bookNote').textContent = w === 2
-    ? '第二世界的怪物等級比較高。第一世界的怪物也都會來（爬行女和衣櫃怪除外），而且第 1 夜就可能出現。'
-    : '所有怪物都有等級（Lv）和血量，夜晚越後面等級越高、越耐打。';
+  $('bookUnseen').classList.toggle('hidden', !list.querySelector('.card.unseen'));
+  $('bookNote').textContent = w === 3
+    ? '第三世界的怪物最強，新怪物分成鬼將級、羅判級、判官級（最後一夜的大魔王）。第一世界的怪物（爬行女除外）和第二世界的大嘴觸角蟲、眼花女孩也都會來，第 1 夜就可能出現。'
+    : w === 2
+      ? '第二世界的怪物等級比較高。第一世界的怪物也都會來（爬行女和衣櫃怪除外），而且第 1 夜就可能出現。'
+      : '所有怪物都有等級（Lv）和血量，夜晚越後面等級越高、越耐打。';
 }
 
 // ====================================================================
 // 12 夜版的難度：越後面越難（第 12 夜大約是原本的第 30 夜）
 // ====================================================================
-// 第二世界比較難：第二世界第 1 夜大約是第一世界第 5 夜
-const diffN = () => (G.day + (isW2() ? 4 : 0)) * 2.5;
+// 第二世界比較難：第二世界第 1 夜大約是第一世界第 5 夜；第三世界第 1 夜大約是第二世界第 5 夜
+const diffN = () => (G.day + (isW3() ? 8 : isW2() ? 4 : 0)) * 2.5;
 const D = () => DIFFS[(G && G.diff) || 'normal'] || DIFFS.normal; // 玩家選的難度
 const randi = (a, b) => Math.floor(rand(a, b + 1));
 const fixtures = () => [...G.sockets, ...G.lamps];
@@ -1683,7 +1751,7 @@ function angelHome(o) { const b = bulbPos(o); return { x: b.x, y: b.y, h: b.h - 
 const targetAlive = t => !t.dead && (t.kind ? G.enemies.includes(t) : G.flowers.includes(t));
 function targetH(t) {
   if (!t.kind) return t.ptype === 'shroom' ? 1.45 : t.ptype === 'sunflower' ? 1.38 : 1.28;
-  return { tall: 2.2, blob: t.h || 0.4, balloon: 1.75, crawler: 0.5, snail: 0.6, grass: t.hidden ? 0.3 : 1.45, girl: 1.35 }[t.kind] || 1.3;
+  return { tall: 2.2, blob: t.h || 0.4, balloon: 1.75, crawler: 0.5, snail: 0.6, grass: t.hidden ? 0.3 : 1.45, girl: 1.35, kronos: 1.0, tyrant: 1.6, warlord: 1.5, taowu: 1.3 }[t.kind] || 1.3;
 }
 // 找範圍內最近、而且看得到的怪物（天使和火球共用）
 function findTarget(x, y, range, skip) {
@@ -1745,7 +1813,7 @@ function angelSmite(t, a) {
     G.fx.push({ type: 'spark', x: t.x, y: t.y, h, vx: Math.cos(r) * s, vy: Math.sin(r) * s, vh: rand(-0.5, 1.5), life: rand(0.4, 0.9), max: 0.9, color: [255, 225, 140] });
   }
   Sound.play('smite');
-  hurtMonster(t, ANGEL_DMG);
+  hurtMonster(t, ANGEL_DMG, 'angel');
   // 大怪物沒被打倒的話會被撞開
   if (!t.dead && t.kind && BOSSES.includes(t.kind)) {
     const r = Math.atan2(t.y - a.y, t.x - a.x);
@@ -1781,7 +1849,7 @@ function updateFireballs(dt) {
     const dx = t.x - f.x, dy = t.y - f.y, dh = targetH(t) - f.h, d = Math.hypot(dx, dy, dh);
     if (d < 0.35) {
       f.dead = true;
-      hurtMonster(t, FIRE_DMG);
+      hurtMonster(t, FIRE_DMG, 'fire');
       Sound.play('fireHit', nearVol(Math.hypot(f.x - G.p.x, f.y - G.p.y)));
       for (let i = 0; i < 14; i++) {
         const r = Math.random() * Math.PI * 2, s = rand(0.5, 2.2);
@@ -1823,8 +1891,8 @@ function handPos(fwd = 0.35, side = 0.15) {
   return { x: p.x + c * fwd + s * side, y: p.y + s * fwd - c * side };
 }
 // 打中怪物：扣血、敲暈、推開
-function whack(t, dmg, stun, kb, fx, fy) {
-  hurtMonster(t, dmg);
+function whack(t, dmg, stun, kb, fx, fy, src = 'pan') {
+  hurtMonster(t, dmg, src);
   const h = targetH(t);
   for (let i = 0; i < 8; i++) G.fx.push({ type: 'spark', x: t.x + rand(-0.15, 0.15), y: t.y + rand(-0.15, 0.15), h: h + rand(-0.3, 0.3), vx: rand(-1.5, 1.5), vy: rand(-1.5, 1.5), vh: rand(-0.5, 1.5), life: rand(0.25, 0.5), max: 0.5, color: [255, 245, 200] });
   if (t.dead || !t.kind) return;
@@ -1897,7 +1965,7 @@ function useWeapon(id) {
         if (!hittable(t)) continue;
         const d = Math.hypot(t.x - p.x, t.y - p.y);
         if (d > SALT_R || !seeLine(p.x, p.y, t, d)) continue;
-        whack(t, SALT_DMG * (t.kind === 'snail' ? 3 : 1), 1, 1.8, p.x, p.y); // 大嘴觸角蟲最怕鹽巴
+        whack(t, SALT_DMG * (t.kind === 'snail' ? 3 : 1), 1, 1.8, p.x, p.y, 'salt'); // 大嘴觸角蟲最怕鹽巴
         if (t.kind === 'snail' && !G.ev.saltTip) { G.ev.saltTip = 1; toast('🧂 大嘴觸角蟲最怕鹽巴了，傷害 3 倍！', 'good'); }
         hit++;
       }
@@ -1937,7 +2005,7 @@ function explode(x, y) {
     if (!hittable(t)) continue;
     const d = Math.hypot(t.x - x, t.y - y);
     if (d > BOMB_R || !seeLine(x, y, t, d)) continue;
-    whack(t, BOMB_DMG * (1 - d / BOMB_R * 0.4), 1.2, 1.5, x, y);
+    whack(t, BOMB_DMG * (1 - d / BOMB_R * 0.4), t.kind === 'warlord' ? 2 : 1.2, 1.5, x, y, 'bomb');   // 鞭炮會讓墮落戰神停 2 秒
   }
 }
 function updateWeapons(dt) {
@@ -1951,7 +2019,7 @@ function updateWeapons(dt) {
       if (!hittable(t)) continue;
       const d = Math.hypot(t.x - p.x, t.y - p.y);
       if (d > SPRAY_RANGE || (d > 0.6 && lookAngle(t.x, t.y) > SPRAY_ARC) || !seeLine(p.x, p.y, t, d)) continue;
-      hurtMonster(t, SPRAY_DPS * (BOSSES.includes(t.kind) ? 1.5 : 1) * dt);
+      hurtMonster(t, SPRAY_DPS * (BOSSES.includes(t.kind) ? 1.5 : 1) * dt, 'spray');
       if (Math.random() < dt * 20) G.fx.push({ type: 'spark', x: t.x + rand(-0.2, 0.2), y: t.y + rand(-0.2, 0.2), h: targetH(t) + rand(-0.3, 0.3), vx: rand(-0.5, 0.5), vy: rand(-0.5, 0.5), vh: rand(0, 1), life: 0.4, max: 0.4, color: [170, 220, 255] });
     }
     const hp = handPos(0.4, 0.13);
@@ -1982,7 +2050,7 @@ function updateWeapons(dt) {
         if (!hittable(m)) continue;
         const r = 0.4 + (m.kind === 'blob' ? 0.4 * (m.size || 1) : 0);
         if (Math.hypot(m.x - sh.x, m.y - sh.y) > r || Math.abs(targetH(m) - sh.h) > 0.95) continue;
-        whack(m, SHOT_DMG, 0.4, 0.3, sh.x - sh.vx, sh.y - sh.vy);
+        whack(m, SHOT_DMG, 0.4, 0.3, sh.x - sh.vx, sh.y - sh.vy, 'shot');
         Sound.play('tick', nearVol(Math.hypot(sh.x - p.x, sh.y - p.y)));
         sh.dead = true;
         break;
@@ -2120,6 +2188,8 @@ function makeStock() {
     { id: 'battery', price: 2, qty: 2 }, { id: 'key', price: 8, qty: 1 },
     { id: 'medkit', price: 6, qty: 1 }, { id: 'cocoa', price: 2, qty: 2 }, { id: 'chocolate', price: 1, qty: 3 },
   ];
+  // 第三世界第 5 天起，商人會賣大白燈（很貴）
+  if (isW3() && d >= 5 && (G.baymaxGot || 0) < BAYMAX_MAX) G.stock.splice(tiers.length, 0, { id: 'bulb' + BAYMAX_TIER, price: BULB_PRICE[BAYMAX_TIER], qty: 1 });
   for (const st of G.stock) if (WEAPON_PRICE[st.id]) st.price = WEAPON_PRICE[st.id];
 }
 const WEAPON_PRICE = { pan: 4, slingshot: 6, watergun: 8, amulet: 7, strongflash: 9, megaflash: 15 };
@@ -2129,7 +2199,7 @@ function updateDelivery(dt) {
   if (G.phase !== 'day') return;
   if (ev.deliveryAt > 0 && G.t >= ev.deliveryAt) {
     ev.deliveryAt = -1; ev.delivery = 30; ev.dTick = 0;
-    toast('📦 有人在敲前門……是送貨員！白天可以放心開門。', 'good');
+    toast(isW3() ? '📦 有人在敲連結處的門……是站務員送包裹來了！白天可以放心開門。' : '📦 有人在敲前門……是送貨員！白天可以放心開門。', 'good');
   }
   if (ev.delivery > 0) {
     ev.delivery -= dt; ev.dTick -= dt;
@@ -2195,7 +2265,7 @@ function openGacha() {
   }, act => {
     if (act !== 'spin' || G.coins < GACHA_PRICE) return;
     G.coins -= GACHA_PRICE;
-    const k = weighted(GACHA_TABLE);
+    const k = weighted(isW3() && (G.baymaxGot || 0) < BAYMAX_MAX ? { ...GACHA_TABLE, ['bulb' + BAYMAX_TIER]: 0.4 } : GACHA_TABLE);   // 幸運機非常少見地會轉出大白燈
     if (k === 'coin5') { addCoins(5); last = { id: 'coin', n: 5 }; }
     else {
       const [[id, n]] = gainItem(k, LOOT_QTY[k] || 1);
@@ -2288,19 +2358,20 @@ function updateSpawns(dt) {
 // 日夜與事件
 // ====================================================================
 function startNight() {
-  const night = G.day, n = diffN(), ev = G.ev, w2 = isW2(); // night：第幾夜（決定新怪物登場）；n：難度
+  const night = G.day, n = diffN(), ev = G.ev, w2 = isW2(), w3 = isW3(); // night：第幾夜（決定新怪物登場）；n：難度
   G.phase = 'night'; G.t = 0; G.spawnT = 5;
   G.nightStats = { kills: 0, caught: 0 };
   if (G.treasure) { G.treasure = null; toast('⭐ 今天的寶藏星星消失了……明天再找吧。'); }
-  // 第 6 夜和最後一夜：第一世界是血月，第二世界是萬物甦醒（一樣怪物更多、等級更高）
-  ev.schedule = []; ev.blood = night % 6 === 0;
+  // 第 6 夜和最後一夜：第一世界是血月，第二世界是萬物甦醒（一樣怪物更多、等級更高）；第三世界只有第 6 夜是紅月
+  ev.schedule = []; ev.blood = w3 ? night === RED_MOON_NIGHT : night % 6 === 0;
   const add = (type, a, b) => ev.schedule.push({ type, at: rand(a, b) });
   const hz = D().hazard;
-  // 第二世界：第一世界的怪物大家都認識了，第 1 夜就可能出現（機率低一點，讓新怪物當主角）
-  const intro = k => (w2 ? 0 : INTRO[k]);
+  // 第二、三世界：第一世界的怪物大家都認識了，第 1 夜就可能出現（機率低一點，讓新怪物當主角）
+  const intro = k => (w2 || w3 ? 0 : INTRO[k]);
   // 登場之後每晚還會再來的機率
   const again = (base, k = 1) => Math.random() < Math.min(base + n * 0.01, 0.9) * (ev.blood ? 1.3 : 1) * k;
-  const old = w2 ? 0.75 : 1;
+  const old = w2 ? 0.75 : w3 ? 0.7 : 1;
+  if (w3) startNight3();
   if (night === 1) add('knock', 40, 60);
   else if (Math.random() < 0.8) add('knock', 15, NIGHT_LEN - 25);
   if (night === 2) add('blackout', 40, 60);
@@ -2317,13 +2388,14 @@ function startNight() {
     const k = 1 + (n >= 12) + (n >= 24);
     for (let i = 0; i < k; i++) if (again(0.5, old)) add('blob', 15, NIGHT_LEN - 40);
   }
-  if (night === intro('flower')) add('flower', 70, 90);
+  if (w3) { /* 列車上沒有泥土，眼球花不會長 */ }
+  else if (night === intro('flower')) add('flower', 70, 90);
   else if (night > intro('flower') && again(0.45, old)) add('flower', 5, 60);
   if (night === intro('woman')) add('woman', 25, 45);
   else if (night > intro('woman') && (ev.blood || again(0.5, old))) add('woman', 20, 90);
   if (night === intro('clown')) add('clown', 80, 100);
   else if (night > intro('clown') && again(0.45, old)) add('clown', 20, NIGHT_LEN - 40);
-  if (!w2) { // 第二世界沒有電視，爬行女不會出現
+  if (!w2 && !w3) { // 第二、三世界沒有電視，爬行女不會出現
     if (night === INTRO.tv) add('tv', 25, 45);
     else if (night > INTRO.tv && again(0.45)) add('tv', 20, NIGHT_LEN - 40);
   }
@@ -2343,15 +2415,17 @@ function startNight() {
     intro2('girl', 25, 45, 0.4);
     if (ev.blood) add('awaken', 2, 3);
   }
-  const special = w2 ? '🌸 萬物甦醒' : '🩸 血月之夜';
+  // 第三世界：第二世界追過來的大嘴觸角蟲和眼花女孩，加上 4 隻新怪物（一隻一隻登場）、煤水車被撬開、乘客轉頭
+  if (w3) scheduleNight3(add, again, night, n, hz);
+  const special = w3 ? '🩸 紅月' : w2 ? '🌸 萬物甦醒' : '🩸 血月之夜';
   if (night === LAST_NIGHT) showBig('最後一夜', `${special}：撐到天亮就贏了！`);
-  else showBig(`第 ${night} 夜`, ev.blood ? (w2 ? '🌸 萬物甦醒：花園裡的一切都醒過來了……' : '🩸 血月之夜：怪物更多、等級更高') : '拿好手電筒');
+  else showBig(`第 ${night} 夜`, ev.blood ? (w2 ? '🌸 萬物甦醒：花園裡的一切都醒過來了……' : '🩸 血月之夜：怪物更多、等級更高') : w3 ? (G.cold ? '❄️ 寒寂之境：顧好火爐，別讓體溫歸零' : '顧好火爐，別讓列車停下來') : '拿好手電筒');
   Sound.play(ev.blood && w2 ? 'awaken' : 'dusk');
   if (night === 1) toast('🌙 夜晚來了。燈光擋不住怪物，但待在亮處理智不會掉。按 F 開手電筒，照著怪物可以扣牠的血！', 'warn');
-  if ((w2 || night > 1) && Object.values(w2 ? INTRO2 : INTRO).includes(night)) toast('📖 今晚會有新的怪物出現……可以先去「怪物圖鑑」看看怎麼對付牠們。', 'warn');
+  if ((w2 || w3 || night > 1) && Object.values(w3 ? INTRO3 : w2 ? INTRO2 : INTRO).includes(night)) toast('📖 今晚會有新的怪物出現……可以先去「怪物圖鑑」看看怎麼對付牠們。', 'warn');
 }
-// 第二世界同一時間最多 3 隻大怪物，免得太擠
-const bossFull = () => isW2() && G.enemies.filter(e => BOSSES.includes(e.kind)).length >= 3;
+// 第二、三世界同一時間最多 3 隻大怪物，免得太擠
+const bossFull = () => curWorld >= 2 && G.enemies.filter(e => BOSSES.includes(e.kind)).length >= 3;
 // 房間名字（會跟著世界變）
 const RN = id => ROOMS.find(r => r.id === id).name;
 function startDay(d) {
@@ -2365,12 +2439,13 @@ function startDay(d) {
   G.stare = 0;
   G.ev.tvOn = false; G.ev.tvT = 0; G.ev.alarm = 0;
   if (isW2()) spreadShrooms();
+  if (isW3()) startDay3(d);   // 列車停靠下一站：車站門打開、放今天的寶箱
   refillContainers();
   prepareDay();
   showBig(`第 ${d} 天`, d === LAST_NIGHT ? '今晚是最後一夜！' : `你撐過了第 ${d - 1} 夜，還剩 ${LAST_NIGHT - d + 1} 夜`);
   Sound.play('dawn');
   saveGame();
-  toast(`💾 已自動存檔，${isW2() ? '箱子和籃子' : '櫃子'}裡的物資也刷新了。`, 'good');
+  toast(`💾 已自動存檔，${isW3() ? '車站和列車上' : isW2() ? '箱子和籃子' : '櫃子'}裡的物資也刷新了。`, 'good');
   if (G.gift) toast(`🎁 ${RN('bedroom')}的床邊有一份早晨禮物！`, 'good');
   if (G.treasure) toast(`⭐ 今天的寶藏星星藏在「${G.treasure.room}」，快去找！`, 'good');
 }
@@ -2381,11 +2456,11 @@ function triggerEvent(type) {
       if (!G.power) return;
       G.power = false;
       Sound.play('powerDown');
-      toast(`⚡ 停電了！拿手電筒去${RN('laundry')}的電箱，按住 E 恢復電力。`, 'warn');
+      toast(isW3() ? `⚡ 發電機跳掉了！拿手電筒去${RN('attic')}的發電機，按住 E 重新啟動。` : `⚡ 停電了！拿手電筒去${RN('laundry')}的電箱，按住 E 恢復電力。`, 'warn');
       break;
     case 'knock':
       ev.knock = 20; ev.knockTick = 0;
-      toast(isW2() ? '🚪 有人在敲那扇門……晚上千萬不要開門。' : '🚪 有人在敲前門……晚上千萬不要開門。', 'warn');
+      toast(isW3() ? '🚪 有人在敲車廂連結處的門……晚上千萬不要開門。' : isW2() ? '🚪 有人在敲那扇門……晚上千萬不要開門。' : '🚪 有人在敲前門……晚上千萬不要開門。', 'warn');
       break;
     case 'closet':
       ev.closet = 18; ev.closetLight = 0; ev.closetTick = 0;
@@ -2393,7 +2468,7 @@ function triggerEvent(type) {
       break;
     case 'phone':
       ev.phone = 15; ev.phoneTick = 0;
-      toast(isW2() ? `☎️ ${RN('living')}的電話亭響了。` : '☎️ 客廳的電話響了。');
+      toast(isW3() ? `☎️ ${RN('living')}的對講機響了……是車長室打來的？` : isW2() ? `☎️ ${RN('living')}的電話亭響了。` : '☎️ 客廳的電話響了。');
       break;
     case 'blob': {
       if (!spawnEnemy('blob')) break;
@@ -2440,6 +2515,9 @@ function triggerEvent(type) {
       break;
     }
     case 'awaken': awakenGarden(); break;
+    case 'tender': tenderRaid(); break;   // 第三世界：煤水車被撬開
+    case 'kronos': case 'tyrant': case 'warlord': case 'taowu': spawnW3Monster(type); break;
+    case 'paxturn': passengerTurn(); break;
     case 'woman': {
       if (G.enemies.some(e => e.kind === 'woman') || bossFull() || !spawnEnemy('woman')) break;
       Sound.play('sob', 0.5);
@@ -2503,6 +2581,8 @@ function updateTime(dt) {
       if (G.t > 22 && !ev.w2tip3) { ev.w2tip3 = 1; toast('💡 這裡的藍鑽、紅鑽、紫鑽燈泡，變成了花、樹、水燈泡。'); }
       if (G.t > 34 && !ev.tipPan && !G.inv.pan) { ev.tipPan = 1; toast(`🍳 ${RN('kitchen')}的野餐箱裡好像有一個平底鍋，可以拿來打怪物！`); }
       if (G.t > 48 && !ev.w2tip4) { ev.w2tip4 = 1; toast(`🪙 神秘商人在${RN('basement')}，扭蛋機在${RN('garage')}，工作台在${RN('storage')}。`); }
+    } else if (isW3()) {
+      if (G.day === 1) dayTips3();
     } else if (G.day === 1) {
       if (G.t > 3 && !ev.tip1) { ev.tip1 = 1; toast('👉 走到櫃子、箱子旁邊按住 E 搜索，找燈泡！'); }
       if (G.t > 18 && !ev.tip2) { ev.tip2 = 1; toast('👉 選中燈泡，看著圓形的天花板燈座按 E 安裝；手上沒拿燈泡時按 E 就是拿起來。'); }
@@ -2513,10 +2593,12 @@ function updateTime(dt) {
     }
     updateDelivery(dt);
     if (!ev.merchantBye && G.t >= DAY_LEN - DUSK) { ev.merchantBye = 1; toast('🛒 神秘商人收攤離開了。'); }
-    if (!ev.duskWarned && G.t >= DAY_LEN - DUSK) { ev.duskWarned = true; toast('🌆 天快黑了！準備好燈光。', 'warn'); }
+    if (!ev.duskWarned && G.t >= DAY_LEN - DUSK) { ev.duskWarned = true; toast(isW3() ? '🚂 汽笛響了！列車快開了，快上車！' : '🌆 天快黑了！準備好燈光。', 'warn'); }
+    if (isW3()) updateDay3(dt);
     if (G.t >= DAY_LEN) startNight();
   } else {
     for (const s of ev.schedule) if (!s.done && G.t >= s.at) { s.done = true; triggerEvent(s.type); }
+    if (isW3()) updateNight3(dt);
     if (G.t >= NIGHT_LEN) {
       if (G.day >= LAST_NIGHT) victory();
       else startDay(G.day + 1);
@@ -2621,7 +2703,8 @@ function updatePlayer(dt) {
   // 踩到大嘴觸角蟲的黏液會變慢（跳起來就沒事）
   const sticky = p.z < 0.08 && onTrail(p.x, p.y);
   if (sticky && !G.ev.trailTip) { G.ev.trailTip = 1; toast('🐌 踩到黏液了，走不快！跳過去就不會變慢。', 'warn'); }
-  const sp = (sprint ? 4.8 : 3.0) * (sneakKey && !sprint ? 0.45 : 1) * (sticky ? 0.45 : 1);
+  const sp = (sprint ? 4.8 : 3.0) * (sneakKey && !sprint ? 0.45 : 1) * (sticky ? 0.45 : 1) * (isW3() ? speedMult3() : 1);
+  if (p.stunT > 0) { p.stunT -= dt; fwd = 0; str = 0; }   // 被震倒、被打飛：動不了
   if (sprint) p.stam -= 28 * dt; else p.stam = Math.min(100, p.stam + 16 * dt);
   const c = Math.cos(p.face), s = Math.sin(p.face);
   const mx = c * fwd - s * str, my = s * fwd + c * str;
@@ -2736,8 +2819,8 @@ function getTarget() {
       else if (G.inv.key) cands.push({ d: d - 0.3, id: 'chest:' + f.id, label: '用鑰匙打開寶箱', hold: 0.8, action: () => openChest(f) });
       else cands.push({ d, id: 'chestLocked', label: '上鎖的寶箱（需要鑰匙）' });
     } else if (f.type === 'breaker') {
-      if (!G.power) cands.push({ d: d - 0.5, id: 'breaker', label: '重啟電源', hold: 3, action: restorePower });
-      else cands.push({ d, id: 'breakerOk', label: '電箱：運作正常' });
+      if (!G.power) cands.push({ d: d - 0.5, id: 'breaker', label: isW3() ? '重新啟動發電機' : '重啟電源', hold: 3, action: restorePower });
+      else cands.push({ d, id: 'breakerOk', label: isW3() ? '發電機：運作正常' : '電箱：運作正常' });
     }
   }
   for (const fl of G.flowers) {
@@ -2758,7 +2841,8 @@ function getTarget() {
     if (gd < 1.5 && (lookAngle(GIFT_POS.x, GIFT_POS.y) < 1.0 || gd < 0.6)) cands.push({ d: gd - 0.3, id: 'gift', label: '打開早晨禮物', hold: 0.6, action: openGift });
   }
   const fd = rectDist(p.x, p.y, { x: FRONT_DOOR.x, y: FRONT_DOOR.y, w: 1, h: 1 });
-  if (fd < 1.15 && lookAngle(FRONT_DOOR.x + 0.5, FRONT_DOOR.y + 0.5) < 1.0) cands.push({ d: fd, id: 'front', label: '打開前門', hold: 0, action: openFrontDoor });
+  if (fd < 1.15 && lookAngle(FRONT_DOOR.x + 0.5, FRONT_DOOR.y + 0.5) < 1.0) cands.push({ d: fd, id: 'front', label: isW3() ? '打開連結處的門' : '打開前門', hold: 0, action: openFrontDoor });
+  if (isW3()) addTargets3(cands);   // 火爐、寶箱、可以關的包廂門
   cands.sort((a, b) => a.d - b.d);
   return cands[0] || null;
 }
@@ -2818,6 +2902,7 @@ function openFrontDoor() {
     toast('你打開了門……門外什麼都沒有。然後，有東西擠了進來！', 'warn');
   } else if (G.phase === 'night') toast('門外一片漆黑……還是別開了。');
   else if (ev.delivery > 0) takeDelivery();
+  else if (isW3()) toast('連結處的門外只有呼嘯的風和鐵軌，還是待在車廂裡吧。');
   else if (isW2()) toast('門外只有一片刺眼的白光，什麼都看不見。還是待在花園裡吧。');
   else toast('門外被濃霧包圍，什麼都看不見。還是待在家裡吧。');
 }
@@ -2831,6 +2916,7 @@ function useSelected() {
       makeNoise(3);
       if (it.hunger) p.hunger = Math.min(100, p.hunger + it.hunger);
       if (it.san) p.san = Math.min(100, p.san + it.san);
+      if (it.warm && isW3()) p.temp = Math.min(100, p.temp + it.warm);
       if (it.hp) p.hp = Math.min(100, p.hp + it.hp);
       removeItem(id); Sound.play('eat'); toast(`使用了${it.name}（${it.desc}）`);
       break;
@@ -2855,6 +2941,7 @@ function useSelected() {
       break;
     }
     case 'charm': toast('📿 護身符帶在身上就有效，被怪物抓到只扣一半的血。'); break;
+    case 'fuel': useFuel(id); break;
     case 'bulb': {
       const fx = nearestFixture();
       if (!fx) { toast('靠近天花板燈座或燈具才能安裝燈泡。'); return; }
@@ -2918,7 +3005,7 @@ function pickUp() {
 // ====================================================================
 const JUMP_V = 4.4, JUMP_G = 12.5;   // 起跳速度、重力：大約 0.7 秒落地
 function tryJump() {
-  if (!G || mode !== 'play' || !isW2()) return;
+  if (!G || mode !== 'play' || curWorld < 2) return;
   const p = G.p;
   if (p.grabbed) { grabEscapePress(); return; }   // 被草叢人抓住：連按跳掙脫
   if (p.z > 0.001 || p.vz !== 0) return;
@@ -2935,11 +3022,14 @@ function update(dt) {
   buildLights();
   updatePlayer(dt);
   if (mode !== 'play') return;
+  if (isW3()) { updateWarmth3(dt); if (mode !== 'play') return; }
+  updateSeen(dt);
   updateTime(dt);
   if (mode !== 'play') return;
   updateEvents(dt);
   updateFlowers(dt);
   updateWorld2(dt);
+  if (isW3()) updateLava(dt);
   updateAngels(dt);
   updateFireLamps(dt);
   updateFireballs(dt);
@@ -2967,13 +3057,15 @@ function updateFx(dt) {
   }
   for (const L of G.lights) {
     if (!L.obj || L.tier < 4) continue;
-    const rate = L.tier === ANGEL_TIER ? 2 : L.tier === STAR_TIER ? 8 : L.tier === HEAL_TIER ? 5 : (L.tier - 3) * 1.4;
+    const rate = L.tier === ANGEL_TIER ? 2 : L.tier === STAR_TIER ? 8 : L.tier === HEAL_TIER ? 5 : L.tier === BAYMAX_TIER ? 3 : (L.tier - 3) * 1.4;
     if (Math.random() < rate * dt) {
       const pos = bulbPos(L.obj);
       if (L.tier === STAR_TIER) G.fx.push({ type: 'spark', x: pos.x + rand(-0.7, 0.7), y: pos.y + rand(-0.7, 0.7), h: pos.h + rand(-0.4, 0.3), vx: 0, vy: 0, vh: rand(-0.05, 0.05), life: rand(0.5, 1.2), max: 1.2, color: pick([[255, 255, 255], [190, 210, 255], [255, 240, 170]]) });
       else if (L.tier === ANGEL_TIER) G.fx.push({ type: 'spark', x: pos.x + rand(-0.3, 0.3), y: pos.y + rand(-0.3, 0.3), h: pos.h, vx: rand(-0.1, 0.1), vy: rand(-0.1, 0.1), vh: -rand(0.1, 0.3), life: 1.5, max: 1.5, color: [255, 230, 160] });
       // 回血燈泡：往下飄的綠色光點
       else if (L.tier === HEAL_TIER) { const life = Math.max(0.4, pos.h / 0.9); G.fx.push({ type: 'spark', x: pos.x + rand(-0.6, 0.6), y: pos.y + rand(-0.6, 0.6), h: pos.h - 0.1, vx: 0, vy: 0, vh: -0.9, life, max: life, color: pick([[140, 255, 175], [220, 255, 230]]) }); }
+      // 大白燈：暖暖的、慢慢往上飄的光點
+      else if (L.tier === BAYMAX_TIER) G.fx.push({ type: 'spark', x: pos.x + rand(-0.9, 0.9), y: pos.y + rand(-0.9, 0.9), h: rand(0.2, 1.4), vx: 0, vy: 0, vh: rand(0.15, 0.35), life: rand(1.2, 2), max: 2, color: pick([[255, 236, 205], [255, 220, 170]]) });
       // 第二世界：花燈泡飄花瓣、樹燈泡飄紅葉、水燈泡滴水
       else if (isW2() && L.tier >= 6 && L.tier <= 8) { const life = Math.max(0.5, pos.h / (L.tier === 8 ? 1.4 : 0.55)); G.fx.push({ type: 'spark', x: pos.x + rand(-0.35, 0.35), y: pos.y + rand(-0.35, 0.35), h: pos.h - 0.05, vx: rand(-0.15, 0.15), vy: rand(-0.15, 0.15), vh: L.tier === 8 ? -1.4 : -0.55, life, max: life, color: L.tier === 6 ? pick([[120, 180, 255], [200, 225, 255]]) : L.tier === 7 ? pick([[255, 80, 60], [255, 140, 60]]) : [200, 120, 255] }); }
       else if (L.tier === FIRE_TIER) G.fx.push({ type: 'ember', x: pos.x + rand(-0.15, 0.15), y: pos.y + rand(-0.15, 0.15), h: pos.h, vx: rand(-0.15, 0.15), vy: rand(-0.15, 0.15), vh: rand(0.5, 1.1), life: rand(0.8, 1.5), max: 1.5, color: pick([[255, 200, 60], [255, 120, 30], [255, 80, 20]]) });
@@ -2996,28 +3088,25 @@ function bulbPos(o) {
 // ====================================================================
 // 結束
 // ====================================================================
-function gameOver() {
+const WORLD_PREFIX = () => (isW3() ? '第三世界・' : isW2() ? '第二世界・' : '');
+function gameOver(cause = '') {
   mode = 'over';
   Sound.setDrone(0);
   G.p.grabbed = null;
   const s = readSave();
-  $('goTitle').textContent = '你倒下了……';
-  $('goText').innerHTML = `你在<b>${isW2() ? '第二世界・' : ''}第 ${G.day} ${G.phase === 'night' ? '夜' : '天'}</b>倒下了。<br>搜索了 ${G.stats.searched} 次，驅散了 ${G.stats.dissolved} 個黑影。<br>最好的燈泡：${bulbName(G.stats.bestTier)}`;
+  const title = { train: '列車被吃掉了……', cold: '你在雪裡睡著了……' }[cause] || '你倒下了……';
+  const why = { train: '火熄了，列車停在荒野裡，車外的東西擠了進來。', cold: '體溫歸零了。火爐和大白燈都能取暖。' }[cause] || '';
+  $('goTitle').textContent = title;
+  $('goText').innerHTML = `${why ? why + '<br>' : ''}你在<b>${WORLD_PREFIX()}第 ${G.day} ${G.phase === 'night' ? '夜' : '天'}</b>倒下了。<br>搜索了 ${G.stats.searched} 次，驅散了 ${G.stats.dissolved} 個黑影。<br>最好的燈泡：${bulbName(G.stats.bestTier)}`;
   $('btnRetry').classList.toggle('hidden', !s);
   if (s) $('btnRetry').textContent = `從第 ${s.day} 天早上重來`;
   $('gameover').classList.remove('hidden');
 }
 function victory() {
-  // 第一世界破關：播開門動畫，走進第二世界
-  if (!isW2()) { startCutscene(); return; }
-  mode = 'over';
-  Sound.setDrone(0);
-  Sound.play('win');
-  try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }
-  $('goTitle').textContent = '🌸 你走出了夢核花園！';
-  $('goText').innerHTML = `花園裡的眼睛一個一個閉上，天花板上的雲慢慢散開了。<br>你在第二世界撐過了 ${LAST_NIGHT} 夜！<br>你搜索了 ${G.stats.searched} 次，驅散了 ${G.stats.dissolved} 個怪物。<br>最好的燈泡：${bulbName(G.stats.bestTier)}`;
-  $('btnRetry').classList.add('hidden');
-  $('gameover').classList.remove('hidden');
+  // 第一世界破關：播開門動畫，走進第二世界；第二世界破關：坐上末班列車；第三世界：列車到站
+  if (isW3()) { victory3(); return; }
+  if (isW2()) { startCutscene2(); return; }
+  startCutscene();
 }
 
 // ====================================================================
@@ -3053,6 +3142,8 @@ function cutCaption(title, sub) {
 }
 function updateCutscene(dt) {
   const c = CUT;
+  if (c.kind === 2) { updateCutscene2(dt); return; }   // 第二到第三世界（js/world3.js）
+  if (c.kind === 3) { updateCutscene3(dt); return; }   // 第三世界破關：終點站
   c.t += dt;
   G.time += dt;
   if (!c.switched) G.t = Math.min(G.t + dt * 1.6, DAY_LEN - DUSK - 1); // 天慢慢亮起來
@@ -3094,7 +3185,10 @@ function updateCutscene(dt) {
   fade.style.opacity = Math.max(white, black).toFixed(3);
 }
 function skipCutscene() {
-  if (mode !== 'cutscene' || !CUT || CUT.t >= CUT_SWITCH) return;
+  if (mode !== 'cutscene' || !CUT) return;
+  if (CUT.kind === 2) { skipCutscene2(); return; }
+  if (CUT.kind === 3) { CUT.t = Math.max(CUT.t, 5.6); return; }
+  if (CUT.t >= CUT_SWITCH) return;
   CUT.t = CUT_SWITCH;
 }
 function endCutscene() {
@@ -3162,15 +3256,15 @@ function drawMinimap() {
     c.fillStyle = lit ? 'rgba(255,220,140,.3)' : 'rgba(120,110,140,.28)';
     c.fillRect(r.x, r.y, r.w, r.h);
   }
-  c.fillStyle = 'rgba(120,110,140,.28)';
-  for (const d of DOORS) if (!d.front) c.fillRect(d.x, d.y, 1, 1);
+  for (const d of DOORS) { if (d.front) continue; c.fillStyle = d.locked ? 'rgba(220,60,60,.6)' : d.closed ? 'rgba(200,170,110,.5)' : 'rgba(120,110,140,.28)'; c.fillRect(d.x, d.y, 1, 1); }
+  if (isW3()) drawMinimap3(c);
   for (const L of G.lights) {
     c.fillStyle = rgba(L.color || (L.candle ? [255, 170, 80] : bulbRGB(L.tier)), 1);
     c.beginPath(); c.arc(L.x, L.y, 0.55, 0, 7); c.fill();
   }
   const blink = Math.sin(G.time * 8) > 0;
   const mark = (x, y, col) => { if (!blink) return; c.fillStyle = col; c.beginPath(); c.arc(x, y, 0.95, 0, 7); c.fill(); };
-  if (!G.power) mark(42.5, 28.5, '#ffd400');
+  if (!G.power) { const b = FURN_BY_ID.breaker; mark(b.x + 0.5, b.y + 0.5, '#ffd400'); }
   if (G.ev.knock > 0) mark(0.5, 12.5, '#ff4455');
   if (G.ev.closet > 0) mark(30.5, 1.5, '#ff4455');
   if (G.ev.phone > 0) mark(26.5, 23.5, '#7ee081');
@@ -3209,6 +3303,7 @@ function updateOverlays() {
   $('dizzyfx').style.opacity = dz.toFixed(3); $('dizzyfx').classList.toggle('on', dz > 0.01);
   $('sporefx').style.opacity = sp.toFixed(3); $('sporefx').classList.toggle('on', sp > 0.01);
   $('healfx').style.opacity = G.power && p.hp < 100 && healAt(p.x, p.y) ? '1' : '0';
+  if (isW3()) overlays3();
 }
 function updatePrompt() {
   const t = G.target, el = $('prompt');
@@ -3253,6 +3348,10 @@ function bulbSVG(t) {
   else if (t === HEAL_TIER) body = `<circle cx="18" cy="14" r="9" fill="#8cffaf" stroke="#2f9a55" stroke-width="1"/><path d="M18 9 V19 M13 14 H23" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>` +
     `<rect x="14" y="22" width="8" height="6" rx="1.5" fill="#9aa"/>`;
   else if (t === FIRE_TIER) body = `<path d="M18 4 C26 14 25 22 18 27 C11 22 10 14 18 4Z" fill="#ff6a10"/><path d="M18 12 C22 18 21 22 18 25 C15 22 14 18 18 12Z" fill="#ffe08a"/>`;
+  // 大白燈：白色的人形，一條面罩線加兩點微光
+  else if (t === BAYMAX_TIER) body = `<ellipse cx="18" cy="21" rx="8.5" ry="8" fill="#f1ece2" stroke="#c9bfae" stroke-width=".8"/><ellipse cx="18" cy="10" rx="6" ry="4.6" fill="#f3efe6" stroke="#c9bfae" stroke-width=".8"/>` +
+    `<path d="M14.5 10.2 H21.5" stroke="#2a2420" stroke-width="1.2" stroke-linecap="round"/><circle cx="14.6" cy="10.2" r="1" fill="#2a2420"/><circle cx="21.4" cy="10.2" r="1" fill="#2a2420"/>` +
+    `<path d="M10 17 L4 23 M26 17 L32 23" stroke="#e6dccb" stroke-width="3.5" stroke-linecap="round"/>`;
   // 第二世界：花燈泡（藍色繡球花）、樹燈泡（紅色楓樹）、水燈泡（紫色的水）
   else if (t === 6 && isW2()) body = [0, 60, 120, 180, 240, 300].map(a => `<ellipse cx="18" cy="8.6" rx="4.2" ry="6" fill="#6fb0ff" stroke="#dfeeff" stroke-width=".7" transform="rotate(${a} 18 15)"/>`).join('') +
     `<circle cx="18" cy="15" r="3.6" fill="#fff6c8"/>`;
@@ -3323,7 +3422,8 @@ function updateHUD() {
   const left = Math.ceil((night ? NIGHT_LEN : DAY_LEN) - G.t);
   $('phaseText').textContent = `${fmtClock()}　${night ? '天亮' : '天黑'}還有 ${left} 秒`;
   const alerts = [];
-  if (!G.power) alerts.push(`⚡ 停電中！→ ${RN('laundry')}電箱`);
+  if (!G.power) alerts.push(isW3() ? `⚡ 發電機跳掉了！→ ${RN('attic')}` : `⚡ 停電中！→ ${RN('laundry')}電箱`);
+  if (isW3()) alerts.push(...alerts3());
   if (G.p.grabbed) alerts.push('🌿 草叢人抓住你的腳了！連按「跳」');
   if (G.ev.knock > 0) alerts.push('🚪 有人在敲門（別開）');
   if (G.ev.closet > 0) alerts.push(`🚪 衣櫃在晃動（${Math.ceil(G.ev.closet)} 秒）`);
@@ -3358,6 +3458,7 @@ function updateHUD() {
   setBar('batFill', p.bat); setBar('stamFill', p.stam);
   const ft = flTier(), fe = $('flashTier');
   if (fe.textContent !== ft.short) { fe.textContent = ft.short; fe.style.color = ft.color; fe.style.borderColor = ft.color; fe.title = ft.name; }
+  hud3();
   if (invDirty) renderHotbar();
   drawMinimap();
   updateOverlays();
@@ -3391,9 +3492,26 @@ function placeBelowToasts(el) {
   const min = $('toasts').getBoundingClientRect().bottom + 14;
   if (el.getBoundingClientRect().top < min) el.style.top = min + 'px';
   const big = $('bigText');
-  if (el === big || !big.classList.contains('show') || !el.firstElementChild) return;
+  if (el === big) { placeBig(big); return; }
+  if (!big.classList.contains('show') || !el.firstElementChild) return;
   const b = big.getBoundingClientRect(), top = el.getBoundingClientRect().top, h = el.firstElementChild.offsetHeight;
   if (top < b.bottom && top + h > b.top) el.style.top = b.bottom + 8 + 'px';
+}
+// 大字：排在提示下面；螢幕矮、提示又多的時候會被推到下面的物品說明上 → 先縮小一號，還是放不下就把最舊的提示拿掉
+function placeBig(big) {
+  const box = $('toasts'), limit = () => $('bottom').getBoundingClientRect().top - 6;
+  const fit = () => {
+    big.style.top = '';
+    const min = box.getBoundingClientRect().bottom + 14;
+    if (big.getBoundingClientRect().top < min) big.style.top = min + 'px';
+    return big.getBoundingClientRect().bottom <= limit();
+  };
+  big.classList.remove('compact');
+  if (fit()) return;
+  big.classList.add('compact');
+  if (fit()) return;
+  while (box.children.length > 1) { box.firstChild.remove(); if (fit()) return; }
+  big.style.top = Math.max(0, limit() - big.offsetHeight) + 'px';   // 真的沒辦法：寧可壓到提示
 }
 let bigTimer = 0;
 function showBig(title, sub) {
@@ -3602,8 +3720,9 @@ function refreshTitle() {
   showBuild();
   const s = readSave();
   $('btnContinue').disabled = !s;
-  $('saveInfo').textContent = s ? `存檔：${s.world === 2 ? '第二世界・' : ''}第 ${Math.min(s.day, LAST_NIGHT)} 天早上（${diffName(s.diff)}）` : '還沒有存檔';
-  $('w2Badge').classList.toggle('hidden', !w2Unlocked());
+  $('saveInfo').textContent = s ? `存檔：${s.world === 3 ? '第三世界・' : s.world === 2 ? '第二世界・' : ''}第 ${Math.min(s.day, LAST_NIGHT)} 天早上（${diffName(s.diff)}）` : '還沒有存檔';
+  $('w2Badge').classList.toggle('hidden', !w2Unlocked() || w3Unlocked());
+  $('w3Badge').classList.toggle('hidden', !w3Unlocked());
 }
 function toTitle() {
   mode = 'title';
@@ -3625,6 +3744,9 @@ $('btnNew').onclick = () => {
   const open = w2Unlocked(), b2 = document.querySelector('#worldPick .worldbtn.w2');
   b2.disabled = !open;
   b2.querySelector('small').textContent = open ? '用樹當牆、有天花板、地上開滿花的怪花園。新怪物、新技能「跳」！' : '🔒 打贏第一世界的 12 夜就會解鎖';
+  const open3 = w3Unlocked(), b3 = document.querySelector('#worldPick .worldbtn.w3');
+  b3.disabled = !open3;
+  b3.querySelector('small').textContent = open3 ? '白天下車找物資和寶箱，晚上顧火爐讓列車一直開。紅月、寒寂之境、大白燈、4 隻新怪物！' : '🔒 打贏第二世界的 12 夜就會解鎖';
   $('worldPick').classList.remove('hidden');
 };
 for (const b of document.querySelectorAll('#worldPick .worldbtn')) b.onclick = () => {
@@ -3644,11 +3766,11 @@ $('buildInfo').addEventListener('click', () => {
   buildTapT = now;
   if (buildTaps < 5) return;
   buildTaps = 0;
-  if (w2Unlocked()) { $('saveInfo').textContent = '🌸 第二世界已經解鎖了，按「新遊戲」就能選。'; return; }
-  unlockW2();
+  if (w3Unlocked()) { $('saveInfo').textContent = '🚂 第二、第三世界都已經解鎖了，按「新遊戲」就能選。'; return; }
+  unlockW3();
   Sound.init(); Sound.play('win');
   refreshTitle();
-  $('saveInfo').textContent = '🌸 第二世界解鎖了！按「新遊戲」就能選。';
+  $('saveInfo').textContent = '🚂 第二、第三世界解鎖了！按「新遊戲」就能選。';
 });
 for (const b of document.querySelectorAll('#bookTabs button')) b.onclick = () => showBookPage(+b.dataset.w);
 $('cutscene').addEventListener('pointerdown', e => { e.preventDefault(); skipCutscene(); });
@@ -3704,6 +3826,8 @@ function musicIntensity() {
   if (G.flowers.some(f => f.ptype === 'sunflower' && f.lock >= SUN_LOCK)) i += 0.15;
   if (G.enemies.some(e => e.kind === 'girl' && e.seen)) i += 0.25;
   if (G.enemies.some(e => e.kind === 'snail')) i += 0.1;
+  if (G.enemies.some(e => e.kind === 'tyrant' || e.kind === 'warlord' || e.kind === 'taowu')) i += 0.3;
+  if (G.enemies.some(e => e.kind === 'taowu' && e.blind <= 0 && Math.hypot(e.x - p.x, e.y - p.y) < 8)) i += 0.2;
   if (p.grabbed) i += 0.3;
   i += (1 - p.san / 100) * 0.3;
   return clamp(i, 0, 1);
@@ -3779,15 +3903,18 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 buildMap();
+initSeen();   // 舊玩家：照存檔的進度把已經登場過的怪物標成見過
 G = demoState();
 refreshTitle();
 // 測試用網址參數：?world=2&night=6（直接開某個世界的某一夜）、&kit=1（帶齊武器和燈泡）、?cut=1（直接播破關動畫）
 (function testStart() {
   const q = new URLSearchParams(location.search);
   if (!q.has('world') && !q.has('cut')) return;
-  const w = q.get('world') === '2' ? 2 : 1;
-  if (w === 2) unlockW2();
-  newGame(q.get('diff') || 'normal', q.has('cut') ? 1 : w);
+  const cut = +q.get('cut') || 0;
+  const w = cut ? cut : worldOf(+q.get('world'));
+  if (w >= 2) unlockW2();
+  if (w === 3) unlockW3();
+  newGame(q.get('diff') || 'normal', w);
   const night = clamp(+q.get('night') || 1, 1, LAST_NIGHT);
   if (night > 1) G.day = night;
   if (q.has('kit')) {
@@ -3795,9 +3922,11 @@ refreshTitle();
     for (const [id, n] of [['marble', 20], ['holywater', 10], ['salt', 6], ['firecracker', 6], ['battery', 5], ['bandage', 3], ['medkit', 2], ['cocoa', 3]]) addItem(id, n);
     for (let t = 1; t <= MAX_TIER; t++) addItem('bulb' + t, 1);
     addItem('lamp_floor', 2);
+    if (w === 3) { addItem('charcoal', 6); addItem('wood', 4); addItem('key', 3); }
     G.p.flashLv = 3; G.coins = 60;
   }
-  if (q.has('cut')) { G.day = LAST_NIGHT; victory(); return; }
+  if (cut) { G.day = LAST_NIGHT; victory(); return; }
+  if (w === 3) testStart3(q, night);   // &cold：強制寒寂之境；&fire=0：火爐一開始是空的
   if (night > 1 || q.has('dusk')) G.t = DAY_LEN - 3;
 })();
 requestAnimationFrame(frame);
