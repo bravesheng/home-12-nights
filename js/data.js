@@ -118,18 +118,26 @@ const BULBS = [null,
   { name: '天使燈泡',     r: 3.2,  color: [255, 236, 190], special: 'angel', desc: '燈泡裡住著小天使，晚上會飛出去打怪物（停電也會）；但燈光比較暗。' },
   { name: '粘液燈泡',     r: 0,    color: [120, 230, 90],  special: 'slime', noLight: true, desc: '不會發光，但會流出一灘黏液，走進黏液的怪物都會變得很慢。' },
   { name: '回血燈泡',     r: 3.8,  color: [140, 255, 175], special: 'heal', desc: '站在燈泡下面（2.5 格內）會慢慢回血。停電時燈熄了就不會回血。' },
+  // 第 15 級：第三世界才拿得到的傳說級燈泡
+  { name: '大白燈',       r: 4.0,  color: [255, 244, 228], special: 'baymax', desc: '柔和的暖白光。燈下站著一個白色的人形「大白」，3 格內會回體溫；走到它面前它會抱住你，體溫回得更快、被打只扣一半的血。' },
 ];
 const MAX_TIER = BULBS.length - 1;
-const FIRE_TIER = 10, STAR_TIER = 11, ANGEL_TIER = 12, SLIME_TIER = 13, HEAL_TIER = 14;
+const FIRE_TIER = 10, STAR_TIER = 11, ANGEL_TIER = 12, SLIME_TIER = 13, HEAL_TIER = 14, BAYMAX_TIER = 15;
 const NORMAL_MAX = STAR_TIER;                 // 一般燈泡的最高級（合成、升級到這裡為止）
 const isSpecialBulb = t => !!(BULBS[t] && BULBS[t].special);
-const BULB_PRICE = [0, 1, 2, 3, 4, 6, 8, 10, 13, 16, 20, 26, 22, 18, 24];
+const BULB_PRICE = [0, 1, 2, 3, 4, 6, 8, 10, 13, 16, 20, 26, 22, 18, 24, 40];
 
 // 第二世界裡，藍鑽、紅鑽、紫鑽燈泡變成花園版（等級、亮度、燈光顏色都一樣）
 const BULBS_W2 = {
   6: { name: '花燈泡', desc: '一朵發著藍光的繡球花，會飄下藍色花瓣。' },
   7: { name: '樹燈泡', desc: '燈泡裡長著一棵紅色的楓樹，會飄下紅葉。' },
   8: { name: '水燈泡', desc: '裝滿發著紫光的水，會滴下紫色的水滴。' },
+};
+// 第三世界裡變成鍍金年代的列車燈具（一樣只換名字和外觀）
+const BULBS_W3 = {
+  6: { name: '黃銅燈泡', desc: '黃銅燈罩裡的藍色燈芯，黃銅已經發黑長出銅綠。' },
+  7: { name: '鍍金燈泡', desc: '鍍金的燈座、紅寶石色的玻璃，金漆有些剝落了。' },
+  8: { name: '水晶吊燈燈泡', desc: '掛著一串紫水晶墜飾，列車開的時候會叮叮作響。' },
 };
 
 // 燈泡稀有度：1～5 級稀有、沒有技能的 6 級以上史詩、有技能的傳奇（火焰、天使、粘液、回血）
@@ -167,6 +175,11 @@ const ITEMS = {
   cocoa:    { name: '熱可可', kind: 'food', icon: '☕', hunger: 10, san: 30, desc: '理智 +30、飽食 +10' },
   chocolate: { name: '巧克力', kind: 'food', icon: '🍫', hunger: 10, san: 20, desc: '理智 +20、飽食 +10' },
   milk:     { name: '熱牛奶', kind: 'food', icon: '🥛', hunger: 20, san: 15, desc: '理智 +15、飽食 +20' },
+  // 第三世界的燃料（丟進機車室的火爐讓列車一直開）：木柴 LV1、木炭 LV2；椅墊和舊報紙是沒燃料時的救急辦法
+  wood:      { name: '木柴',     kind: 'fuel', icon: '🪵', burn: 25, lv: 1, desc: '燃料 LV1：丟進火爐燒 25 秒。對著火爐按 E 丟進去。' },
+  charcoal:  { name: '木炭',     kind: 'fuel', icon: '🪨', burn: 55, lv: 2, desc: '燃料 LV2：丟進火爐燒 55 秒，比木柴耐燒。' },
+  cushion:   { name: '絨布椅墊', kind: 'fuel', icon: '🧶', burn: 8,  lv: 0, desc: '燃料 LV0：救急用，只能燒 8 秒。' },
+  newspaper: { name: '舊報紙',   kind: 'fuel', icon: '📰', burn: 8,  lv: 0, desc: '燃料 LV0：救急用，只能燒 8 秒。' },
   // 武器
   pan:        { name: '平底鍋', kind: 'weapon', icon: '🍳', desc: '敲前面的怪物，扣血又會把牠敲暈。' },
   slingshot:  { name: '彈弓',   kind: 'weapon', icon: '🎯', desc: '發射彈珠打遠處的怪物（需要彈珠）。' },
@@ -188,9 +201,10 @@ ITEMS.key = { name: '鑰匙', kind: 'key', icon: '🗝️', desc: '走到上鎖�
 ITEMS.coin = { name: '硬幣', kind: 'coin', icon: '🪙', desc: '可以跟神秘商人買東西，或投扭蛋機。' };
 const ITEM_ORDER = [
   'pan', 'slingshot', 'watergun', 'firecracker', 'salt', 'marble', 'holywater', 'strongflash', 'megaflash', 'amulet',
-  'bulb' + HEAL_TIER, 'bulb' + SLIME_TIER, 'bulb' + ANGEL_TIER,
+  'bulb' + BAYMAX_TIER, 'bulb' + HEAL_TIER, 'bulb' + SLIME_TIER, 'bulb' + ANGEL_TIER,
   ...Array.from({ length: NORMAL_MAX }, (_, i) => 'bulb' + (NORMAL_MAX - i)),
   'key', 'lamp_chand', 'lamp_floor', 'lamp_desk', 'battery', 'candle',
+  'charcoal', 'wood', 'cushion', 'newspaper',
   'cocoa', 'chocolate', 'milk', 'canned', 'noodles', 'snack', 'medkit', 'bandage',
 ];
 
@@ -202,6 +216,13 @@ const LOOT = {
   tool:     { bulb: 4, battery: 3, lamp_floor: 1.2, candle: 1, lamp_desk: 1, coin: 2, key: 0.35, firecracker: 1.5, marble: 1, strongflash: 0.25, watergun: 0.3 },
   antique:  { bulb: 5, lamp_chand: 1, lamp_floor: 1.5, candle: 1, medkit: 0.8, coin: 3, key: 0.6, amulet: 0.5, holywater: 1, strongflash: 0.3 },
   clothes:  { battery: 2, candle: 2, snack: 1.5, bulb: 2, bandage: 1, cocoa: 1.5, chocolate: 1.5, milk: 1, coin: 3, marble: 1.5, slingshot: 0.5, amulet: 0.2 },
+  // 第三世界：車站的物資、燃料堆、煤袋、椅墊堆、吧台、行李
+  station:  { bulb: 3, battery: 2, snack: 2, wood: 3, candle: 1.5, coin: 3, newspaper: 1.5, marble: 1, firecracker: 0.8, key: 0.25, chocolate: 1.5, cocoa: 1.5, milk: 1 },
+  fuel:     { wood: 10, newspaper: 1.5, coin: 1 },
+  coal:     { charcoal: 8, wood: 2, coin: 1 },
+  cushions: { cushion: 6, newspaper: 5, coin: 1 },
+  bar:      { bulb: 3, cocoa: 2, milk: 2, chocolate: 2, coin: 3, candle: 1, key: 0.3, holywater: 1, lamp_desk: 1 },
+  luggage:  { bulb: 3, battery: 2, candle: 1.5, bandage: 1, cocoa: 1.5, chocolate: 1.5, coin: 3, marble: 1.5, newspaper: 1, amulet: 0.2, slingshot: 0.4 },
 };
 
 // 難度：開始新遊戲前選
