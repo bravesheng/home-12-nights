@@ -48,4 +48,5 @@ node tools/playtest.mjs
 - `js/version.js`：發布時間，由 `stamp.sh` 寫入，不要手改。
 - `sw.js`：離線快取，只在 https 啟用，本機開發時不會快取。
 - `docs/world2-plan.md`：第二世界的設計計劃書。
+- `docs/world3-plan.md`：第三世界（末班列車）的設計計劃書，還沒開始做。
 - `tools/playtest.mjs`：自動試玩測試。
