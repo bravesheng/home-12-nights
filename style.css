@@ -295,3 +295,61 @@ body:not(.w2) #tbtns .tb.jump { visibility: hidden; }
 .tabs { display: flex; gap: 8px; margin: -4px 0 12px; }
 .tabs button { padding: 7px 16px; font-size: 14px; background: rgba(255, 255, 255, .08); color: #ddd; font-weight: 600; }
 .tabs button.on { background: linear-gradient(180deg, #ffd166, #f4a93b); color: #2a1a00; }
+
+/* ===== 手機（短邊 520px 以下，game.js 會給 body 加上 .phone）=====
+   手機橫放時高度只有 400px 左右，平板的版面會把畫面幾乎全擋住：
+   時鐘、狀態列、物品說明、物品列、提示、燈泡卡、搖桿和按鈕全部縮小，小地圖和暫停鍵移到右上角 */
+body.phone #clock { top: 8px; left: 8px; width: 146px; padding: 6px 8px; border-radius: 9px; }
+body.phone #dayLabel { font-size: 14px; letter-spacing: 0; }
+body.phone #phaseBar { height: 4px; margin: 4px 0 3px; }
+body.phone #phaseText { font-size: 11px; white-space: nowrap; }
+body.phone #alert { font-size: 11px; margin-top: 3px; line-height: 1.35; }
+body.phone #bars { top: 8px; left: 160px; padding: 5px 8px; gap: 2px; border-radius: 9px; }
+body.phone .bar { gap: 5px; }
+body.phone .bar .ico { width: 14px; font-size: 10px; }
+body.phone #bars .track { width: 72px; height: 6px; }
+body.phone .coins { font-size: 12px; margin-top: 2px; }
+body.phone .ftier { font-size: 9px; line-height: 12px; padding: 0 4px; }
+body.phone #minimap { top: 8px; right: 56px; left: auto; padding: 4px; border-radius: 7px; }
+body.phone #toasts { gap: 4px; }
+body.phone .toast { font-size: 12px; padding: 4px 10px; border-radius: 6px; max-width: 100%; }
+body.phone #bigText { font-size: 32px; letter-spacing: 3px; }
+body.phone #bigText small { font-size: 13px; margin-top: 4px; }
+body.phone #prompt { top: calc(50% + 24px); }
+body.phone #prompt .pm { font-size: 15px; padding: 5px 12px; }
+body.phone #prompt .pm.grab { font-size: 15px; }
+body.phone #prompt .ps { font-size: 12px; }
+body.phone #prompt .pbar { width: 120px; }
+body.phone .bcard { left: -100px; width: 200px; gap: 8px; padding: 8px 10px; border-radius: 12px; border-width: 2px; }
+body.phone .bcard .bc-ic, body.phone .bcard .bc-ic svg { width: 46px; height: 46px; }
+body.phone .bcard .bc-tx .rar { font-size: 10px; }
+body.phone .bcard .bc-tx b { font-size: 15px; }
+body.phone .bcard .bc-tx small { font-size: 10px; }
+body.phone #bottom { bottom: 8px; gap: 5px; }
+body.phone #hotbar { gap: 4px; padding: 4px; border-radius: 9px; }
+body.phone .slot { width: 46px; height: 46px; font-size: 24px; border-width: 2px; border-radius: 8px; }
+body.phone .slot svg { width: 36px; height: 36px; }
+body.phone .slot .cnt { font-size: 11px; right: 3px; bottom: 1px; }
+body.phone .slot .tier { font-size: 10px; right: 3px; top: 1px; }
+body.phone .slot.r-rare::after, body.phone .slot.r-epic::after, body.phone .slot.r-legend::after { left: 6px; right: 6px; bottom: 2px; height: 2px; }
+body.phone #itemInfo { font-size: 11px; padding: 3px 8px; border-radius: 6px; line-height: 1.4; max-width: 100%; }
+body.phone #itemInfo .hint { margin-left: 4px; }
+/* 手機的觸控操作：搖桿和按鈕小一點，物品列擠在中間 */
+body.touch.phone #stick { left: 16px; bottom: 14px; width: 120px; height: 120px; }
+body.touch.phone #knob { width: 54px; height: 54px; margin: -27px 0 0 -27px; }
+body.touch.phone #tbtns { right: 12px; bottom: 12px; grid-template-columns: 62px 80px; grid-template-rows: 62px 80px; gap: 8px; }
+body.touch.phone .tb { width: 62px; height: 62px; font-size: 20px; }
+body.touch.phone .tb small { font-size: 10px; margin-top: 1px; }
+body.touch.phone .tb.big { width: 80px; height: 80px; font-size: 26px; border-width: 2px; }
+body.touch.phone #tpause { top: 8px; right: 8px; width: 40px; height: 40px; font-size: 16px; }
+body.touch.phone #bottom { left: calc(50% - 13px); max-width: calc(100vw - 316px); min-width: 200px; bottom: 8px; }
+/* 橫放：提示放在最上面、左上角面板和右上角小地圖的中間，不會蓋住畫面中央（game.js 的 toast() 這時不會改 top） */
+@media (orientation: landscape) {
+  body.phone #toasts { top: 8px; left: 306px; right: 180px; }
+}
+/* 直放：小地圖放在時鐘下面，提示排在面板下面、佔滿寬度，物品列放在搖桿和按鈕上面 */
+@media (orientation: portrait) {
+  body.phone #minimap { top: 124px; left: 8px; right: auto; }
+  body.phone #toasts { left: 4%; right: 4%; }
+  body.touch.phone #bottom { left: 50%; max-width: calc(100vw - 16px); bottom: 170px; }
+}

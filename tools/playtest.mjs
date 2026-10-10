@@ -113,7 +113,8 @@ async function startFromMenu(page, world, diff, tap = false) {
 }
 // 低 FPS 時遊戲時間走很慢（每幀最多 0.05 秒），直接把時間撥到天黑前一點點
 const skipToDusk = page => page.evaluate(() => { G.t = DAY_LEN - 0.3; });
-// 版面重疊：提示不能壓到大字、燈泡卡和左上角、右上角的面板，大字不能壓到下面的物品說明和物品列
+// 版面重疊：提示不能壓到大字、燈泡卡和左上角、右上角的面板，大字不能壓到下面的物品說明和物品列，
+// 固定的東西（面板、小地圖、物品列、搖桿、按鈕、暫停鍵）彼此也不能疊在一起
 const overlaps = page => page.evaluate(() => {
   const $ = id => document.getElementById(id);
   const hit = (a, b) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
@@ -127,10 +128,21 @@ const overlaps = page => page.evaluate(() => {
   const big = $('bigText').classList.contains('show') ? [area('大字', $('bigText'))] : [];
   const panels = [['狀態列', 'bars'], ['時鐘', 'clock'], ['小地圖', 'minimap']].filter(([, id]) => shown(id)).map(([n, id]) => area(n, $(id)));
   const bottom = [['物品說明', 'itemInfo'], ['物品列', 'hotbar']].filter(([, id]) => shown(id)).map(([n, id]) => area(n, $(id)));
+  const touch = [['搖桿', 'stick'], ['觸控按鈕', 'tbtns'], ['暫停鍵', 'tpause']].filter(([, id]) => shown(id)).map(([n, id]) => area(n, $(id)));
   const out = [];
   for (const t of toasts) for (const o of [...panels, ...big, ...cards]) if (hit(t, o)) out.push(`${t.name}壓到${o.name}`);
   for (const g of big) for (const o of bottom) if (hit(g, o)) out.push(`大字壓到${o.name}`);
+  for (const c of cards) for (const g of big) if (hit(c, g)) out.push('燈泡卡壓到大字');
+  const fixed = [...panels, ...bottom, ...touch];
+  for (let i = 0; i < fixed.length; i++) for (let j = i + 1; j < fixed.length; j++) if (hit(fixed[i], fixed[j])) out.push(`${fixed[i].name}壓到${fixed[j].name}`);
   return out;
+});
+// 手機：上面的面板和下面的物品列不能佔掉太多畫面，中間要看得到 3D 畫面
+const hudCover = page => page.evaluate(() => {
+  const $ = id => document.getElementById(id), H = innerHeight;
+  const top = Math.max(...['clock', 'bars', 'minimap'].map(id => $(id).getBoundingClientRect().bottom));
+  const bottom = $('bottom').getBoundingClientRect().top;
+  return { phone: document.body.classList.contains('phone'), top: Math.round(top / H * 100), bottom: Math.round(bottom / H * 100) };
 });
 
 // ---------- 情境 ----------
@@ -248,6 +260,37 @@ await scenario('layout', '小平板版面（962×601：天黑、天亮、撿到�
     await shot(label);
     await sleep(4500);
   }
+});
+
+await scenario('phone', '手機版面（橫放 852×393、直放 393×852：介面縮小，不擋住畫面中央，也不互相重疊）', { viewport: { width: 852, height: 393 }, isMobile: true, hasTouch: true }, async ({ page, shot, check }) => {
+  await page.goto(BASE + '?world=1&diff=easy', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play');
+  await sleep(3500); // 等「第 1 天」大字消失
+  let c = await hudCover(page);
+  check(c.phone, '852×393 要用手機版面（body.phone）');
+  check(c.top <= 40 && c.bottom >= 65, `手機橫放時面板佔太多畫面（上面到 ${c.top}%，下面從 ${c.bottom}% 開始）`);
+  for (const [label, name, fn] of [
+    ['1-night', '天黑', () => startNight()],
+    ['2-day', '天亮', () => startDay(2)],
+    ['3-bulb', '撿到燈泡', () => { toast('撿到了' + itemName('bulb1'), 'item'); showBulbCard(1); }],
+  ]) {
+    await page.evaluate(fn);
+    await sleep(500);
+    const lay = await overlaps(page);
+    check(lay.length === 0, `手機橫放${name}時版面重疊：${lay.join('、')}`);
+    await shot(label);
+    await sleep(4500);
+  }
+  // 轉成直放：物品列要移到搖桿和按鈕上面，小地圖到時鐘下面
+  await page.setViewportSize({ width: 393, height: 852 });
+  await sleep(500);
+  c = await hudCover(page);
+  check(c.phone, '393×852 也要用手機版面');
+  await page.evaluate(() => { toast('撿到了' + itemName('bulb1'), 'item'); showBulbCard(1); startNight(); });
+  await sleep(500);
+  const lay = await overlaps(page);
+  check(lay.length === 0, `手機直放天黑時版面重疊：${lay.join('、')}`);
+  await shot('4-portrait');
 });
 
 await scenario('cut', '破關開門動畫（?cut=1）', {}, async ({ page, shot, check }) => {

@@ -278,11 +278,11 @@ function nextCard() {
   const t = cardQ.shift();
   if (t === undefined) return;
   const r = bulbRarity(t), el = document.createElement('div');
-  placeBelowToasts($('cards'));
   el.className = 'bcard r-' + r;
   el.innerHTML = `<div class="bc-ic">${bulbSVG(t)}</div><div class="bc-tx"><span class="rar r-${r}">${RARITY[r].name}燈泡</span>` +
     `<b>${bulbName(t)}</b><small>${BULBS[t].special ? '特殊燈泡' : `第 ${t} 級`}</small></div>`;
   $('cards').appendChild(el);
+  placeBelowToasts($('cards'));
   Sound.play(r === 'legend' ? 'cardLegend' : r === 'epic' ? 'cardEpic' : 'card');
   setTimeout(() => el.remove(), 2100);
   cardTimer = setTimeout(nextCard, 1250);
@@ -3106,6 +3106,12 @@ function endCutscene() {
 // ====================================================================
 const cv = $('game');
 const isTouch = () => document.body.classList.contains('touch');
+// 手機：短邊 520px 以下（手機橫放時高度不夠），介面用小一號的版面（style.css 的 body.phone）；轉向、改視窗大小時會重新判斷
+const phoneMQ = window.matchMedia ? matchMedia('(max-width: 520px), (max-height: 520px)') : null;
+const isPhone = () => document.body.classList.contains('phone');
+function updatePhone() { document.body.classList.toggle('phone', !!phoneMQ && phoneMQ.matches); }
+updatePhone();
+if (phoneMQ) (phoneMQ.addEventListener ? phoneMQ.addEventListener('change', updatePhone) : phoneMQ.addListener(updatePhone));
 
 function darkLevel() {
   if (G.phase === 'day') {
@@ -3135,7 +3141,7 @@ function demoState() {
 // ---------- 小地圖 ----------
 const mm = $('minimap'), mmc = mm.getContext('2d');
 function drawMinimap() {
-  const s = 3.2, dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const s = isPhone() ? 2.2 : 3.2, dpr = Math.min(window.devicePixelRatio || 1, 2); // 手機的小地圖小一點
   const w = Math.round(MAP_W * s * dpr), h = Math.round(MAP_H * s * dpr);
   if (mm.width !== w) { mm.width = w; mm.height = h; mm.style.width = MAP_W * s + 'px'; mm.style.height = MAP_H * s + 'px'; }
   const c = mmc;
@@ -3354,23 +3360,31 @@ function toast(msg, cls = '') {
   if (msg === lastToast && now - lastToastT < 1500) return;
   lastToast = msg; lastToastT = now;
   const box = $('toasts'), el = document.createElement('div');
-  // 從左上角面板（時鐘、狀態列）下面開始排，才不會蓋到面板；出現「👂」那一列時狀態列會變高
-  const panels = Math.max($('clock').getBoundingClientRect().bottom, $('bars').getBoundingClientRect().bottom);
-  if (panels > 0) box.style.top = panels + 8 + 'px';
+  // 從左上角面板（時鐘、狀態列、小地圖）下面開始排，才不會蓋到面板；出現「👂」那一列時狀態列會變高
+  // 手機橫放時提示固定在最上面中間（style.css），不用算
+  if (isPhone() && innerWidth > innerHeight) box.style.top = '';
+  else {
+    const panels = Math.max(...['clock', 'bars', 'minimap'].map(id => $(id).getBoundingClientRect().bottom));
+    if (panels > 0) box.style.top = panels + 8 + 'px';
+  }
   el.className = 'toast ' + cls; el.textContent = msg;
   box.appendChild(el);
-  while (box.children.length > 4) box.firstChild.remove();
+  while (box.children.length > (isPhone() ? 3 : 4)) box.firstChild.remove(); // 手機最多留 3 則，不然會疊到下面
   if ($('bigText').classList.contains('show')) placeBelowToasts($('bigText'));
   if ($('cards').children.length) placeBelowToasts($('cards'));
   setTimeout(() => { el.style.opacity = 0; setTimeout(() => el.remove(), 500); }, 4200);
 }
 // 畫面中間跳出來的東西（大字、燈泡卡）要在提示下面：平常在 style.css 的位置，
-// 提示多、換行或螢幕比較矮的時候就往下移，才不會被提示蓋住
+// 提示多、換行或螢幕比較矮的時候就往下移，才不會被提示蓋住；燈泡卡還要避開大字（兩個都被往下推時會疊在一起）
 function placeBelowToasts(el) {
   el.style.top = '';
   if (!$('hud').clientHeight) return; // 介面還沒顯示：就用 style.css 的位置
   const min = $('toasts').getBoundingClientRect().bottom + 14;
   if (el.getBoundingClientRect().top < min) el.style.top = min + 'px';
+  const big = $('bigText');
+  if (el === big || !big.classList.contains('show') || !el.firstElementChild) return;
+  const b = big.getBoundingClientRect(), top = el.getBoundingClientRect().top, h = el.firstElementChild.offsetHeight;
+  if (top < b.bottom && top + h > b.top) el.style.top = b.bottom + 8 + 'px';
 }
 let bigTimer = 0;
 function showBig(title, sub) {
@@ -3378,6 +3392,7 @@ function showBig(title, sub) {
   el.innerHTML = `${title}<small>${sub || ''}</small>`;
   placeBelowToasts(el);
   el.classList.add('show');
+  if ($('cards').children.length) placeBelowToasts($('cards')); // 正在飛的燈泡卡讓開
   clearTimeout(bigTimer);
   bigTimer = setTimeout(() => el.classList.remove('show'), 2600);
 }
@@ -3487,7 +3502,7 @@ cv.addEventListener('contextmenu', e => e.preventDefault());
 // ---------- 觸控：左半邊搖桿移動、右半邊滑動轉頭 ----------
 const joy = { x: 0, y: 0, id: null, ox: 0, oy: 0 };
 let lookId = null, lookX = 0, lookY = 0;
-const JOY_R = 85;
+const joyR = () => isPhone() ? 60 : 85; // 搖桿半徑（手機的搖桿比較小）
 function enableTouch() {
   if (isTouch()) return;
   document.body.classList.add('touch');
@@ -3498,7 +3513,8 @@ function setStick(x, y) {
   const st = $('stick');
   if (x === null) { st.classList.remove('active'); st.style.left = st.style.top = st.style.bottom = ''; $('knob').style.transform = ''; return; }
   st.classList.add('active');
-  st.style.left = (x - JOY_R) + 'px'; st.style.top = (y - JOY_R) + 'px'; st.style.bottom = 'auto';
+  const r = joyR();
+  st.style.left = (x - r) + 'px'; st.style.top = (y - r) + 'px'; st.style.bottom = 'auto';
 }
 cv.addEventListener('pointerdown', e => {
   if (e.pointerType === 'mouse') return;
@@ -3515,9 +3531,9 @@ cv.addEventListener('pointerdown', e => {
 cv.addEventListener('pointermove', e => {
   if (e.pointerId === joy.id) {
     let dx = e.clientX - joy.ox, dy = e.clientY - joy.oy;
-    const l = Math.hypot(dx, dy);
-    if (l > JOY_R) { dx *= JOY_R / l; dy *= JOY_R / l; }
-    joy.x = dx / JOY_R; joy.y = dy / JOY_R;
+    const l = Math.hypot(dx, dy), r = joyR();
+    if (l > r) { dx *= r / l; dy *= r / l; }
+    joy.x = dx / r; joy.y = dy / r;
     $('knob').style.transform = `translate(${dx}px, ${dy}px)`;
   } else if (e.pointerId === lookId && mode === 'play') {
     look((e.clientX - lookX) * LOOK_TOUCH_X, (e.clientY - lookY) * LOOK_TOUCH_Y);
