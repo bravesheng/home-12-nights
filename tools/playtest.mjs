@@ -323,6 +323,33 @@ await scenario('phone', '手機版面（橫放 852×393、直放 393×852：介�
   await shot('4-portrait');
 });
 
+await scenario('book', '怪物圖鑑（卡片上是會動的 3D 怪物：第一世界上下、第二世界上下各拍一張）', {}, async ({ page, shot, check }) => {
+  await page.goto(BASE, { waitUntil: 'load' });
+  await page.waitForSelector('#btnBook');
+  await page.click('#btnBook');
+  await sleep(2500);
+  const stat = () => page.evaluate(() => ({ ok: Renderer.book.ok(), stages: document.querySelectorAll('#bookList .stage').length, cards: document.querySelectorAll('#bookList .card').length, rendered: Renderer.book.stats.rendered, built: Renderer.book.stats.built }));
+  let s = await stat();
+  check(s.ok && s.stages === s.cards && s.cards > 0, `圖鑑的每張卡片都要用 3D 舞台（${s.stages}/${s.cards}）`);
+  check(s.rendered > 0 && s.built > 0, `圖鑑要畫出 3D 怪物（畫了 ${s.rendered} 次、建了 ${s.built} 隻）`);
+  await shot('1-world1');
+  await page.evaluate(() => { document.querySelector('#book .panel').scrollTop = 99999; });
+  await sleep(1500);
+  await shot('1b-world1-scrolled');
+  await page.click('#bookTabs button[data-w="2"]');
+  await sleep(2500);
+  const before = s.built;
+  s = await stat();
+  check(s.built > before, `切到第二世界要建出新的怪物（建了 ${s.built} 隻）`);
+  await shot('2-world2');
+  // 往下捲：捲到面板外面的不畫，下面的要畫出來
+  await page.evaluate(() => { document.querySelector('#book .panel').scrollTop = 99999; });
+  await sleep(1500);
+  await shot('3-scrolled');
+  await page.click('#btnBookBack');
+  check(await page.evaluate(() => !document.getElementById('title').classList.contains('hidden')), '返回要回到主選單');
+});
+
 await scenario('cut', '破關開門動畫（?cut=1）', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?cut=1', { waitUntil: 'load' });
   await sleep(2500);
