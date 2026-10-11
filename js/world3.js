@@ -1100,7 +1100,7 @@ function endVictory3() {
   CUT = null; $('cutscene').classList.add('hidden'); $('cutFade').style.opacity = '0'; cutCaption('');
   mode = 'over';
   Sound.play('win');
-  try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }
+  if (!TEST_MODE) try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }   // 測試版不碰正式版的存檔
   $('goTitle').textContent = '🚂 列車到站了';
   $('goText').innerHTML = `天亮了，列車慢慢停進終點站……月台上空無一人，只有你一個。<br>你在第三世界撐過了 ${LAST_NIGHT} 夜！<br>你搜索了 ${G.stats.searched} 次，驅散了 ${G.stats.dissolved} 個怪物。<br>最好的燈泡：${bulbName(G.stats.bestTier)}`;
   $('btnRetry').classList.add('hidden');
@@ -1114,12 +1114,12 @@ function endVictory3() {
 // ====================================================================
 let seenCache = null;
 function seenSet() {
-  if (!seenCache) seenCache = new Set(Object.keys(readProg().seen || {}));
+  if (!seenCache) seenCache = new Set(TEST_MODE ? BESTIARY.map(bookKey) : Object.keys(readProg().seen || {}));   // 測試版：全部都見過
   return seenCache;
 }
 function markSeen(key) {
   const s = seenSet();
-  if (s.has(key)) return;
+  if (s.has(key) || TEST_MODE) return;
   s.add(key);
   const p = readProg();
   p.seen = p.seen || {}; p.seen[key] = 1;
@@ -1144,6 +1144,7 @@ function updateSeen(dt) {
 // 舊玩家第一次用新版打開：照存檔的進度把已經登場過的怪物標成見過（例如第一世界第 5 天：第 1～4 夜登場的都算），
 // 打贏過第一世界的人第一世界的怪物都算、打贏過第二世界的人第二世界的也算，才不會突然全部變問號
 function initSeen() {
+  if (TEST_MODE) return;
   const prog = readProg();
   if (prog.seenInit) return;
   prog.seen = prog.seen || {};

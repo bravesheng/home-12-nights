@@ -10,7 +10,7 @@
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <title>在家生存 12 夜</title>
-  <link rel="stylesheet" href="style.css?v=17">
+  <link rel="stylesheet" href="style.css?v=18">
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -93,6 +93,7 @@
       </div>
       <p id="w2Badge" class="w2badge hidden">🌸 第二世界：夢核花園 已解鎖</p>
       <p id="w3Badge" class="w2badge w3badge hidden">🚂 第三世界：末班列車 已解鎖</p>
+      <p id="testBadge" class="w2badge testbadge hidden">🧪 測試版：所有世界和怪物都開著，新遊戲可以從任一夜開始</p>
       <p id="saveInfo" class="small"></p>
       <p id="buildInfo" class="small build"></p>
     </div>
@@ -119,6 +120,10 @@
         <button class="diffbtn easy" data-d="easy"><b>😊 簡單</b><small>怪物比較少、比較弱，被抓到只扣一點血；食物和武器很多。第一次玩選這個！</small></button>
         <button class="diffbtn normal" data-d="normal"><b>😨 普通</b><small>怪物和物資都剛剛好，有一點挑戰。</small></button>
         <button class="diffbtn hard" data-d="hard"><b>😱 困難</b><small>怪物又多又強，東西很難找。給生存高手！</small></button>
+      </div>
+      <div id="testOpts" class="testopts hidden">
+        <label>🧪 測試：從第 <select id="testNight"></select> 夜開始</label>
+        <label><input type="checkbox" id="testKit"> 帶齊武器和燈泡</label>
       </div>
       <div class="btns"><button id="btnDiffBack" class="ghost">返回</button></div>
     </div>
@@ -251,12 +256,12 @@
     </div>
   </div>
 
-  <script src="js/version.js?v=17"></script>
-  <script src="js/data.js?v=17"></script>
-  <script src="js/audio.js?v=17"></script>
-  <script src="js/world2.js?v=17"></script>
-  <script src="js/world3.js?v=17"></script>
-  <script src="js/game.js?v=17"></script>
-  <script type="module" src="js/render3d.js?v=17"></script>
+  <script src="js/version.js?v=18"></script>
+  <script src="js/data.js?v=18"></script>
+  <script src="js/audio.js?v=18"></script>
+  <script src="js/world2.js?v=18"></script>
+  <script src="js/world3.js?v=18"></script>
+  <script src="js/game.js?v=18"></script>
+  <script type="module" src="js/render3d.js?v=18"></script>
 </body>
 </html>

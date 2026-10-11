@@ -9,6 +9,8 @@ N=$(( $(grep -o "home12-v[0-9]*" sw.js | grep -o "[0-9]*$") + 1 ))
 sed -i.bak "s/home12-v[0-9]*/home12-v$N/" sw.js
 sed -i.bak "s/?v=[0-9]*/?v=$N/g" index.html
 rm -f sw.js.bak index.html.bak
+# 測試版的頁面是從 index.html 產生的，版本號改了要重新產生
+node tools/make-test.mjs >/dev/null
 cat > js/version.js <<JS
 // 發布時間：發布時由 stamp.sh 自動寫入，主選單會顯示，用來確認平板上跑的是哪一版
 const BUILD_TIME = '$STAMP';
