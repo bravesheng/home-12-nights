@@ -15,6 +15,9 @@ const INTRO2 = { sunflower: 1, shroom: 2, grass: 3, snail: 4, girl: 5 };
 // 第三世界的新怪物：克蘿諾斯・蕈裂衣、熔岩暴君、墮落戰神、檮杌・九瞳（最後一夜也一定來）
 const INTRO3 = { kronos: 1, tyrant: 4, warlord: 7, taowu: 10 };
 const PROG_KEY = 'home99_progress_v1';   // 已解鎖的世界（跟存檔分開，破關刪存檔時不會被刪掉）
+// 測試版（test.html 會先設 window.TEST_MODE = true）：所有世界和圖鑑的怪物都開著、新遊戲可以從任一夜開始；
+// 不讀也不寫存檔和解鎖紀錄，所以不會影響正式版的進度
+const TEST_MODE = !!window.TEST_MODE;
 
 const $ = id => document.getElementById(id);
 // 舊版 iPad Safari 沒有 roundRect
@@ -82,10 +85,10 @@ function applyWorld(w) {
   document.body.classList.toggle('w3', w === 3);
   if (window.Renderer && Renderer.setWorld) Renderer.setWorld(w);
 }
-function readProg() { try { return JSON.parse(localStorage.getItem(PROG_KEY)) || {}; } catch (e) { return {}; } }
-function writeProg(p) { try { localStorage.setItem(PROG_KEY, JSON.stringify(p)); } catch (e) { /* 無法存檔時忽略 */ } }
-const w2Unlocked = () => !!readProg().w2;
-const w3Unlocked = () => !!readProg().w3;
+function readProg() { if (TEST_MODE) return { w2: true, w3: true, seenInit: true }; try { return JSON.parse(localStorage.getItem(PROG_KEY)) || {}; } catch (e) { return {}; } }
+function writeProg(p) { if (TEST_MODE) return; try { localStorage.setItem(PROG_KEY, JSON.stringify(p)); } catch (e) { /* 無法存檔時忽略 */ } }
+const w2Unlocked = () => TEST_MODE || !!readProg().w2;
+const w3Unlocked = () => TEST_MODE || !!readProg().w3;
 function unlockW2() { const p = readProg(); p.w2 = true; writeProg(p); }
 function unlockW3() { const p = readProg(); p.w2 = true; p.w3 = true; writeProg(p); }
 
@@ -230,6 +233,7 @@ function startPlay() {
 // 存檔
 // ====================================================================
 function saveGame() {
+  if (TEST_MODE) return;   // 測試版不存檔
   const s = {
     v: 1, day: G.day, diff: G.diff, world: G.world || 1,
     p: { x: G.p.x, y: G.p.y, hp: G.p.hp, san: G.p.san, hunger: G.p.hunger, bat: G.p.bat, flashLv: G.p.flashLv },
@@ -247,6 +251,7 @@ function saveGame() {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch (e) { /* 無法存檔時忽略 */ }
 }
 function readSave() {
+  if (TEST_MODE) return null;   // 測試版不碰正式版的存檔
   try { return JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { return null; }
 }
 function loadGame() {
@@ -3744,7 +3749,7 @@ addEventListener('resize', resize);
 // ---------- 選單按鈕 ----------
 // 顯示發布時間，方便確認平板上跑的是哪一版
 function showBuild() {
-  const t = '版本：' + (typeof BUILD_TIME === 'string' ? BUILD_TIME : '未知');
+  const t = (TEST_MODE ? '🧪 測試版・' : '') + '版本：' + (typeof BUILD_TIME === 'string' ? BUILD_TIME : '未知');
   $('buildInfo').textContent = t;
   $('buildInfoPause').textContent = t;
 }
@@ -3753,9 +3758,11 @@ function refreshTitle() {
   showBuild();
   const s = readSave();
   $('btnContinue').disabled = !s;
-  $('saveInfo').textContent = s ? `存檔：${s.world === 3 ? '第三世界・' : s.world === 2 ? '第二世界・' : ''}第 ${Math.min(s.day, LAST_NIGHT)} 天早上（${diffName(s.diff)}）` : '還沒有存檔';
-  $('w2Badge').classList.toggle('hidden', !w2Unlocked() || w3Unlocked());
-  $('w3Badge').classList.toggle('hidden', !w3Unlocked());
+  $('saveInfo').textContent = TEST_MODE ? '測試版不會存檔，也不會影響正式版的進度' : s ? `存檔：${s.world === 3 ? '第三世界・' : s.world === 2 ? '第二世界・' : ''}第 ${Math.min(s.day, LAST_NIGHT)} 天早上（${diffName(s.diff)}）` : '還沒有存檔';
+  $('w2Badge').classList.toggle('hidden', TEST_MODE || !w2Unlocked() || w3Unlocked());
+  $('w3Badge').classList.toggle('hidden', TEST_MODE || !w3Unlocked());
+  $('testBadge').classList.toggle('hidden', !TEST_MODE);
+  $('btnTransfer').classList.toggle('hidden', TEST_MODE);   // 測試版沒有存檔可以轉移
 }
 function toTitle() {
   mode = 'title';
@@ -3790,7 +3797,17 @@ for (const b of document.querySelectorAll('#worldPick .worldbtn')) b.onclick = (
   $('diffPick').classList.remove('hidden');
 };
 $('btnWorldBack').onclick = () => { $('worldPick').classList.add('hidden'); $('title').classList.remove('hidden'); };
-for (const b of document.querySelectorAll('#diffPick .diffbtn')) b.onclick = () => { Sound.init(); newGame(b.dataset.d, pickWorld); };
+for (const b of document.querySelectorAll('#diffPick .diffbtn')) b.onclick = () => {
+  Sound.init();
+  newGame(b.dataset.d, pickWorld);
+  if (TEST_MODE) testSetup(pickWorld, +$('testNight').value, $('testKit').checked);   // 測試版：從選的那一夜開始、帶齊裝備
+};
+// 測試版的選單：從第幾夜開始（1～12）
+if (TEST_MODE) {
+  const sel = $('testNight');
+  for (let n = 1; n <= LAST_NIGHT; n++) { const o = document.createElement('option'); o.value = n; o.textContent = n; sel.appendChild(o); }
+  $('testOpts').classList.remove('hidden');
+}
 $('btnDiffBack').onclick = () => { $('diffPick').classList.add('hidden'); $('worldPick').classList.remove('hidden'); };
 // 隱藏的解鎖方法：在主選單連點版本號 5 下（舊版破關時沒有留下紀錄）
 let buildTaps = 0, buildTapT = 0;
@@ -3940,6 +3957,22 @@ buildMap();
 initSeen();   // 舊玩家：照存檔的進度把已經登場過的怪物標成見過
 G = demoState();
 refreshTitle();
+// 測試用：開了新遊戲之後直接跳到第 night 夜（第 2 夜以後從天黑前 3 秒開始）、kit 帶齊武器和燈泡。
+// 網址參數（?world=&night=&kit=）和測試版的選單都用這個；q 是網址參數（&cold、&fire=0、&dusk），選單來的沒有
+function testSetup(w, night, kit, q = new URLSearchParams('')) {
+  night = clamp(night || 1, 1, LAST_NIGHT);
+  if (night > 1) G.day = night;
+  if (kit) {
+    for (const id of ['pan', 'slingshot', 'watergun', 'amulet']) gainItem(id);
+    for (const [id, n] of [['marble', 20], ['holywater', 10], ['salt', 6], ['firecracker', 6], ['battery', 5], ['bandage', 3], ['medkit', 2], ['cocoa', 3]]) addItem(id, n);
+    for (let t = 1; t <= MAX_TIER; t++) addItem('bulb' + t, 1);
+    addItem('lamp_floor', 2);
+    if (w === 3) { addItem('charcoal', 6); addItem('wood', 4); addItem('key', 3); }
+    G.p.flashLv = 3; G.coins = 60;
+  }
+  if (w === 3) testStart3(q, night);   // &cold：強制寒寂之境；&fire=0：火爐一開始是空的
+  if (night > 1 || q.has('dusk')) G.t = DAY_LEN - 3;
+}
 // 測試用網址參數：?world=2&night=6（直接開某個世界的某一夜）、&kit=1（帶齊武器和燈泡）、?cut=1（直接播破關動畫）
 (function testStart() {
   const q = new URLSearchParams(location.search);
@@ -3949,18 +3982,7 @@ refreshTitle();
   if (w >= 2) unlockW2();
   if (w === 3) unlockW3();
   newGame(q.get('diff') || 'normal', w);
-  const night = clamp(+q.get('night') || 1, 1, LAST_NIGHT);
-  if (night > 1) G.day = night;
-  if (q.has('kit')) {
-    for (const id of ['pan', 'slingshot', 'watergun', 'amulet']) gainItem(id);
-    for (const [id, n] of [['marble', 20], ['holywater', 10], ['salt', 6], ['firecracker', 6], ['battery', 5], ['bandage', 3], ['medkit', 2], ['cocoa', 3]]) addItem(id, n);
-    for (let t = 1; t <= MAX_TIER; t++) addItem('bulb' + t, 1);
-    addItem('lamp_floor', 2);
-    if (w === 3) { addItem('charcoal', 6); addItem('wood', 4); addItem('key', 3); }
-    G.p.flashLv = 3; G.coins = 60;
-  }
-  if (cut) { G.day = LAST_NIGHT; victory(); return; }
-  if (w === 3) testStart3(q, night);   // &cold：強制寒寂之境；&fire=0：火爐一開始是空的
-  if (night > 1 || q.has('dusk')) G.t = DAY_LEN - 3;
+  testSetup(w, +q.get('night') || 1, q.has('kit'), q);
+  if (cut) { G.day = LAST_NIGHT; victory(); }
 })();
 requestAnimationFrame(frame);

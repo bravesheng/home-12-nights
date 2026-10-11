@@ -632,6 +632,45 @@ await scenario('cut2', '第二到第三世界的過場動畫（?cut=2）：月�
   await shot('3-day1');
 });
 
+await scenario('test', '測試版頁面（test.html）：所有世界都開著、圖鑑沒有問號、新遊戲可以從第 6 夜開始、不存檔也不碰正式版的進度；test.html 要跟 index.html 同步', {}, async ({ page, shot, check }) => {
+  // test.html 是 tools/make-test.mjs 從 index.html 產生的，改了 index.html 要重新產生
+  const { makeTest } = await import('./make-test.mjs');
+  check(makeTest(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8')) === fs.readFileSync(path.join(ROOT, 'test.html'), 'utf8'), 'test.html 跟 index.html 不同步：請跑 node tools/make-test.mjs');
+  await page.goto(BASE + 'test.html', { waitUntil: 'load' });
+  await page.waitForSelector('#btnNew');
+  // 先放一份正式版的存檔和進度（第一世界第 3 天、第二世界沒解鎖），測試版不可以動到它們
+  await page.evaluate(() => {
+    localStorage.setItem('home99_save_v1', JSON.stringify({ v: 1, day: 3, diff: 'easy', world: 1, p: { x: 19.5, y: 23, hp: 100, san: 100, hunger: 100, bat: 100, flashLv: 1 }, inv: { bulb1: 1 }, sockets: [], lamps: [], containers: {}, stats: { searched: 0, dissolved: 0, bestTier: 1 } }));
+    localStorage.setItem('home99_progress_v1', JSON.stringify({ w2: false }));
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('#btnNew');
+  const t = await page.evaluate(() => ({ test: TEST_MODE, title: document.title.includes('測試版'), w2: w2Unlocked(), w3: w3Unlocked(), noContinue: document.getElementById('btnContinue').disabled, badge: !document.getElementById('testBadge').classList.contains('hidden'), noTransfer: document.getElementById('btnTransfer').classList.contains('hidden'), seen: seenSet().size === BESTIARY.length }));
+  check(Object.values(t).every(Boolean), `測試版要全部解鎖、圖鑑全部見過、沒有繼續遊戲和存檔轉移（${JSON.stringify(t)}）`);
+  await shot('1-title');
+  await page.click('#btnNew');
+  check(await page.evaluate(() => [...document.querySelectorAll('#worldPick .worldbtn')].every(b => !b.disabled)), '測試版三個世界都要能選');
+  await page.click('#worldPick .worldbtn.w3');
+  check(await page.evaluate(() => !document.getElementById('testOpts').classList.contains('hidden') && document.querySelectorAll('#testNight option').length === 12), '選難度的畫面要有「從第幾夜開始」的選項（1～12）');
+  await page.selectOption('#testNight', '6');
+  await page.check('#testKit');
+  await shot('2-diff');
+  await page.click('#diffPick .diffbtn.normal');
+  await page.waitForFunction(() => mode === 'play');
+  await sleep(1500);
+  // 從第 6 夜開始、帶齊裝備；存檔、標成見過、解鎖都不可以寫進 localStorage
+  const g = await page.evaluate(() => { saveGame(); markSeen('tall'); unlockW3(); return { world: curWorld, day: G.day, pan: !!G.inv.pan, dusk: G.t > DAY_LEN - 10, save: JSON.parse(localStorage.getItem('home99_save_v1')).day, prog: localStorage.getItem('home99_progress_v1') }; });
+  check(g.world === 3 && g.day === 6 && g.pan && g.dusk, `測試版要能從第三世界第 6 夜開始、帶齊裝備（世界 ${g.world}、第 ${g.day} 天、平底鍋 ${g.pan}）`);
+  check(g.save === 3 && g.prog === '{"w2":false}', `測試版不可以動到正式版的存檔和進度（存檔第 ${g.save} 天、進度 ${g.prog}）`);
+  await sleep(1200);
+  await shot('3-night6');
+  // 正式版的頁面不受影響：不是測試版、存檔照樣讀得到、第二世界還是鎖著
+  await page.goto(BASE, { waitUntil: 'load' });
+  await page.waitForSelector('#btnNew');
+  const n = await page.evaluate(() => ({ test: TEST_MODE, cont: !document.getElementById('btnContinue').disabled, day: (document.getElementById('saveInfo').textContent.match(/第 (\d+) 天/) || [])[1], w2: w2Unlocked(), opts: document.getElementById('testOpts').classList.contains('hidden') }));
+  check(!n.test && n.cont && n.day === '3' && !n.w2 && n.opts, `正式版要照舊（測試版 ${n.test}、繼續遊戲 ${n.cont}、第 ${n.day} 天、第二世界解鎖 ${n.w2}）`);
+});
+
 await scenario('offline', '離線（快取後斷網，重新打開並開新遊戲）', {}, async ({ page, ctx, shot, check }) => {
   await page.goto(BASE, { waitUntil: 'load' });
   // 遊戲只在 https 註冊 service worker，本機測試這裡手動註冊

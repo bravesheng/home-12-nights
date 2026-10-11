@@ -314,6 +314,12 @@ body:not(.w2):not(.w3) #tbtns .tb.jump { visibility: hidden; }
 .w2badge { display: inline-block; margin-top: 12px; font-size: 13px; padding: 4px 12px; border-radius: 14px; color: #ffd0e6;
   border: 1px solid rgba(255, 158, 200, .6); background: rgba(255, 158, 200, .1); }
 .w3badge { color: #e8c37a; border-color: rgba(214, 170, 90, .7); background: rgba(214, 170, 90, .1); }
+.testbadge { color: #9fe8c0; border-color: rgba(120, 220, 160, .7); background: rgba(120, 220, 160, .1); }
+/* 測試版的選單：從第幾夜開始、帶齊裝備 */
+.testopts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px; margin-top: 14px; font-size: 14px; color: #9fe8c0; }
+.testopts label { display: inline-flex; align-items: center; gap: 6px; }
+.testopts select { font: inherit; font-size: 15px; padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(120, 220, 160, .6); background: #14201a; color: #dff5e8; }
+.testopts input { width: 18px; height: 18px; accent-color: #7ee081; }
 .tabs { display: flex; gap: 8px; margin: -4px 0 12px; }
 .tabs button { padding: 7px 16px; font-size: 14px; background: rgba(255, 255, 255, .08); color: #ddd; font-weight: 600; }
 .tabs button.on { background: linear-gradient(180deg, #ffd166, #f4a93b); color: #2a1a00; }

@@ -3,7 +3,7 @@
 // 每次更新遊戲都要改 VERSION，平板連上網路時就會自動下載新版本。
 const VERSION = 'home12-v17';
 const ASSETS = [
-  './', './index.html', './style.css', './manifest.webmanifest',
+  './', './index.html', './style.css', './manifest.webmanifest', './test.html', './manifest-test.webmanifest',
   './js/version.js', './js/data.js', './js/audio.js', './js/world2.js', './js/world3.js', './js/game.js', './js/render3d.js',
   './lib/three.module.js', './lib/three.core.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png',
