@@ -169,7 +169,19 @@ textarea { width: 100%; height: 76px; resize: none; border-radius: 10px; border:
 .card .stage.unseen { display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at 50% 60%, #221c2c 0%, #0e0b14 75%); }
 .card .stage.unseen span { font-size: 72px; font-weight: 800; color: #6a6080; text-shadow: 0 0 18px rgba(120, 100, 160, .5); }
 .card.unseen h4 { opacity: .85; }
-.card .night.grade { color: #ff9a6a; border-color: rgba(255, 154, 106, .55); }
+/* 九級：卡片圖片的邊框和等級標籤用那一級的顏色（--gc 由 game.js 設定）；閻羅級粉紅和藍交替閃、酆都級七彩閃 */
+.card .stage, .card canvas { border: 3px solid var(--gc, rgba(255, 255, 255, .15)); box-sizing: border-box; }
+.card .night.grade { color: var(--gc, #ff9a6a); border-color: var(--gc, rgba(255, 154, 106, .55)); }
+.card.g-yama .stage, .card.g-yama canvas, .card.g-yama .grade, .gtag.g-yama { animation: gYama 1.1s ease-in-out infinite alternate; }
+@keyframes gYama { from { border-color: #ff8ad0; color: #ff8ad0; } to { border-color: #6ab8ff; color: #6ab8ff; } }
+.card.g-fengdu .stage, .card.g-fengdu canvas, .card.g-fengdu .grade, .gtag.g-fengdu { animation: gFengdu 2.4s linear infinite; }
+@keyframes gFengdu {
+  0% { border-color: #ff3a4a; color: #ff3a4a; } 17% { border-color: #ff8a2a; color: #ff8a2a; } 33% { border-color: #ffd23a; color: #ffd23a; }
+  50% { border-color: #5fd37a; color: #5fd37a; } 67% { border-color: #4da3ff; color: #4da3ff; } 83% { border-color: #b06bff; color: #b06bff; } 100% { border-color: #ff3a4a; color: #ff3a4a; }
+}
+.grades { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 12px; align-items: center; }
+.grades::before { content: '九級：'; font-size: 12px; opacity: .7; }
+.gtag { font-size: 11px; padding: 1px 8px; border: 1px solid var(--gc); color: var(--gc); border-radius: 10px; }
 #bookfx { position: absolute; inset: 0; width: 100% !important; height: 100% !important; pointer-events: none; z-index: 2; }
 body.phone .card .stage { width: 104px; height: 130px; }
 .card h4 { margin: 2px 0 6px; font-size: 17px; }

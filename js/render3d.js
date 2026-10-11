@@ -5,6 +5,9 @@
 import * as THREE from '../lib/three.module.js';
 
 const WALL_H = 2.7, EYE = 1.55, LMS = 4;
+// 第二世界的天花板比較高（設計師要求：溜滑梯要能玩，站在溜滑梯的平台上才不會撞到天花板）
+const CEIL_W2 = 4.6;
+const ceilH = () => (isW2() ? CEIL_W2 : WALL_H);
 let LMW = 0, LMH = 0;   // 光照貼圖的大小（跟著地圖走，見 allocLM）
 const SRGB = THREE.SRGBColorSpace;
 
@@ -644,7 +647,7 @@ function buildHouse() {
     // 第三世界：每個房間各一片天花板（車頂沒有天花板，看得到天空）；車站的屋頂從車頂看得到，上面再蓋一片柏油屋頂
     const top = patchLM(new THREE.MeshLambertMaterial({ map: tarTex })); top.userData.own = true;
     for (const r of ROOMS) {
-      if (r.roof) continue;
+      if (r.roof || r.open) continue;   // 車頂和露天的月台沒有天花板，看得到藍天白雲
       const g = new THREE.PlaneGeometry(r.w, r.h); scaleUV(g, r.w / 2, r.h / 2);
       const m = new THREE.Mesh(g, cm); m.userData.ownGeo = true; m.rotation.x = Math.PI / 2; m.position.set(r.x + r.w / 2, WALL_H, r.y + r.h / 2); houseGroup.add(m);
       if (r.station) { const tp = new THREE.Mesh(g, top); tp.rotation.x = -Math.PI / 2; tp.position.set(r.x + r.w / 2, WALL_H + 0.03, r.y + r.h / 2); houseGroup.add(tp); }
@@ -653,7 +656,7 @@ function buildHouse() {
     const ceil = new THREE.Mesh(new THREE.PlaneGeometry(MAP_W, MAP_H), cm);
     ceil.userData.ownGeo = true;
     ceil.rotation.x = Math.PI / 2;
-    ceil.position.set(MAP_W / 2, WALL_H, MAP_H / 2);
+    ceil.position.set(MAP_W / 2, ceilH(), MAP_H / 2);   // 第二世界的藍天比較高
     houseGroup.add(ceil);
   }
 
@@ -672,10 +675,11 @@ function buildHouse() {
   wallMat.userData.own = true;
   if (w3) buildTrainWalls(list);   // 第三世界：車廂的壁板、車站的磚牆、車身、真的窗戶
   else {
-    const walls = new THREE.InstancedMesh(new THREE.BoxGeometry(1, WALL_H, 1), wallMat, list.length);
+    const H = ceilH();   // 第二世界的樹牆跟著天花板一起變高
+    const walls = new THREE.InstancedMesh(new THREE.BoxGeometry(1, H, 1), wallMat, list.length);
     walls.userData.ownGeo = true;
     const mtx = new THREE.Matrix4();
-    list.forEach(([x, y], i) => { mtx.makeTranslation(x + 0.5, WALL_H / 2, y + 0.5); walls.setMatrixAt(i, mtx); });
+    list.forEach(([x, y], i) => { mtx.makeTranslation(x + 0.5, H / 2, y + 0.5); walls.setMatrixAt(i, mtx); });
     walls.castShadow = true; walls.receiveShadow = true;
     walls.computeBoundingSphere();
     houseGroup.add(walls);
@@ -686,7 +690,7 @@ function buildHouse() {
   const archFlowers = [];
   for (const d of DOORS) {
     const g = new THREE.Group(); g.position.set(d.x, 0, d.y); houseGroup.add(g);
-    box(g, 0, 1, 2.15, WALL_H, 0, 1, w3 ? wallMat3(d.x, d.y) : wallMat);
+    box(g, 0, 1, 2.15, ceilH(), 0, 1, w3 ? wallMat3(d.x, d.y) : wallMat);
     // 門上下是牆 → 通道東西向，門框在南北兩側；否則在東西兩側
     const eastWest = !!(tiles[d.y - 1] && tiles[d.y - 1][d.x] === 0);
     if (w3 && !d.front) addDoorPanel(d, g, eastWest);
@@ -1339,7 +1343,7 @@ function gardenFurniture(f, g, r, W, D, side, len, cabinet) {
       r.top = 1.35;
       return true;
     case 'hollow': // 三棵靠在一起的大樹，中間那棵有樹洞
-      for (let i = 0; i < 3; i++) cyl(g, 0.4, 0.46, WALL_H, (i + 0.5) * W / 3, 0, D / 2, bark, 12);
+      for (let i = 0; i < 3; i++) cyl(g, 0.4, 0.46, ceilH(), (i + 0.5) * W / 3, 0, D / 2, bark, 12);
       fb(g, f, side, len / 2 - 0.22, len / 2 + 0.22, 0.5, 1.15, 0, 0.07, hole, false);
       r.top = 1.2;
       return true;
@@ -1370,7 +1374,7 @@ function gardenFurniture(f, g, r, W, D, side, len, cabinet) {
       return true;
     }
     case 'roots': // 從天花板長下來的大樹根
-      cyl(g, 0.45, 0.6, WALL_H, W / 2, 0, D / 2, bark, 12);
+      cyl(g, 0.45, 0.6, ceilH(), W / 2, 0, D / 2, bark, 12);
       for (let i = 0; i < 7; i++) { const a = i / 7 * Math.PI * 2; limb(g, [W / 2 + Math.cos(a) * 0.4, 0.8 + rnd() * 0.6, D / 2 + Math.sin(a) * 0.4], [W / 2 + Math.cos(a) * 0.95, 0.02, D / 2 + Math.sin(a) * 1.3], 0.08, bark); }
       r.top = 1.5;
       return true;
@@ -1391,16 +1395,17 @@ function gardenFurniture(f, g, r, W, D, side, len, cabinet) {
       r.top = 1.3;
       return true;
     }
-    case 'slide': { // 沒有人的遊樂場：溜滑梯
+    case 'slide': { // 沒有人的遊樂場：溜滑梯（可以玩：對著西邊的爬梯按住 E，game.js 的 startSlide）。遮陽棚拉高到 3.3，站在平台上頭才不會撞到
       const red = lm('#e2394a'), yel = lm('#ffd166'), blue = lm('#4da3ff'), metal = lm('#c9ced4');
       box(g, 0.6, 1.6, 1.35, 1.45, 0.8, D - 0.8, yel);
-      for (const [x, z] of [[0.65, 0.85], [1.55, 0.85], [0.65, D - 0.85], [1.55, D - 0.85]]) box(g, x - 0.05, x + 0.05, 0, 2.1, z - 0.05, z + 0.05, blue);
-      box(g, 0.55, 1.65, 2.1, 2.2, 0.75, D - 0.75, red);
+      for (const [x, z] of [[0.65, 0.85], [1.55, 0.85], [0.65, D - 0.85], [1.55, D - 0.85]]) box(g, x - 0.05, x + 0.05, 0, 3.3, z - 0.05, z + 0.05, blue);
+      for (const z of [0.85, D - 0.85]) box(g, 0.6, 1.6, 2.2, 2.26, z - 0.03, z + 0.03, metal);   // 平台的扶手
+      box(g, 0.55, 1.65, 3.3, 3.4, 0.75, D - 0.75, red);
       for (const z of [0.95, D - 0.95]) limb(g, [0.1, 0, z], [0.6, 1.4, z], 0.035, metal);
       for (let k = 1; k < 6; k++) { const t = k / 6; limb(g, [0.1 + t * 0.5, t * 1.4, 0.95], [0.1 + t * 0.5, t * 1.4, D - 0.95], 0.025, metal); }
       const sl = new THREE.Mesh(BOX, red); sl.scale.set(3.45, 0.06, 0.9); sl.position.set(3.2, 0.78, D / 2); sl.rotation.z = -0.386; sl.castShadow = true; g.add(sl);
       for (const z of [D / 2 - 0.47, D / 2 + 0.47]) { const rl = new THREE.Mesh(BOX, yel); rl.scale.set(3.45, 0.15, 0.05); rl.position.set(3.2, 0.86, z); rl.rotation.z = -0.386; g.add(rl); }
-      r.top = 2.2;
+      r.top = 3.4;
       return true;
     }
     case 'well': { // 石頭水井
@@ -1576,9 +1581,17 @@ function buildFixture(o) {
   const bh = bulbPos(o).h;
   const res = { g, bulbs: [], halos: [], spin: null, rays: null, gems: null };
   if (o.bulb === SLIME_TIER) addSlimePuddle(g, o);
-  if (o.type === 'socket') {
-    cyl(g, 0.16, 0.16, 0.04, 0, WALL_H - 0.04, 0, edge);
-    cyl(g, 0.01, 0.01, WALL_H - 0.04 - (bh + 0.1), 0, bh + 0.1, 0, edge, 6);
+  if (o.type === 'socket' && o.room && o.room.open) {
+    // 露天的月台：燈座做成鑄鐵燈柱，燈泡吊在彎出來的燈臂下面
+    cyl(g, 0.05, 0.07, bh + 0.38, 0.32, 0, 0, edge, 8);
+    box(g, -0.02, 0.36, bh + 0.3, bh + 0.36, -0.03, 0.03, edge);
+    cyl(g, 0.01, 0.01, 0.2, 0, bh + 0.1, 0, edge, 6);
+    cyl(g, 0.07, 0.25, 0.17, 0, bh - 0.02, 0, metal2, 18, true);
+    addBulb(res, g, 0, bh - 0.02, 0, o.bulb);
+    addDecor(res, g, bh - 0.02, o.bulb, th);
+  } else if (o.type === 'socket') {
+    cyl(g, 0.16, 0.16, 0.04, 0, ceilH() - 0.04, 0, edge);   // 第二世界的天花板比較高，吊線比較長
+    cyl(g, 0.01, 0.01, ceilH() - 0.04 - (bh + 0.1), 0, bh + 0.1, 0, edge, 6);
     cyl(g, 0.07, 0.25, 0.17, 0, bh - 0.02, 0, metal2, 18, true);
     addBulb(res, g, 0, bh - 0.02, 0, o.bulb);
     addDecor(res, g, bh - 0.02, o.bulb, th);
@@ -1595,7 +1608,7 @@ function buildFixture(o) {
     addBulb(res, g, 0, bh, 0, o.bulb);
     addDecor(res, g, bh + 0.25, o.bulb, th);
   } else {
-    cyl(g, 0.012, 0.012, WALL_H - 2.28, 0, 2.28, 0, edge, 6);
+    cyl(g, 0.012, 0.012, ceilH() - 2.28, 0, 2.28, 0, edge, 6);
     sph(g, 0.07, 0, 2.24, 0, metal);
     const ring = new THREE.Mesh(geo('chring', () => new THREE.TorusGeometry(0.3, 0.012, 6, 30)), metal);
     ring.rotation.x = Math.PI / 2; ring.position.y = 2.17; g.add(ring);
@@ -2665,7 +2678,7 @@ function addSlimePuddle(g, o) {
 
 // ====================================================================
 // 第三世界的 4 隻新怪物（照紙本設計圖做成寫實風，貼圖 512、全部打開自己的明暗）：
-// 克蘿諾斯・蕈裂衣、熔岩暴君、墮落戰神、檮杌・九瞳；熔岩暴君走過留下的熔岩
+// 克羅諾斯・蕈裂、熔岩暴君、墮落戰神、檮杌・九瞳；熔岩暴君走過留下的熔岩
 // ====================================================================
 let kronosSkinTex, kronosCapTex, kronosFaceTex, rockTex, lavaCrackTex, tyrantFaceTex, cloakTex, bandageTex, skullTex, taowuFurTex, taowuStrandTex, taowuEyeTex;
 function makeMonster3Textures() {
@@ -2673,7 +2686,7 @@ function makeMonster3Textures() {
   kronosFaceTex = faceT((c, S) => drawKronosFace(c, S, true));
   tyrantFaceTex = faceT(drawTyrantFace);
   skullTex = faceT(drawSkullFace);
-  // 蕈裂衣：灰綠色乾裂的屍皮
+  // 蕈裂：灰綠色乾裂的屍皮
   kronosSkinTex = canvasTex(256, 256, (c, w, h) => {
     c.fillStyle = '#5f6e4e'; c.fillRect(0, 0, w, h);
     for (let i = 0; i < 300; i++) { c.fillStyle = `rgba(${90 + rnd() * 60 | 0},${110 + rnd() * 50 | 0},${70 + rnd() * 30 | 0},.35)`; c.fillRect(rnd() * w, rnd() * h, 2 + rnd() * 4, 2 + rnd() * 4); }
@@ -2733,7 +2746,7 @@ function makeMonster3Textures() {
     c.fillStyle = 'rgba(255,255,255,.85)'; c.beginPath(); c.arc(57, 57, 4, 0, 7); c.fill();
   }, true);
 }
-// 克蘿諾斯・蕈裂衣：1.5 公尺、駝背的矮人，灰綠色乾裂的屍皮，頭上一頂裂開的紫色蘑菇傘（裂縫透出紫光），
+// 克羅諾斯・蕈裂：1.5 公尺、駝背的矮人，灰綠色乾裂的屍皮，頭上一頂裂開的紫色蘑菇傘（裂縫透出紫光），
 // 肩膀和腰上長著小蘑菇，右手拿骨矛、左手拿一朵小蘑菇，身上是綠色的破布衣。走路一跛一跛
 function buildKronos(r, g) {
   const skin = ownLM('#ffffff', { map: kronosSkinTex, shade: 0.8, transparent: true });
@@ -3638,7 +3651,7 @@ function updatePlaceGhost() {
 // 第三世界：末班列車。鍍金年代的豪華特快車（深胡桃木、黃銅、暗紅絨布、象牙白的天花板），全部都要「舊」；
 // 最下面一排是車站。牆上有真的窗戶，窗外是會捲動的三層風景（遠山和天空、樹林、電線桿）
 // ====================================================================
-let walnutTex, stationWallTex, carriageTex, ceil3Tex, doorPanelTex, carriageDoorTex, glassTex, skyFarTex, skyTopTex, nearTex, yardTex, sheetTex, velvetTex, ironWallTex, tarTex, ballastTex;
+let walnutTex, stationWallTex, carriageTex, ceil3Tex, doorPanelTex, carriageDoorTex, glassTex, skyFarTex, skyTopTex, cloudTex, nearTex, yardTex, sheetTex, velvetTex, ironWallTex, tarTex, ballastTex;
 const midTexes = {};
 let backdrop = null, panes3 = [], walnutMat = null, stationMat = null, ironMat = null, wallMat3 = null, curtains = [], locoSmoke = null;
 const doorPanels = new Map();
@@ -3752,25 +3765,45 @@ function makeTrainTextures() {
     grime(c, w, h, 14, 0.25);
   });
   // ---------- 車外的風景（三層視差）：遠山和天空、中景（照天數換）、近景的電線桿；白天停在車站看到的站場 ----------
+  // 設計師要的夢核風：飽和的藍天、白白的雲、紫藍色的遠山、綠色的山丘，山腳下是開滿花的草原
+  const SKY_TOP = '#3d8fe0';
+  // 一朵雲；靠近貼圖邊緣的話在另一邊也畫一份，貼圖重複排的時候雲才不會被切掉
+  // wrapY：上下也要接得起來（頭頂的雲）；遠山那張上下不重複，雲只在左右接
+  const cloud = (c, x, y, sc, a = 0.92, wrapY = false) => {
+    const w = c.canvas.width, h = c.canvas.height;
+    c.fillStyle = `rgba(255,255,255,${a})`;
+    for (const dx of [-w, 0, w]) for (const dy of wrapY ? [-h, 0, h] : [0]) {
+      if (Math.abs(x + dx - w / 2) > w / 2 + 60 * sc || Math.abs(y + dy - h / 2) > h / 2 + 30 * sc) continue;
+      for (let i = 0; i < 7; i++) { c.beginPath(); c.arc(x + dx + (i - 3) * 11 * sc, y + dy + Math.sin(i * 1.9) * 5 * sc, (11 + (i % 3) * 5) * sc, 0, 7); c.fill(); }
+      c.beginPath(); c.ellipse(x + dx, y + dy + 8 * sc, 42 * sc, 9 * sc, 0, 0, 7); c.fill();
+    }
+  };
   skyFarTex = canvasTex(1024, 256, (c, w, h) => {
-    const g = c.createLinearGradient(0, 0, 0, 170); g.addColorStop(0, '#5f7ea3'); g.addColorStop(0.7, '#a9b4bd'); g.addColorStop(1, '#cfc4ad');
-    c.fillStyle = g; c.fillRect(0, 0, w, 170);
+    // 四面牆的天空不畫雲（四面牆在角落接起來，雲會被切成一條）；雲都在頭頂那一片。上面一段是純色，跟頭頂那一片的邊接得起來
+    const g = c.createLinearGradient(0, 0, 0, 175); g.addColorStop(0, SKY_TOP); g.addColorStop(0.4, SKY_TOP); g.addColorStop(0.8, '#9ecbf5'); g.addColorStop(1, '#d9ecfb');
+    c.fillStyle = g; c.fillRect(0, 0, w, 175);
     const range = (base, amp, col, y0) => { c.fillStyle = col; c.beginPath(); c.moveTo(0, h); c.lineTo(0, y0); let x = 0; while (x < w) { x += 30 + rnd() * 60; c.lineTo(x, y0 - amp * Math.abs(Math.sin(x * base)) - rnd() * 12); } c.lineTo(w, h); c.fill(); };
-    range(0.011, 60, '#8a94a8', 168); range(0.019, 42, '#616b80', 174);
-    c.fillStyle = '#4e5046'; c.fillRect(0, 178, w, h - 178);
-    for (let i = 0; i < 60; i++) { c.fillStyle = `rgba(0,0,0,${0.1 + rnd() * 0.2})`; c.beginPath(); c.ellipse(rnd() * w, 180 + rnd() * 76, 10 + rnd() * 40, 2 + rnd() * 4, 0, 0, 7); c.fill(); }
+    range(0.011, 70, '#7a8fcc', 168); range(0.017, 46, '#4f8a74', 176); range(0.03, 22, '#5fa04a', 184);
+    c.fillStyle = '#5c9c40'; c.fillRect(0, 188, w, h - 188);
+    for (let i = 0; i < 160; i++) { c.fillStyle = ['#ff9ec8', '#ffe066', '#ffffff', '#8fb8ff', '#ff6a6a'][(rnd() * 5) | 0]; c.beginPath(); c.arc(rnd() * w, 190 + rnd() * 66, 1.2 + rnd() * 2, 0, 7); c.fill(); }
   });
   skyFarTex.wrapT = THREE.ClampToEdgeWrapping;   // 上下不重複，接天空的地方才不會有一條線
   // 遠山上面再接一片天空（從車頂看得到更高的地方）：顏色跟遠山那張貼圖的最上面一樣
-  skyTopTex = canvasTex(8, 8, (c, w, h) => { c.fillStyle = '#5f7ea3'; c.fillRect(0, 0, w, h); });
+  skyTopTex = canvasTex(8, 8, (c, w, h) => { c.fillStyle = SKY_TOP; c.fillRect(0, 0, w, h); });
+  // 頭頂的藍天白雲（露天的月台和車頂抬頭看得到）：一大片會跟著列車慢慢飄的雲
+  cloudTex = canvasTex(512, 512, (c, w, h) => {
+    c.fillStyle = SKY_TOP; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 9; i++) cloud(c, rnd() * w, rnd() * h, 1.2 + rnd() * 1.6, 0.9, true);
+  });
   const mid = (name, draw) => { midTexes[name] = canvasTex(1024, 256, (c, w, h) => { c.clearRect(0, 0, w, h); draw(c, w, h); }); };
-  // 平原：草地、籬笆、遠遠的農舍
+  // 草原（夢核風）：開滿花的綠草地、幾棵圓圓的樹、一段白籬笆
   mid('plain', (c, w, h) => {
-    c.fillStyle = '#4f5d3b'; c.fillRect(0, 150, w, h - 150);
-    c.strokeStyle = '#2d2a24'; c.lineWidth = 3; for (let x = 0; x < w; x += 36) { c.beginPath(); c.moveTo(x, 150); c.lineTo(x, 178); c.stroke(); }
-    c.lineWidth = 2; c.beginPath(); c.moveTo(0, 158); c.lineTo(w, 158); c.moveTo(0, 170); c.lineTo(w, 170); c.stroke();
-    c.fillStyle = '#2a2622'; c.fillRect(600, 118, 70, 36); c.beginPath(); c.moveTo(594, 118); c.lineTo(635, 92); c.lineTo(676, 118); c.fill();
-    for (let i = 0; i < 40; i++) { c.fillStyle = `rgba(0,0,0,${0.12 + rnd() * 0.2})`; c.beginPath(); c.ellipse(rnd() * w, 160 + rnd() * 90, 10 + rnd() * 50, 2 + rnd() * 4, 0, 0, 7); c.fill(); }
+    const g = c.createLinearGradient(0, 150, 0, h); g.addColorStop(0, '#76bf52'); g.addColorStop(1, '#4b8c36');
+    c.fillStyle = g; c.fillRect(0, 150, w, h - 150);
+    for (let i = 0; i < 80; i++) { c.fillStyle = `rgba(255,255,255,${0.05 + rnd() * 0.08})`; c.beginPath(); c.ellipse(rnd() * w, 160 + rnd() * 90, 14 + rnd() * 50, 2 + rnd() * 3, 0, 0, 7); c.fill(); }
+    for (let i = 0; i < 6; i++) { const x = rnd() * w, r = 16 + rnd() * 14; c.fillStyle = '#5a3b22'; c.fillRect(x - 3, 150 - r, 6, r + 8); c.fillStyle = ['#3f8f3a', '#56a84a', '#2f7a30'][(rnd() * 3) | 0]; c.beginPath(); c.arc(x, 150 - r, r, 0, 7); c.fill(); }
+    c.fillStyle = '#f4f1e6'; for (let x = 0; x < w; x += 34) c.fillRect(x, 150, 4, 22); c.fillRect(0, 156, w, 3); c.fillRect(0, 166, w, 3);
+    for (let i = 0; i < 420; i++) { c.fillStyle = ['#ff9ec8', '#ffe066', '#ffffff', '#8fb8ff', '#ff6a6a', '#ffb347'][(rnd() * 6) | 0]; c.beginPath(); c.arc(rnd() * w, 176 + rnd() * 80, 1.5 + rnd() * 3, 0, 7); c.fill(); }
   });
   // 枯樹林：一棵一棵分岔的枯樹
   mid('trees', (c, w, h) => {
@@ -3814,7 +3847,8 @@ function makeTrainTextures() {
   // 白天的站場：對面的月台、站房、鐘塔、水塔、煤氣燈
   yardTex = canvasTex(1024, 256, (c, w, h) => {
     c.clearRect(0, 0, w, h);
-    c.fillStyle = '#6e6a62'; c.fillRect(0, 196, w, 60); c.fillStyle = '#8a8378'; c.fillRect(0, 196, w, 6);
+    c.fillStyle = '#9a9484'; c.fillRect(0, 196, w, 60); c.fillStyle = '#b8b2a2'; c.fillRect(0, 196, w, 6);
+    for (let i = 0; i < 90; i++) { c.fillStyle = ['#ff9ec8', '#ffe066', '#ffffff', '#8fb8ff'][(rnd() * 4) | 0]; c.beginPath(); c.arc(rnd() * w, 230 + rnd() * 26, 1.5 + rnd() * 2, 0, 7); c.fill(); }
     c.fillStyle = '#5a4034'; c.fillRect(120, 100, 300, 96); c.fillStyle = '#3a2a22'; c.beginPath(); c.moveTo(110, 100); c.lineTo(270, 50); c.lineTo(430, 100); c.fill();
     for (let x = 140; x < 400; x += 44) { c.fillStyle = '#1a2230'; c.fillRect(x, 126, 24, 40); c.fillStyle = '#c9a24a'; c.fillRect(x - 2, 124, 28, 2); }
     c.fillStyle = '#6b4a3a'; c.fillRect(600, 20, 50, 176); c.fillStyle = '#e8e0c8'; c.beginPath(); c.arc(625, 50, 16, 0, 7); c.fill(); c.strokeStyle = '#222'; c.lineWidth = 2; c.beginPath(); c.moveTo(625, 50); c.lineTo(625, 40); c.moveTo(625, 50); c.lineTo(633, 54); c.stroke();
@@ -3938,6 +3972,12 @@ function buildBackdrop() {
     mk(skyTopTex, 240, 50, x, 44, cz, ry, true, 0);
     const mid = mk(midTexes.plain, 170, 9, x + (x < 0 ? 7 : -7), 3.2, cz, ry, false, 0); mid.isMid = true;
   }
+  // 頭頂的藍天白雲：一大片蓋在整張地圖上面（露天的月台、車頂抬頭看得到），列車開的時候雲慢慢往後飄
+  const ct = cloudTex.clone(); ct.needsUpdate = true; ct.repeat.set((MAP_W + 40) / 40, (MAP_H + 30) / 40);
+  const cmat = new THREE.MeshBasicMaterial({ map: ct, fog: false, side: THREE.DoubleSide }); cmat.userData.own = true;
+  const sky = new THREE.Mesh(geo(`sky${MAP_W}x${MAP_H}`, () => new THREE.PlaneGeometry(MAP_W + 40, MAP_H + 30)), cmat);
+  sky.rotation.x = Math.PI / 2; sky.position.set(cx, 16, cz); backdrop.g.add(sky);   // 放低一點，從車窗抬頭也看得到雲
+  backdrop.layers.push({ m: sky, t: ct, speed: 0.006, dir: -1, isSky: true });
   // 地面：在車廂地板下面 1.2 公尺，從車頂的邊緣、窗戶往下看得到；列車開的時候跟著往後跑
   const gt = ballastTex.clone(); gt.needsUpdate = true; gt.repeat.set(300 / 4, (MAP_H + 28) / 4);
   const gm = new THREE.MeshBasicMaterial({ map: gt }); gm.userData.own = true;
@@ -4064,6 +4104,19 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
       const mat = patchLM(new THREE.MeshLambertMaterial({ map: t })); mat.userData.own = true;
       const m = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.2, D - 0.2), mat); m.userData.ownGeo = true;
       m.rotation.x = -Math.PI / 2; m.position.set(W / 2, 0.006, D / 2); m.receiveShadow = true; g.add(m);
+      return true;
+    }
+    case 'throttle': { // 駕駛台（車頭是開車的）：鐵製的控制台，上面有兩個壓力表、黃銅的節流閥和煞車閥拉桿、一個手輪；按 E 拉汽笛
+      const dark = lm('#1c1c20'), glassT = ownLM('#e8e4d8', { emissive: 0x222018 });
+      box(g, 0.1, W - 0.1, 0, 0.92, 0.15, D - 0.15, iron);
+      box(g, 0.05, W - 0.05, 0.92, 1.0, 0.1, D - 0.1, dark);
+      for (const u of [0.55, 1.35]) { const [x, z] = fpos(f, side, u, 0.5); cyl(g, 0.15, 0.15, 0.06, x, 1.0, z, brass, 16); cyl(g, 0.12, 0.12, 0.02, x, 1.06, z, glassT, 16); box(g, x - 0.01, x + 0.01, 1.08, 1.09, z - 0.1, z + 0.02, lm('#a01818'), false); }
+      for (const [u, a] of [[2.0, -0.35], [2.5, 0.25]]) { const [x, z] = fpos(f, side, u, 0.35); limb(g, [x, 1.0, z], [x + Math.sin(a) * 0.3, 1.55, z - 0.25], 0.025, brass); sph(g, 0.05, x + Math.sin(a) * 0.3, 1.57, z - 0.25, lm('#3a1a10')); }
+      const [wx, wz] = fpos(f, side, len - 0.45, 0.5);
+      const wheel = new THREE.Mesh(geo('handwheel', () => new THREE.TorusGeometry(0.2, 0.025, 8, 20)), brass); wheel.position.set(wx, 1.3, wz); wheel.rotation.x = Math.PI / 2 - 0.6; g.add(wheel);
+      cyl(g, 0.03, 0.03, 0.3, wx, 1.0, wz, brass2, 8);
+      for (const u of [0.3, len - 0.3]) fb(g, f, side, u - 0.04, u + 0.04, 0.3, 0.9, 0.0, 0.02, brass2, false);
+      r.top = 1.6;
       return true;
     }
     case 'gramocab': // 留聲機櫃：胡桃木櫃子，上面放著黃銅喇叭的留聲機
@@ -4528,8 +4581,8 @@ const cDayFog = new THREE.Color('#1b1720'), cNightFog = new THREE.Color('#020104
 const cWinDay = new THREE.Color('#dcebf5'), cWinDusk = new THREE.Color('#e89a5a'), cWinNight = new THREE.Color('#0a1022'), cWinBlood = new THREE.Color('#4a0610');
 // 第二世界：白天是淡淡的粉紫色霧，晚上深藍紫色；萬物甦醒時在紫色和綠色之間變來變去
 const cW2Day = new THREE.Color('#cdbfe0'), cW2Night = new THREE.Color('#05041a'), cAwakeA = new THREE.Color('#1c0a2c'), cAwakeB = new THREE.Color('#06221a');
-// 第三世界：白天是像老照片的褐色調，晚上黑；紅月偏紅
-const cW3Day = new THREE.Color('#2a2420'), cW3Night = new THREE.Color('#030204'), cW3Blood = new THREE.Color('#1a0406');
+// 第三世界：白天是淡藍色的薄霧（窗外是夢核風的藍天白雲），晚上黑；紅月偏紅
+const cW3Day = new THREE.Color('#a9c9e8'), cW3Night = new THREE.Color('#030204'), cW3Blood = new THREE.Color('#1a0406');
 const tmpC = new THREE.Color(), tmpC2 = new THREE.Color();
 function updateAtmosphere(dark, t) {
   const k = dark / NIGHT_DARK;
