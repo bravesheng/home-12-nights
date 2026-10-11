@@ -165,9 +165,9 @@ const Sound = (() => {
     trainStart() { for (let i = 0; i < 6; i++) { noise(0.3, 0.35, 2000, i * 0.55 * (1 - i * 0.08), 0.6); tone(60, 0.2, 'sine', 0.3, 40, i * 0.55 * (1 - i * 0.08)); } },
     pound() { tone(55, 0.3, 'sine', 0.6, 35); noise(0.15, 0.5, 250, 0, 1.5); noise(0.4, 0.2, 90, 0.05, 1); },
     wind() { noise(2.5, 0.14, 500, 0, 0.4); noise(2.0, 0.08, 1500, 0.6, 0.6); },
-    // 時鐘倒轉（蕈裂衣刺中你）
+    // 時鐘倒轉（蕈裂刺中你）
     clockBack() { for (let i = 0; i < 8; i++) tone(1800 - i * 150, 0.05, 'square', 0.05, 2400 - i * 150, i * 0.07); tone(300, 0.6, 'sawtooth', 0.06, 900); noise(0.5, 0.15, 4000, 0, 1); },
-    // 蕈裂衣：咯咯笑、長矛刺、孢子
+    // 蕈裂：咯咯笑、長矛刺、孢子
     kcackle() { for (let i = 0; i < 6; i++) { tone(260 + i * 25, 0.08, 'square', 0.06, 200 + i * 20, i * 0.1); noise(0.06, 0.1, 1400, i * 0.1, 3); } },
     spear() { noise(0.12, 0.4, 2600, 0, 1.5); tone(180, 0.2, 'sawtooth', 0.12, 70); },
     // 熔岩暴君：跺腳、熔岩嘶聲、岩石碎掉
@@ -203,7 +203,10 @@ const Sound = (() => {
   }
 
   // ==================================================================
-  // 背景音樂
+  // 背景音樂：每個世界不一樣（設計師的要求）
+  //   第一世界（和主選單）：白天是音樂盒的搖籃曲、晚上是壞掉的音樂盒
+  //   第二世界：白天〈月亮升起〉（Rise the Moon）輕快的圓舞曲、晚上〈扭曲的夢境〉：同一首放慢、走音、音會往下滑
+  //   第三世界：白天是葛利格《皮爾金》的〈清晨〉（長笛）、晚上是老唱片放的〈恭喜恭喜〉（有沙沙聲、轉速忽快忽慢，古老的感覺）
   // ==================================================================
   let musicIn = null, musicOut = null, musicOn = -1;
   let curState = '', nextNote = 0, nextPad = 0, nextFx = 0, seq = 0;
@@ -222,11 +225,12 @@ const Sound = (() => {
     musicOut.connect(master);
   }
 
-  // 音樂盒的一個音
-  function musicBox(freq, t0, vol, dur = 1.8) {
+  // 音樂盒的一個音；warpTo 有給的話，音會在響的時候慢慢滑到那個頻率（扭曲的夢境）
+  function musicBox(freq, t0, vol, dur = 1.8, warpTo = null) {
     for (const [mult, v] of [[1, 1], [2, 0.3], [3.01, 0.1]]) {
       const o = ac.createOscillator(), g = ac.createGain();
-      o.type = 'sine'; o.frequency.value = freq * mult;
+      o.type = 'sine'; o.frequency.setValueAtTime(freq * mult, t0);
+      if (warpTo) o.frequency.exponentialRampToValueAtTime(warpTo * mult, t0 + dur * 0.8);
       g.gain.setValueAtTime(0.0001, t0);
       g.gain.exponentialRampToValueAtTime(vol * v, t0 + 0.006);
       g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur / Math.sqrt(mult));
@@ -291,21 +295,100 @@ const Sound = (() => {
     }
   }
 
-  // 詭異的搖籃曲（A 和聲小調）：[相對 A4 的半音, 拍數]，null 是休止
+  // ---------- 曲子：[相對 A4 的半音, 拍數]，null 是休止 ----------
+  // 第一世界（和主選單）：詭異的搖籃曲（A 和聲小調）
   const LULLABY = [
     [7, 1], [3, 1], [0, 1], [2, 1], [3, 1], [2, 1], [-1, 1], [-5, 2.5], [null, 4],
     [0, 1], [3, 1], [7, 1], [8, 1], [7, 1], [3, 1], [2, 1], [-1, 2.5], [null, 4],
     [7, 1], [8, 1], [7, 1], [3, 1], [2, 1], [0, 1], [-1, 1], [0, 3], [null, 6],
   ];
+  // 第二世界白天：〈月亮升起〉（Rise the Moon）——自己寫的 D 大調圓舞曲，輕飄飄的夢核花園；晚上同一首變成〈扭曲的夢境〉
+  const RISE = [
+    [5, 1], [7, 1], [9, 2], [12, 1], [9, 1], [7, 2], [5, 1], [2, 1], [0, 3], [null, 1],
+    [5, 1], [7, 1], [9, 2], [14, 1], [12, 1], [9, 2], [7, 1], [9, 1], [5, 3], [null, 1],
+    [12, 1], [14, 1], [17, 2], [14, 1], [12, 1], [9, 2], [7, 1], [5, 1], [2, 2], [0, 2], [null, 2],
+    [2, 1], [5, 1], [7, 2], [9, 1], [7, 1], [5, 2], [2, 1], [0, 1], [-3, 3], [null, 3],
+  ];
+  // 第三世界晚上：〈恭喜恭喜〉（1946 年陳歌辛寫的老歌，A 小調；照記憶簡化的版本）用老唱片放，有古老的感覺
+  const GONGXI = [
+    [3, 1], [3, 1], [3, 1], [3, 1], [2, 1], [3, 2], [7, 1], [7, 1], [7, 1], [7, 1], [5, 1], [7, 2],
+    [12, 1], [12, 1], [12, 1], [12, 1], [10, 1], [12, 2], [12, 1], [10, 1], [7, 1], [5, 1], [3, 1], [0, 2], [null, 2],
+    [0, 1], [0, 1], [0, 1], [0, 1], [3, 1], [3, 1], [2, 1], [0, 2], [null, 1], [0, 1], [0, 1], [0, 1], [0, 1], [3, 1], [2, 1], [0, 3], [null, 3],
+  ];
+  // 第三世界白天：葛利格《皮爾金》的〈清晨〉（E 大調、6/8 拍，長笛的主題；照記憶簡化的版本）
+  const MORNING = [
+    [11, 1], [9, 1], [7, 1], [9, 1], [11, 1], [11, 1], [11, 1], [9, 1], [7, 1], [9, 1], [11, 1], [11, 1],
+    [11, 1], [9, 1], [7, 1], [9, 1], [11, 1], [9, 1], [7, 1], [9, 1], [11, 1], [9, 1], [7, 1], [9, 1],
+    [11, 3], [null, 1], [14, 1], [16, 1], [14, 2], [11, 1], [9, 1], [7, 3], [null, 3],
+    [11, 1], [9, 1], [7, 1], [9, 1], [11, 1], [11, 1], [11, 1], [9, 1], [7, 1], [9, 1], [11, 1], [11, 1],
+    [14, 1], [11, 1], [9, 1], [11, 1], [14, 1], [14, 1], [16, 1], [14, 1], [11, 1], [9, 1], [7, 3], [null, 4],
+  ];
   const NIGHT_CHORDS = [[38, 39, 45], [36, 42, 43], [41, 42, 48], [33, 39, 40]];
+  // 白天的和弦（跟著各世界的曲子的調）：第一世界 A 小調、第二世界 D 大調、第三世界 E 大調
+  const DAY_CHORDS = { 1: [57, 60, 64], 2: [50, 54, 57], 3: [52, 56, 59] };
 
-  function scheduleNote(state, inten) {
-    const [semi, beats] = LULLABY[seq % LULLABY.length];
+  // 長笛（〈清晨〉）：正弦波加一點抖音，起音慢
+  function flute(freq, t0, vol, dur) {
+    const o = ac.createOscillator(), lfo = ac.createOscillator(), lg = ac.createGain(), g = ac.createGain();
+    o.type = 'sine'; o.frequency.value = freq;
+    lfo.frequency.value = 5.5; lg.gain.value = freq * 0.006;
+    lfo.connect(lg); lg.connect(o.frequency);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.07);
+    g.gain.setValueAtTime(vol, t0 + dur * 0.6);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g); g.connect(musicIn);
+    o.start(t0); lfo.start(t0); o.stop(t0 + dur + 0.05); lfo.stop(t0 + dur + 0.05);
+  }
+  // 老唱片（〈恭喜恭喜〉）：悶悶的三角波，轉速忽快忽慢（音會輕輕飄）
+  function gramo(freq, t0, vol, dur) {
+    const o = ac.createOscillator(), lfo = ac.createOscillator(), lg = ac.createGain(), g = ac.createGain(), f = ac.createBiquadFilter();
+    o.type = 'triangle'; o.frequency.value = freq;
+    lfo.frequency.value = 0.7; lg.gain.value = 14;   // 轉速不穩：±14 音分
+    lfo.connect(lg); lg.connect(o.detune);
+    f.type = 'lowpass'; f.frequency.value = 1500; f.Q.value = 0.7;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(f); f.connect(g); g.connect(musicIn);
+    o.start(t0); lfo.start(t0); o.stop(t0 + dur + 0.05); lfo.stop(t0 + dur + 0.05);
+  }
+  // 唱片的沙沙聲和劈啪聲
+  function crackle(t0, vol) {
+    noise(0.03, vol, 3500, t0 - ac.currentTime, 2, musicIn);
+    if (Math.random() < 0.5) noise(0.02, vol * 0.7, 5000, t0 - ac.currentTime + rnd(0.1, 0.4), 3, musicIn);
+  }
+
+  function scheduleNote(state, inten, world) {
+    const night = state === 'night', title = state === 'title';
+    const tune = title || world === 1 ? LULLABY : world === 3 ? (night ? GONGXI : MORNING) : RISE;
+    const [semi, beats] = tune[seq % tune.length];
     seq++;
-    const night = state === 'night';
-    const beat = state === 'day' ? 0.55 : state === 'title' ? 0.7 : 0.95 + inten * 0.3;
+    let beat;
+    if (title) beat = 0.7;
+    else if (world === 3) beat = night ? 0.6 + inten * 0.15 : 0.3;     // 老唱片慢慢放；〈清晨〉是 6/8 的八分音符，流動感
+    else if (world === 2) beat = night ? 0.85 + inten * 0.3 : 0.4;     // 圓舞曲輕快；扭曲的夢境慢
+    else beat = state === 'day' ? 0.55 : 0.95 + inten * 0.3;
     if (semi !== null) {
-      if (night) {
+      if (world === 3 && !night && !title) flute(mtof(69 + semi), nextNote, 0.04, beats * beat * 1.15);
+      else if (world === 3 && !title) {
+        // 老唱片：低八度、每個音都有一點走音；越緊張越走音、沙沙聲越多
+        const cents = rnd(-10, 10) * (1 + inten * 2);
+        gramo(440 * Math.pow(2, (semi - 12) / 12 + cents / 1200), nextNote, 0.055, beats * beat * 1.7);
+        if (Math.random() < 0.4 + inten * 0.4) crackle(nextNote + rnd(0, beat), 0.04 + inten * 0.05);
+      } else if (world === 2 && night && !title) {
+        // 扭曲的夢境：〈月亮升起〉低八度、走音、會漏音，音還會往下滑（像錄音帶被拉慢）
+        if (Math.random() > 0.15 + inten * 0.35) {
+          const cents = rnd(-30, 30) * (1 + inten * 2);
+          const f = 440 * Math.pow(2, (semi - 12) / 12 + cents / 1200);
+          musicBox(f, nextNote, 0.05, 2.6, Math.random() < 0.45 + inten * 0.4 ? f * rnd(0.7, 0.9) : null);
+          if (Math.random() < inten * 0.3) musicBox(f * Math.pow(2, -1 / 12), nextNote + 0.05, 0.03, 2);
+        }
+      } else if (world === 2 && !title) {
+        const f = 440 * Math.pow(2, semi / 12);
+        musicBox(f, nextNote, 0.045);
+        if (Math.random() < 0.4) flute(f * 2, nextNote + 0.02, 0.012, beats * beat * 1.2);   // 高八度輕輕跟著吹
+      } else if (night && !title) {
         // 壞掉的音樂盒：低八度、走音、會漏音
         if (Math.random() > 0.2 + inten * 0.4) {
           const cents = rnd(-25, 25) * (1 + inten * 2);
@@ -314,13 +397,14 @@ const Sound = (() => {
           if (Math.random() < inten * 0.35) musicBox(f * Math.pow(2, 1 / 12), nextNote + 0.03, 0.03, 2);
         }
       } else {
-        musicBox(440 * Math.pow(2, semi / 12), nextNote, state === 'title' ? 0.04 : 0.045);
+        musicBox(440 * Math.pow(2, semi / 12), nextNote, title ? 0.04 : 0.045);
       }
     }
-    nextNote += beats * beat * (semi === null && night ? 1 + inten : 1);
+    nextNote += beats * beat * (semi === null && night && !title ? 1 + inten : 1);
   }
 
-  function music(state, inten = 0) {
+  // state：day／night／title／off；world：現在的世界（主選單傳 1）
+  function music(state, inten = 0, world = 1) {
     if (!ac) return;
     ensureMusic();
     const now = ac.currentTime;
@@ -331,14 +415,15 @@ const Sound = (() => {
       musicOut.gain.setTargetAtTime(on * MUSIC_VOL, now, on ? 1.2 : 0.4);
     }
     if (!on) { curState = ''; return; }
-    if (state !== curState) {
-      curState = state; seq = 0;
+    const key = state + ':' + world;
+    if (key !== curState) {
+      curState = key; seq = 0;
       nextNote = now + 1; nextPad = now + 0.5; nextFx = now + rnd(3, 6);
     }
     if (nextNote < now - 1) nextNote = now + 0.1; // 分頁被暫停後重新接上
     if (nextPad < now - 1) nextPad = now + 0.1;
     if (nextFx < now - 1) nextFx = now + 0.5;
-    while (nextNote < now + 0.25) scheduleNote(state, inten);
+    while (nextNote < now + 0.25) scheduleNote(state, inten, world);
 
     if (nextPad < now + 0.25) {
       if (state === 'night') {
@@ -347,7 +432,7 @@ const Sound = (() => {
         nextPad += dur * rnd(0.55, 0.75);
       } else {
         const dur = 12;
-        pad(state === 'title' ? [45, 48, 52] : [57, 60, 64], nextPad, dur, 0.018, 700);
+        pad(state === 'title' ? [45, 48, 52] : DAY_CHORDS[world] || DAY_CHORDS[1], nextPad, dur, 0.018, 700);
         nextPad += rnd(14, 20);
       }
     }

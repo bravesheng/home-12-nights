@@ -198,6 +198,21 @@ await scenario('w2', '第二世界第 6 夜＋全套裝備（?world=2&night=6&ki
   }));
   await page.keyboard.up('Space');
   check(maxZ > 0, '第二世界按空白鍵要能跳');
+  // 溜滑梯：站在遊樂場溜滑梯西邊的爬梯前，互動是「爬上溜滑梯」；玩的時候會爬高再滑下來，結束後站在東邊（直接呼叫更新函式，不用等低 FPS）
+  const sl = await page.evaluate(() => {
+    const f = FURN_BY_ID.car;
+    Object.assign(G.p, { x: f.x - 0.6, y: f.y + f.h / 2, face: 0, pitch: 0, z: 0, vz: 0, grabbed: null });
+    const t = getTarget();
+    startSlide(f);
+    let maxZ = 0;
+    for (let i = 0; i < 80; i++) { updatePlayer(0.05); maxZ = Math.max(maxZ, G.p.z); }
+    return { label: t && t.label, maxZ, done: !ride, east: G.p.x > f.x + 4, ok: walkable(G.p.x, G.p.y) };
+  });
+  check(sl.label === '爬上溜滑梯' && sl.maxZ > 1.2 && sl.done && sl.east && sl.ok, `溜滑梯要能玩（互動「${sl.label}」、最高 ${sl.maxZ.toFixed(2)}、滑完 ${sl.done}、在東邊 ${sl.east}）`);
+  await page.evaluate(() => { const f = FURN_BY_ID.car; Object.assign(G.p, { x: f.x - 0.6, y: f.y + f.h / 2, face: 0, pitch: 0 }); startSlide(f); });
+  await sleep(1200);
+  await shot('1b-slide');
+  await page.waitForFunction(() => !ride, null, { timeout: 30000 }).catch(() => {});
   await skipToDusk(page);
   await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
   await sleep(400);
@@ -215,10 +230,20 @@ await scenario('w3', '第三世界第 1 天（下車到月台、天黑前車站�
   await sleep(2500);
   let s = await state(page);
   check(s.hud && s.day === 1, `要從第 1 天開始（現在：${s.label}）`);
-  check(await page.evaluate(() => MAP_W === 108 && ROOMS.find(r => r.id === 'engine').name === '機車室' && ROOMS.some(r => r.roof) && DOORS.length === 20 && document.body.classList.contains('w3')), '第三世界要是 108 格長的列車地圖（機車室、車頂、20 扇門）');
+  check(await page.evaluate(() => MAP_W === 74 && ROOMS.find(r => r.id === 'engine').name === '機車室' && ROOMS.some(r => r.roof) && ROOMS.find(r => r.id === 'platform').open && DOORS.length === 12 && document.body.classList.contains('w3')), '第三世界要是 74 格長的列車地圖（機車室、車頂、露天的月台、12 扇門）');
+  check(await page.evaluate(() => document.getElementById('alert').textContent.includes('🎯')), '狀態列要有 🎯 今天的目標');
+  // 駕駛台：站在前面對著它，互動是「拉汽笛」；拉了之後要冷卻
+  const wh = await page.evaluate(() => {
+    const th = FURN_BY_ID.throttle;
+    Object.assign(G.p, { x: th.x + 1.5, y: th.y + 1.6, face: -Math.PI / 2, pitch: 0 });
+    const t = getTarget();
+    pullWhistle();
+    return { label: t && t.label, cd: G.ev.whistleCd };
+  });
+  check(wh.label === '拉汽笛' && wh.cd > 0, `駕駛台要能拉汽笛（互動「${wh.label}」）`);
   await shot('1-start');
   // 下車：站在景觀車廂的車門北邊往南走，白天要走得下月台
-  await page.evaluate(() => { Object.assign(G.p, { x: 63.5, y: 9.3, face: Math.PI / 2, pitch: 0.05 }); });
+  await page.evaluate(() => { Object.assign(G.p, { x: 50.5, y: 9.3, face: Math.PI / 2, pitch: 0.05 }); });
   await page.keyboard.down('w');
   await page.waitForFunction(() => G.p.y > 10.6, null, { timeout: 20000 }).catch(() => {});
   await page.keyboard.up('w');
@@ -252,10 +277,10 @@ await scenario('w3', '第三世界第 1 天（下車到月台、天黑前車站�
   check(fire.n1 === fire.n0 + 1 && fire.w1 === fire.w0 - 1 && fire.left >= 25, `對著火爐用木柴要丟進去（火爐 ${fire.n0}→${fire.n1}，木柴 ${fire.w0}→${fire.w1}）`);
   check(fire.bar, '第三世界要顯示 🔥 火力條');
   // 天黑前 3 秒車站鎖門：門變成牆，還留在車站的人會被拉回車上
-  await page.evaluate(() => { Object.assign(G.p, { x: 36.5, y: 13.5 }); G.t = DAY_LEN - 3.2; });
+  await page.evaluate(() => { Object.assign(G.p, { x: 30.5, y: 13.5 }); G.t = DAY_LEN - 3.2; });
   await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
   await sleep(400);
-  const d = await page.evaluate(() => ({ locked: DOORS.filter(d => d.locked).length, y: G.p.y, solid: isSolid(32, 10), wall: isWall(48, 10) }));
+  const d = await page.evaluate(() => ({ locked: DOORS.filter(d => d.locked).length, y: G.p.y, solid: isSolid(19, 10), wall: isWall(35, 10) }));
   check(d.locked === 3 && d.solid && d.wall, `天黑時車站的三扇門要鎖住、變成牆（鎖了 ${d.locked} 扇）`);
   check(d.y < 10, `留在車站的玩家要被拉回車上（現在 y=${d.y.toFixed(1)}）`);
   const lay = await overlaps(page);
@@ -300,7 +325,7 @@ await scenario('w3cold', '第三世界寒寂之境（?world=3&night=3&cold）：
   await page.waitForFunction(() => mode === 'play');
   await sleep(2000);
   // 站在月台上：體溫每秒掉 2 點（低 FPS 下遊戲時間走得慢，直接比較前後）
-  const t0 = await page.evaluate(() => { Object.assign(G.p, { x: 36.5, y: 13.5, face: -Math.PI / 2 }); return { cold: G.cold, temp: G.p.temp, bar: !document.getElementById('tempBar').classList.contains('hidden') }; });
+  const t0 = await page.evaluate(() => { Object.assign(G.p, { x: 30.5, y: 13.5, face: -Math.PI / 2 }); return { cold: G.cold, temp: G.p.temp, bar: !document.getElementById('tempBar').classList.contains('hidden') }; });
   check(t0.cold && t0.bar, '&cold 要是寒寂之境，狀態列要顯示 🌡️ 體溫');
   await sleep(3000);
   const t1 = await page.evaluate(() => ({ temp: G.p.temp, frost: G.frost, snow: G.fx.length }));
@@ -309,9 +334,9 @@ await scenario('w3cold', '第三世界寒寂之境（?world=3&night=3&cold）：
   await shot('1-platform');
   // 大白燈：放一盞落地燈裝上大白燈，走到大白面前會被抱住、體溫回升
   const h0 = await page.evaluate(() => {
-    Object.assign(G.p, { x: 62.5, y: 7.6, face: -Math.PI / 2, pitch: -0.1 });
+    Object.assign(G.p, { x: 49.5, y: 7.6, face: -Math.PI / 2, pitch: -0.1 });
     G.selId = 'lamp_floor'; useSelected(); installBulb(G.lamps[0], BAYMAX_TIER);
-    Object.assign(G.p, { x: 62.5, y: 6.7 }); G.p.temp = 40;
+    Object.assign(G.p, { x: 49.5, y: 6.7 }); G.p.temp = 40;
     return { ok: G.lamps.length > 0 && G.lamps[0].bulb === BAYMAX_TIER, temp: G.p.temp };
   });
   check(h0.ok, '落地燈要能裝上大白燈');
@@ -323,7 +348,7 @@ await scenario('w3cold', '第三世界寒寂之境（?world=3&night=3&cold）：
   const lay = await overlaps(page);
   check(lay.length === 0, '寒寂之境時版面重疊：' + lay.join('、'));
   // 退後幾步看大白（抱著的時候鏡頭在它身體裡面）
-  await page.evaluate(() => { Object.assign(G.p, { x: 62.5, y: 9.3, face: -Math.PI / 2, pitch: -0.05 }); document.getElementById('hud').style.opacity = '0'; });
+  await page.evaluate(() => { Object.assign(G.p, { x: 49.5, y: 9.3, face: -Math.PI / 2, pitch: -0.05 }); document.getElementById('hud').style.opacity = '0'; });
   await sleep(1500);
   await shot('2-baymax');
 });
@@ -386,7 +411,7 @@ await scenario('monsters2', '第二世界怪物模型（草叢人、大嘴觸角
   await shot('2-flashlight');
 });
 
-await scenario('monsters3', '第三世界怪物模型（克蘿諾斯・蕈裂衣、熔岩暴君、墮落戰神、檮杌・九瞳排成一排，旁邊站著大白燈的大白；手電筒開關各拍一張）', {}, async ({ page, shot, check }) => {
+await scenario('monsters3', '第三世界怪物模型（克羅諾斯・蕈裂、熔岩暴君、墮落戰神、檮杌・九瞳排成一排，旁邊站著大白燈的大白；手電筒開關各拍一張）', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=3&night=6&kit=1', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
   await skipToDusk(page);
@@ -394,14 +419,14 @@ await scenario('monsters3', '第三世界怪物模型（克蘿諾斯・蕈裂衣
   // 在景觀車廂排一排（pose：不追、不咬人，只做待機的動作），玩家在車尾那一頭往車頭看；落地燈裝上大白燈
   const n = await page.evaluate(() => {
     G.enemies = []; G.ev.schedule = [];
-    Object.assign(G.p, { x: 66.5, y: 7.5, face: Math.PI, pitch: -0.06, inv: 999 });
+    Object.assign(G.p, { x: 53.5, y: 7.5, face: Math.PI, pitch: -0.06, inv: 999 });
     const put = (kind, x, y, extra) => Object.assign(spawnEnemy(kind, { x, y }), { spawn: 0, pose: true, face: 0 }, extra);
-    put('kronos', 62.8, 5.7, { thrust: 0.3 });
-    put('tyrant', 60.2, 8.9);
-    put('warlord', 62.8, 9.1);
-    put('taowu', 59.6, 6.1);
-    G.p.x = 64.5; G.p.y = 5.8; G.selId = 'lamp_floor'; useSelected(); installBulb(G.lamps[0], BAYMAX_TIER);
-    Object.assign(G.p, { x: 66.5, y: 7.5, face: Math.PI });
+    put('kronos', 49.8, 5.7, { thrust: 0.3 });
+    put('tyrant', 47.2, 8.9);
+    put('warlord', 49.8, 9.1);
+    put('taowu', 46.6, 6.1);
+    G.p.x = 50.5; G.p.y = 5.8; G.selId = 'lamp_floor'; useSelected(); installBulb(G.lamps[0], BAYMAX_TIER);
+    Object.assign(G.p, { x: 53.5, y: 7.5, face: Math.PI });
     return G.enemies.length + G.lamps.filter(l => l.bulb === BAYMAX_TIER).length;
   });
   check(n === 5, `要放好 4 隻怪物和大白（現在 ${n}）`);
@@ -433,7 +458,7 @@ await scenario('w3roof', '第三世界的車頂（爬梯上去、風、檮杌會
   // 對著景觀車廂的爬梯：互動是「爬上車頂」；爬上去之後站在車頂（地板比較高）
   const up = await page.evaluate(() => {
     G.enemies = []; G.ev.schedule = []; G.train.k = 1;
-    Object.assign(G.p, { x: 69.5, y: 7.5, face: 0, pitch: 0 });
+    Object.assign(G.p, { x: 56.5, y: 7.5, face: 0, pitch: 0 });
     const t1 = getTarget();
     climbRoof(FURN_BY_ID.ladder2);
     Object.assign(G.p, { face: Math.PI, pitch: -0.05 });
@@ -446,7 +471,7 @@ await scenario('w3roof', '第三世界的車頂（爬梯上去、風、檮杌會
   await shot('1-roof');
   // 檮杌會跟上車頂：牠在車廂裡、你在車頂，4 秒後牠從最近的艙口跳上來（直接呼叫牠的更新函式，不用等低 FPS 的遊戲時間）
   const tw = await page.evaluate(() => {
-    const e = Object.assign(spawnEnemy('taowu', { x: 60.5, y: 7.5 }), { spawn: 0 });
+    const e = Object.assign(spawnEnemy('taowu', { x: 47.5, y: 7.5 }), { spawn: 0 });
     for (let i = 0; i < 60; i++) updateTaowu(e, 0.1);
     return { roof: onRoof(e.x, e.y), pos: [Math.round(e.x), Math.round(e.y)] };
   });
@@ -454,7 +479,7 @@ await scenario('w3roof', '第三世界的車頂（爬梯上去、風、檮杌會
   // 艙口：互動是「爬回車廂」，爬下去之後站在爬梯旁邊
   const down = await page.evaluate(() => {
     G.enemies = [];
-    Object.assign(G.p, { x: 70.5, y: 2.5, face: 0 });
+    Object.assign(G.p, { x: 57.5, y: 2.5, face: 0 });
     const t2 = getTarget();
     climbDown(FURN_BY_ID.hatch2);
     return { label: t2 && t2.label, roof: onRoof(G.p.x, G.p.y), ok: walkable(G.p.x, G.p.y), room: roomAt(G.p.x, G.p.y).name };
@@ -462,18 +487,18 @@ await scenario('w3roof', '第三世界的車頂（爬梯上去、風、檮杌會
   check(down.label === '爬回車廂' && !down.roof && down.ok && down.room === '景觀車廂', `艙口要能爬回車廂（互動「${down.label}」、房間「${down.room}」）`);
   // 墮落戰神：從列車的一頭巡邏到另一頭（走得動、一直在走道裡）；你躲進包廂牠就在門外的走道上等，不會進來
   const wl = await page.evaluate(() => {
-    Object.assign(G.p, { x: 63.5, y: 7.5, face: Math.PI });
+    Object.assign(G.p, { x: 50.5, y: 7.5, face: Math.PI });
     const e = Object.assign(spawnEnemy('warlord', warlordSpawn()), { spawn: 0 });
     const x0 = e.x;
     let hall = true;
     for (let i = 0; i < 40; i++) { updateWarlord(e, 0.1); if (!inHall(e.x, e.y)) hall = false; }
     const walked = Math.abs(e.x - x0);
-    // 玩家躲進商務包廂 B，戰神從走道衝過來
-    Object.assign(G.p, { x: 79.5, y: 8.6 });
-    Object.assign(e, { x: 74.5, y: 5.5, state: 'charge', waitT: 0, pt: null });
+    // 玩家躲進臥鋪 B，戰神從走道衝過來
+    Object.assign(G.p, { x: 65.5, y: 8.6 });
+    Object.assign(e, { x: 60.5, y: 5.5, state: 'charge', waitT: 0, pt: null });
     let inside = false;
     for (let i = 0; i < 60; i++) { updateWarlord(e, 0.1); if (roomAt(e.x, e.y) && roomAt(e.x, e.y).comp) inside = true; }
-    return { walked, hall, state: e.state, wait: [Math.round(e.x * 10) / 10, Math.round(e.y * 10) / 10], inside, near: Math.hypot(e.x - 79.5, e.y - 6.5) < 1.3 };
+    return { walked, hall, state: e.state, wait: [Math.round(e.x * 10) / 10, Math.round(e.y * 10) / 10], inside, near: Math.hypot(e.x - 66.5, e.y - 6.5) < 1.3 };
   });
   check(wl.walked > 3 && wl.hall, `墮落戰神要在走道裡巡邏（走了 ${wl.walked.toFixed(1)} 格、一直在走道 ${wl.hall}）`);
   check(wl.state === 'wait' && wl.near && !wl.inside, `躲進包廂時戰神要在門外等（狀態 ${wl.state}、位置 ${wl.wait}、進過包廂 ${wl.inside}）`);
@@ -576,12 +601,18 @@ await scenario('book', '怪物圖鑑（沒見過的只有問號；見過的卡�
   s = await stat();
   check(s.built > before && s.unseen === 0, `見過第二世界的怪物要建出新的模型（建了 ${s.built} 隻）`);
   await shot('3-scrolled');
-  // 第三世界：4 隻新怪物（卡片上寫鬼將級／羅判級／判官級）
+  // 第三世界：每張卡片都寫著九級裡的哪一級（蕈裂鬼將級、熔岩暴君和墮落戰神判官級、檮杌羅剎級），邊框是那一級的顏色；上面有九級的說明列
   await page.click('#bookTabs button[data-w="3"]');
   await sleep(2500);
   s = await stat();
-  const grades = await page.evaluate(() => [...document.querySelectorAll('#bookList .card .grade')].map(e => e.textContent));
-  check(s.stages === s.cards && grades.length === 4 && grades.includes('判官級'), `第三世界要有 4 張寫著等級的卡片（${grades.join('、')}）`);
+  const gr = await page.evaluate(() => ({
+    grades: [...document.querySelectorAll('#bookList .card .grade')].map(e => e.textContent),
+    cards: document.querySelectorAll('#bookList .card').length,
+    border: getComputedStyle(document.querySelector('#bookList .card.g-rakshasa .stage')).borderTopColor,
+    legend: document.querySelectorAll('#bookGrades .gtag').length,
+  }));
+  check(s.stages === s.cards && gr.grades.length === gr.cards && gr.grades.filter(g => g === '判官級').length === 2 && gr.grades.includes('羅剎級') && gr.grades.includes('鬼將級'), `第三世界每張卡片都要寫等級（${gr.grades.join('、')}）`);
+  check(gr.border === 'rgb(255, 138, 42)' && gr.legend === 9, `檮杌的卡片邊框要是羅剎級的橘色、上面要有九級的說明列（邊框 ${gr.border}、說明 ${gr.legend} 級）`);
   await shot('4-world3');
   await page.evaluate(() => { document.querySelector('#book .panel').scrollTop = 99999; });
   await sleep(1500);

@@ -12,7 +12,7 @@ const NIGHT_DARK = 0.94;
 const INTRO = { stick: 1, blob: 2, flower: 2, woman: 3, clown: 3, tv: 4, momo: 4, tall: 5 };
 // 第二世界的新怪物：一夜登場一隻
 const INTRO2 = { sunflower: 1, shroom: 2, grass: 3, snail: 4, girl: 5 };
-// 第三世界的新怪物：克蘿諾斯・蕈裂衣、熔岩暴君、墮落戰神、檮杌・九瞳（最後一夜也一定來）
+// 第三世界的新怪物：克羅諾斯・蕈裂、熔岩暴君、墮落戰神、檮杌・九瞳（最後一夜也一定來）
 const INTRO3 = { kronos: 1, tyrant: 4, warlord: 7, taowu: 10 };
 const PROG_KEY = 'home99_progress_v1';   // 已解鎖的世界（跟存檔分開，破關刪存檔時不會被刪掉）
 // 測試版（test.html 會先設 window.TEST_MODE = true）：所有世界和圖鑑的怪物都開著、新遊戲可以從任一夜開始；
@@ -64,7 +64,7 @@ function applyWorld(w) {
   w = worldOf(w);
   if (w === curWorld && tiles) return;
   curWorld = w;
-  [MAP_W, MAP_H] = MAP_SIZE[w];   // 第三世界的地圖是一列長長的列車
+  [MAP_W, MAP_H] = MAP_SIZE[w];   // 第三世界的地圖是一列長長的列車（74 格）
   ROOMS.length = 0; ROOMS.push(...roomsForWorld(w));
   SOCKETS.length = 0; SOCKETS.push(...socketsForWorld(w));
   FURN.length = 0;
@@ -222,7 +222,7 @@ function newGame(diff = 'normal', world = 1, carry = null) {
 
 function startPlay() {
   mode = 'play';
-  flow = null;
+  flow = null; ride = null;
   invDirty = true;
   for (const id of ['title', 'help', 'pause', 'gameover', 'book', 'transfer', 'diffPick', 'worldPick']) $(id).classList.add('hidden');
   $('hud').classList.remove('hidden');
@@ -238,7 +238,7 @@ function saveGame() {
     v: 1, day: G.day, diff: G.diff, world: G.world || 1,
     p: { x: G.p.x, y: G.p.y, hp: G.p.hp, san: G.p.san, hunger: G.p.hunger, bat: G.p.bat, flashLv: G.p.flashLv },
     inv: G.inv, selId: G.selId,
-    sockets: G.sockets.map(s => s.bulb),
+    sockets: G.sockets.map(s => s.bulb), socketIds: G.sockets.map(s => s.id),   // 燈座用 id 對，地圖改版燈泡才不會裝錯位置
     lamps: G.lamps.map(l => ({ type: l.type, x: l.x, y: l.y, bulb: l.bulb })),
     containers: G.containers, stats: G.stats,
     flowers: G.flowers.map(f => ({ x: f.x, y: f.y, lv: f.lv, pt: f.ptype || 'eye', g: Math.round(f.grow * 100) / 100 })),
@@ -268,7 +268,15 @@ function loadGame() {
   if (!walkable(G.p.x, G.p.y)) Object.assign(G.p, world === 3 ? W3.start : { x: 19.5, y: 23, face: -Math.PI / 2 });
   G.inv = s.inv || {};
   G.selId = s.selId;
-  (s.sockets || []).forEach((b, i) => { if (G.sockets[i]) G.sockets[i].bulb = b; });
+  // 燈座裡的燈泡：新存檔有燈座的 id；2026/10/11 以前的第三世界存檔（21 個燈座的舊地圖）照舊的順序對 id。
+  // 對不到的燈座（拿掉的車廂）上面的燈泡收回背包，不會不見
+  const OLD_W3 = ['s_engine', 's_baggage', 's_coach1', 's_coach2', 's_dining1', 's_dining2', 's_lounge', 's_lounge2', 's_business', 's_comp1', 's_comp2', 's_comp3', 's_sleeper', 's_berth1', 's_berth2', 's_berth3', 's_wash', 's_platform1', 's_platform2', 's_waiting', 's_office'];
+  const ids = s.socketIds || (world === 3 && (s.sockets || []).length === OLD_W3.length ? OLD_W3 : null);
+  (s.sockets || []).forEach((b, i) => {
+    const so = ids ? G.sockets.find(x => x.id === ids[i]) : G.sockets[i];
+    if (so) so.bulb = b;
+    else if (b && BULBS[b]) G.inv['bulb' + b] = (G.inv['bulb' + b] || 0) + 1;
+  });
   G.lamps = (s.lamps || []).filter(l => walkable(l.x + 0.5, l.y + 0.5)).map(l => ({ kind: 'lamp', ...l, dying: 0, room: roomGrid[l.y][l.x] }));
   G.containers = s.containers || {};
   for (const f of FURN) if (f.loot && !G.containers[f.id]) G.containers[f.id] = { items: [] };
@@ -606,15 +614,15 @@ const BASE_HP = {
 const MONSTER_NAME = {
   shadow: '黑影', fast: '衣櫃怪', blob: '黑球', stick: '火柴人', balloon: '紅氣球', flower: '眼球花', woman: '血淚女', momo: '鳥腳女', crawler: '爬行女', clown: '小丑', tall: '它',
   sunflower: '向日葵眼', shroom: '千眼菇', grass: '草叢人', snail: '大嘴觸角蟲', girl: '眼花女孩',
-  kronos: '克蘿諾斯・蕈裂衣', tyrant: '熔岩暴君', warlord: '墮落戰神', taowu: '檮杌・九瞳',
+  kronos: '克羅諾斯・蕈裂', tyrant: '熔岩暴君', warlord: '墮落戰神', taowu: '檮杌・九瞳',
 };
 const BOSSES = ['woman', 'momo', 'crawler', 'clown', 'tall', 'snail', 'girl', 'tyrant', 'warlord', 'taowu'];
 // 長在地上的植物怪（眼球花、向日葵眼、千眼菇）放在 G.flowers，用 ptype 分種類
 const plantKind = t => (t.ptype === 'sunflower' ? 'sunflower' : t.ptype === 'shroom' ? 'shroom' : 'flower');
 const kindOf = t => t.kind || plantKind(t);
-// 第二世界的怪物比第一世界高 2 級，第三世界再高 2 級
+// 第二世界的怪物比第一世界高 2 級，第三世界再高 1 級
 function rollLevel() {
-  let lv = 1 + Math.floor((G.day - 1) / 2) + (Math.random() < 0.35 ? 1 : 0) + D().lv + (isW3() ? 4 : isW2() ? 2 : 0);
+  let lv = 1 + Math.floor((G.day - 1) / 2) + (Math.random() < 0.35 ? 1 : 0) + D().lv + (isW3() ? 3 : isW2() ? 2 : 0);
   if (G.ev && G.ev.blood) lv++;
   return clamp(lv, 1, isW3() ? 12 : isW2() ? 10 : 8);
 }
@@ -662,7 +670,7 @@ function defeatMonster(t) {
     blob: '⚫ 黑球被打散了！', stick: '✏️ 火柴人被燒掉了！', balloon: '🎈 氣球破了！小丑找不到你了。', flower: '🌼 眼球花枯萎了。',
     woman: '😢 血淚女消散了！', momo: '🐦 鳥腳女被打跑了！', crawler: '📺 爬行女被打倒了，電視也關掉了！', clown: '🤡 小丑被打倒了！', tall: '👁️ 你打倒了「它」！',
     sunflower: '🌻 向日葵眼枯萎了。', shroom: '🍄 千眼菇被打爛了！', grass: '🌿 草叢人被打倒了！', snail: '🐌 大嘴觸角蟲被打倒了！', girl: '👧 眼花女孩消散了！',
-    kronos: '🍄 蕈裂衣的蘑菇傘碎了！掉了 2 塊木炭。', tyrant: '🪨 熔岩暴君碎成了一堆石頭！', warlord: '⚔️ 墮落戰神倒下了，斗篷散落一地。', taowu: '👁️ 你打倒了檮杌・九瞳！',
+    kronos: '🍄 蕈裂的蘑菇傘碎了！掉了 2 塊木炭。', tyrant: '🪨 熔岩暴君碎成了一堆石頭！', warlord: '⚔️ 墮落戰神倒下了，斗篷散落一地。', taowu: '👁️ 你打倒了檮杌・九瞳！',
   }[kind];
   if (msg && (BOSSES.includes(kind) || !G.ev['kill_' + kind])) { G.ev['kill_' + kind] = 1; toast(`${msg}（Lv.${t.lv}）`, 'good'); }
 }
@@ -1675,28 +1683,30 @@ function thumbClown(c, S) {
   c.translate(-8, 16); drawClownFace(c, 180);
   c.restore();
 }
+// grade：九級裡的哪一級（GRADES，data.js）。第一世界：黑影、火柴人、眼球花是鬼兵；衣櫃怪、黑球是鬼差；血淚女、小丑、鳥腳女是厲鬼；爬行女是鬼將；「它」是鬼王。
+// 第二世界：向日葵眼鬼兵、千眼菇和草叢人鬼差、大嘴觸角蟲厲鬼、眼花女孩鬼王。第三世界照設計圖：蕈裂紫色鬼將級、熔岩暴君和墮落戰神黃色判官級、檮杌橘色羅剎級
 const BESTIARY = [
-  { name: '黑影', night: 1, kind: 'shadow', draw: thumbShadow('#ff3344'), desc: '到處追你，燈光也擋不住牠。手電筒照著牠會一直扣血，平底鍋一敲就散掉。' },
-  { name: '火柴人', night: INTRO.stick, kind: 'stick', draw: thumbStick, desc: '會穿牆，一邊吹口哨一邊朝你揮手走過來，走得很慢。紙做的身體被手電筒照到就會燒起來。' },
-  { name: '衣櫃怪', night: 2, kind: 'fast', draw: thumbShadow('#ffd23a', true), in: [1, 3], desc: '衣櫃晃動時沒去按住 E 壓住門，就會衝出來，速度很快。' },
-  { name: '黑球', night: INTRO.blob, kind: 'blob', draw: thumbBlob, desc: '不追你，專門去吃燈，每吃一次燈泡降一級，特殊燈泡會直接被吃掉。用手電筒照牠、用彈弓打牠。' },
-  { name: '眼球花', night: INTRO.flower, flower: 'eye', draw: thumbFlower, desc: '長在屋子裡、白天也不會消失。被它盯 3 秒它就會尖叫，把黑影叫過來。用手電筒照它、用平底鍋打它，或走過去按住 E 拔掉。' },
-  { name: '血淚女', night: INTRO.woman, kind: 'woman', draw: drawWomanFace, desc: '你看著她，她就不會動；但一直盯著她，理智會快速下降。看著她走過去，用平底鍋或聖水槍打她！' },
-  { name: '小丑', night: INTRO.clown, kind: 'clown', draw: thumbClown, desc: '先會飄來一顆紅氣球，用手電筒照破或用武器打破它。讓氣球碰到你，小丑就會拿著刀出現在你背後！撒鹽巴可以把他推開。' },
-  { name: '爬行女', night: INTRO.tv, kind: 'crawler', draw: drawCrawlerFace, in: [1], desc: '客廳的電視自己打開後，不快點關掉，她就會從螢幕裡爬出來。關掉電視或把她打倒都可以。' },
-  { name: '鳥腳女', night: INTRO.momo, kind: 'momo', draw: drawMomoFace, desc: '眼睛不好，靠聲音找你，一跳一跳地追過來。別奔跑，輕輕推搖桿慢慢走。鞭炮很吵會把她引過去！手電筒照到她的眼鏡會讓她暫時看不見。' },
-  { name: '它', night: INTRO.tall, kind: 'tall', draw: thumbTall, desc: '高大又非常耐打，手電筒和武器對它只有一半效果。靠聖水槍、鞭炮、天使和火球一起對付它。' },
+  { name: '黑影', night: 1, grade: 'soldier', kind: 'shadow', draw: thumbShadow('#ff3344'), desc: '到處追你，燈光也擋不住牠。手電筒照著牠會一直扣血，平底鍋一敲就散掉。' },
+  { name: '火柴人', night: INTRO.stick, grade: 'soldier', kind: 'stick', draw: thumbStick, desc: '會穿牆，一邊吹口哨一邊朝你揮手走過來，走得很慢。紙做的身體被手電筒照到就會燒起來。' },
+  { name: '衣櫃怪', night: 2, grade: 'runner', kind: 'fast', draw: thumbShadow('#ffd23a', true), in: [1, 3], desc: '衣櫃晃動時沒去按住 E 壓住門，就會衝出來，速度很快。' },
+  { name: '黑球', night: INTRO.blob, grade: 'runner', kind: 'blob', draw: thumbBlob, desc: '不追你，專門去吃燈，每吃一次燈泡降一級，特殊燈泡會直接被吃掉。用手電筒照牠、用彈弓打牠。' },
+  { name: '眼球花', night: INTRO.flower, grade: 'soldier', flower: 'eye', draw: thumbFlower, desc: '長在屋子裡、白天也不會消失。被它盯 3 秒它就會尖叫，把黑影叫過來。用手電筒照它、用平底鍋打它，或走過去按住 E 拔掉。' },
+  { name: '血淚女', night: INTRO.woman, grade: 'fierce', kind: 'woman', draw: drawWomanFace, desc: '你看著她，她就不會動；但一直盯著她，理智會快速下降。看著她走過去，用平底鍋或聖水槍打她！' },
+  { name: '小丑', night: INTRO.clown, grade: 'fierce', kind: 'clown', draw: thumbClown, desc: '先會飄來一顆紅氣球，用手電筒照破或用武器打破它。讓氣球碰到你，小丑就會拿著刀出現在你背後！撒鹽巴可以把他推開。' },
+  { name: '爬行女', night: INTRO.tv, grade: 'general', kind: 'crawler', draw: drawCrawlerFace, in: [1], desc: '客廳的電視自己打開後，不快點關掉，她就會從螢幕裡爬出來。關掉電視或把她打倒都可以。' },
+  { name: '鳥腳女', night: INTRO.momo, grade: 'fierce', kind: 'momo', draw: drawMomoFace, desc: '眼睛不好，靠聲音找你，一跳一跳地追過來。別奔跑，輕輕推搖桿慢慢走。鞭炮很吵會把她引過去！手電筒照到她的眼鏡會讓她暫時看不見。' },
+  { name: '它', night: INTRO.tall, grade: 'king', kind: 'tall', draw: thumbTall, desc: '高大又非常耐打，手電筒和武器對它只有一半效果。靠聖水槍、鞭炮、天使和火球一起對付它。' },
   // 第二世界：夢核花園
-  { world: 2, in: [2], name: '向日葵眼', night: INTRO2.sunflower, flower: 'sunflower', draw: thumbSunflower, desc: '長在地上不會動，會轉向最亮的光。你開著手電筒被它看到，它就會盯著你、往你腳邊吐種子。關掉手電筒走過去打它或按住 E 拔掉；種子吐過來時跳起來就打不到。' },
-  { world: 2, in: [2], name: '千眼菇', night: INTRO2.shroom, flower: 'shroom', draw: thumbShroom, desc: '長滿眼睛的大蘑菇，不會動，四面八方都看得到。靠近它會撒孢子，理智掉很快、畫面變得暈暈的。用手電筒照它，眼睛就會閉起來。每天早上旁邊會再長出一朵小的，要趕快打掉！' },
-  { world: 2, in: [2], name: '草叢人', night: INTRO2.grass, kind: 'grass', draw: thumbGrass, desc: '躲在草裡移動，只看得到一叢草在晃。靠近時會突然撲出來抓你的腳：撲過來的瞬間跳起來就抓不到；被抓住就連按「跳」5 下掙脫。用手電筒照晃動的草叢可以把牠逼出來。' },
-  { world: 2, in: [2, 3], name: '大嘴觸角蟲', night: INTRO2.snail, kind: 'snail', draw: thumbSnail, desc: '爬得很慢但非常耐打，爬過的地方留下黏液，踩到會變慢（跳過去就沒事）。用手電筒照牠，觸角會縮回去、停 2 秒；🧂鹽巴對牠的傷害是 3 倍！' },
-  { world: 2, in: [2, 3], name: '眼花女孩', night: INTRO2.girl, kind: 'girl', draw: thumbGirl, desc: '第二世界的大魔王。靠樹枝上的兩顆眼球花看東西，被盯著會「眼花」，畫面晃、走路歪。她還會種下眼睛種子，長大就變成向日葵眼（還沒長大前可以踩掉）。手電筒照她會變瞎子，聖水槍特別有效。' },
-  // 第三世界：末班列車（鬼將級 ＜ 羅判級 ＜ 判官級）
-  { world: 3, in: [3], name: '克蘿諾斯・蕈裂衣', grade: '鬼將級', night: INTRO3.kronos, kind: 'kronos', draw: thumbKronos, desc: '戴著裂開蘑菇傘的駝背矮人，在包廂和走道裡一跛一跛地遊蕩，離你 2.5 格就用骨矛刺你。被刺中夜晚的時鐘會倒退 10 秒，被刺 3 次以上牠會噴孢子讓你變慢。牠怕光：手電筒照蘑菇傘牠會冒煙往後退；有燒的火爐牠不敢靠近，機車室是安全的。鹽巴和平底鍋都有效，打倒會掉 2 塊木炭。' },
-  { world: 3, in: [3], name: '熔岩暴君', grade: '羅判級', night: INTRO3.tyrant, kind: 'tyrant', draw: thumbTyrant, desc: '2.6 公尺的岩石巨人，縫隙透出熔岩光。走得慢但非常耐打，每走 5 步跺一次腳，2 格內會被震倒（跳起來就不會）；走過的地毯會燒出熔岩，踩到會扣血，15 秒後才冷卻。手電筒對岩石沒用：用聖水槍噴牠會「嘶——」地冷卻，3 秒內不會動，這時用平底鍋敲會碎掉一塊（大傷害）；鞭炮也有效。寒寂之境時牠身邊 3 格很溫暖，但靠近就會被打。' },
-  { world: 3, in: [3], name: '墮落戰神', grade: '羅判級', night: INTRO3.warlord, kind: 'warlord', draw: thumbWarlord, desc: '披著破斗篷、骷髏臉的高大戰士，拖著一把比人還長的大劍。牠只在走道裡走，看到你就衝過來，2 格內橫掃一劍把你打飛撞牆。牠不進包廂：躲進包廂、對著門按 E 關上就安全（牠會在門外等 10 秒再走）。正面有盔甲，傷害只有一半；從背後打傷害 3 倍。鞭炮會讓牠停下來。看到牠把劍舉高就趕快退開。' },
-  { world: 3, in: [3], name: '檮杌・九瞳', grade: '判官級', night: INTRO3.taowu, kind: 'taowu', draw: thumbTaowu, desc: '第三世界的大魔王，最後一夜一定會來。四腳的紫黑色巨獸，臉上聚著九顆眼睛，看得到一切，永遠知道你在哪裡，會撞壞關上的門，靠近時撲過來咬，每 15 秒咆哮一次讓理智大掉。用手電筒照牠的臉，被照到的眼睛會一顆一顆閉上（巨光手電筒最快）；九顆都閉上牠就瞎了 10 秒，亂撞、所有傷害 3 倍。聖水槍、鞭炮、火球、天使全部有效。' },
+  { world: 2, in: [2], name: '向日葵眼', night: INTRO2.sunflower, grade: 'soldier', flower: 'sunflower', draw: thumbSunflower, desc: '長在地上不會動，會轉向最亮的光。你開著手電筒被它看到，它就會盯著你、往你腳邊吐種子。關掉手電筒走過去打它或按住 E 拔掉；種子吐過來時跳起來就打不到。' },
+  { world: 2, in: [2], name: '千眼菇', night: INTRO2.shroom, grade: 'runner', flower: 'shroom', draw: thumbShroom, desc: '長滿眼睛的大蘑菇，不會動，四面八方都看得到。靠近它會撒孢子，理智掉很快、畫面變得暈暈的。用手電筒照它，眼睛就會閉起來。每天早上旁邊會再長出一朵小的，要趕快打掉！' },
+  { world: 2, in: [2], name: '草叢人', night: INTRO2.grass, grade: 'runner', kind: 'grass', draw: thumbGrass, desc: '躲在草裡移動，只看得到一叢草在晃。靠近時會突然撲出來抓你的腳：撲過來的瞬間跳起來就抓不到；被抓住就連按「跳」5 下掙脫。用手電筒照晃動的草叢可以把牠逼出來。' },
+  { world: 2, in: [2, 3], name: '大嘴觸角蟲', night: INTRO2.snail, grade: 'fierce', kind: 'snail', draw: thumbSnail, desc: '爬得很慢但非常耐打，爬過的地方留下黏液，踩到會變慢（跳過去就沒事）。用手電筒照牠，觸角會縮回去、停 2 秒；🧂鹽巴對牠的傷害是 3 倍！' },
+  { world: 2, in: [2, 3], name: '眼花女孩', night: INTRO2.girl, grade: 'king', kind: 'girl', draw: thumbGirl, desc: '第二世界的大魔王。靠樹枝上的兩顆眼球花看東西，被盯著會「眼花」，畫面晃、走路歪。她還會種下眼睛種子，長大就變成向日葵眼（還沒長大前可以踩掉）。手電筒照她會變瞎子，聖水槍特別有效。' },
+  // 第三世界：末班列車（鬼將級 ＜ 判官級 ＜ 羅剎級）
+  { world: 3, in: [3], name: '克羅諾斯・蕈裂', grade: 'general', night: INTRO3.kronos, kind: 'kronos', draw: thumbKronos, desc: '戴著裂開蘑菇傘的駝背矮人，在包廂和走道裡一跛一跛地遊蕩，離你 2.5 格就用骨矛刺你。被刺中夜晚的時鐘會倒退 10 秒，被刺 3 次以上牠會噴孢子讓你變慢。牠怕光：手電筒照蘑菇傘牠會冒煙往後退；有燒的火爐牠不敢靠近，機車室是安全的。鹽巴和平底鍋都有效，打倒會掉 2 塊木炭。' },
+  { world: 3, in: [3], name: '熔岩暴君', grade: 'judge', night: INTRO3.tyrant, kind: 'tyrant', draw: thumbTyrant, desc: '2.6 公尺的岩石巨人，縫隙透出熔岩光。走得慢但非常耐打，每走 5 步跺一次腳，2 格內會被震倒（跳起來就不會）；走過的地毯會燒出熔岩，踩到會扣血，15 秒後才冷卻。手電筒對岩石沒用：用聖水槍噴牠會「嘶——」地冷卻，3 秒內不會動，這時用平底鍋敲會碎掉一塊（大傷害）；鞭炮也有效。寒寂之境時牠身邊 3 格很溫暖，但靠近就會被打。' },
+  { world: 3, in: [3], name: '墮落戰神', grade: 'judge', night: INTRO3.warlord, kind: 'warlord', draw: thumbWarlord, desc: '披著破斗篷、骷髏臉的高大戰士，拖著一把比人還長的大劍。牠只在走道裡走，看到你就衝過來，2 格內橫掃一劍把你打飛撞牆。牠不進包廂：躲進包廂、對著門按 E 關上就安全（牠會在門外等 10 秒再走）。正面有盔甲，傷害只有一半；從背後打傷害 3 倍。鞭炮會讓牠停下來。看到牠把劍舉高就趕快退開。' },
+  { world: 3, in: [3], name: '檮杌・九瞳', grade: 'rakshasa', night: INTRO3.taowu, kind: 'taowu', draw: thumbTaowu, desc: '第三世界的大魔王，最後一夜一定會來。四腳的紫黑色巨獸，臉上聚著九顆眼睛，看得到一切，永遠知道你在哪裡，會撞壞關上的門，靠近時撲過來咬，每 15 秒咆哮一次讓理智大掉。用手電筒照牠的臉，被照到的眼睛會一顆一顆閉上（巨光手電筒最快）；九顆都閉上牠就瞎了 10 秒，亂撞、所有傷害 3 倍。聖水槍、鞭炮、火球、天使全部有效。' },
 ];
 // 這隻怪物會在哪些世界出現（圖鑑分頁用）
 const monsterWorlds = m => m.in || [1, 2, 3];
@@ -1716,8 +1726,9 @@ function showBookPage(w) {
   const live = !!(window.Renderer && Renderer.book && Renderer.book.ok()), items = [], seen = seenSet();
   for (const m of BESTIARY) {
     if (!monsterWorlds(m).includes(w)) continue;
-    const card = document.createElement('div');
-    card.className = 'card';
+    const card = document.createElement('div'), gr = GRADES[m.grade] || GRADES.soldier;
+    card.className = 'card g-' + m.grade;
+    card.style.setProperty('--gc', gr.color);   // 邊框和等級標籤的顏色（閻羅、酆都級用 CSS 動畫閃）
     let pic;
     if (!seen.has(bookKey(m))) {
       // 沒見過的怪物：只有一個大大的問號（暗色的剪影），名字和說明照樣顯示
@@ -1734,24 +1745,33 @@ function showBookPage(w) {
     }
     const info = document.createElement('div');
     const when = (m.world || 1) === w ? `第 ${m.night} 夜起` : '第 1 夜起';
-    info.innerHTML = `<h4>${m.name}${m.grade ? `<span class="night grade">${m.grade}</span>` : ''}<span class="night">${when}</span></h4><p>${m.desc}</p>`;
+    info.innerHTML = `<h4>${m.name}<span class="night grade">${gr.name}級</span><span class="night">${when}</span></h4><p>${m.desc}</p>`;
     card.append(pic, info);
     list.appendChild(card);
   }
   if (live) Renderer.book.show(items);
   $('bookUnseen').classList.toggle('hidden', !list.querySelector('.card.unseen'));
   $('bookNote').textContent = w === 3
-    ? '第三世界的怪物最強，新怪物分成鬼將級、羅判級、判官級（最後一夜的大魔王）。第一世界的怪物（爬行女除外）和第二世界的大嘴觸角蟲、眼花女孩也都會來，第 1 夜就可能出現。'
+    ? '第三世界的怪物最強：克羅諾斯・蕈裂是鬼將級，熔岩暴君和墮落戰神是判官級，檮杌・九瞳是羅剎級（最後一夜的大魔王）。第一世界的怪物（爬行女除外）和第二世界的大嘴觸角蟲、眼花女孩也都會來，第 1 夜就可能出現。'
     : w === 2
-      ? '第二世界的怪物等級比較高。第一世界的怪物也都會來（爬行女和衣櫃怪除外），而且第 1 夜就可能出現。'
-      : '所有怪物都有等級（Lv）和血量，夜晚越後面等級越高、越耐打。';
+      ? '第二世界的怪物等級比較高，大魔王眼花女孩是鬼王級。第一世界的怪物也都會來（爬行女和衣櫃怪除外），而且第 1 夜就可能出現。'
+      : '所有怪物都有等級（Lv）和血量，夜晚越後面等級越高、越耐打。「它」是第一世界的鬼王。';
+  // 九級的說明列：每一級用自己的顏色
+  const legend = $('bookGrades');
+  if (legend && !legend.children.length) {
+    for (const k of GRADE_ORDER) {
+      const g = GRADES[k], el = document.createElement('span');
+      el.className = 'gtag g-' + k; el.style.setProperty('--gc', g.color); el.textContent = g.name;
+      legend.appendChild(el);
+    }
+  }
 }
 
 // ====================================================================
 // 12 夜版的難度：越後面越難（第 12 夜大約是原本的第 30 夜）
 // ====================================================================
-// 第二世界比較難：第二世界第 1 夜大約是第一世界第 5 夜；第三世界第 1 夜大約是第二世界第 5 夜
-const diffN = () => (G.day + (isW3() ? 8 : isW2() ? 4 : 0)) * 2.5;
+// 第二世界比較難：第二世界第 1 夜大約是第一世界第 5 夜；第三世界第 1 夜大約是第二世界第 2 夜（設計師說太容易死，調低了）
+const diffN = () => (G.day + (isW3() ? 5 : isW2() ? 4 : 0)) * 2.5;
 const D = () => DIFFS[(G && G.diff) || 'normal'] || DIFFS.normal; // 玩家選的難度
 const randi = (a, b) => Math.floor(rand(a, b + 1));
 const fixtures = () => [...G.sockets, ...G.lamps];
@@ -2405,7 +2425,7 @@ function startNight() {
   const intro = k => (w2 || w3 ? 0 : INTRO[k]);
   // 登場之後每晚還會再來的機率
   const again = (base, k = 1) => Math.random() < Math.min(base + n * 0.01, 0.9) * (ev.blood ? 1.3 : 1) * k;
-  const old = w2 ? 0.75 : w3 ? 0.7 : 1;
+  const old = w2 ? 0.75 : w3 ? 0.5 : 1;   // 第三世界的舊怪物少一點（太容易死）
   if (w3) startNight3();
   if (night === 1) add('knock', 40, 60);
   else if (Math.random() < 0.8) add('knock', 15, NIGHT_LEN - 25);
@@ -2740,6 +2760,7 @@ function updatePlayer(dt) {
   if (sticky && !G.ev.trailTip) { G.ev.trailTip = 1; toast('🐌 踩到黏液了，走不快！跳過去就不會變慢。', 'warn'); }
   const sp = (sprint ? 4.8 : 3.0) * (sneakKey && !sprint ? 0.45 : 1) * (sticky ? 0.45 : 1) * (isW3() ? speedMult3() : 1);
   if (p.stunT > 0) { p.stunT -= dt; fwd = 0; str = 0; }   // 被震倒、被打飛：動不了
+  if (ride) { updateSlide(dt); fwd = 0; str = 0; }          // 正在玩溜滑梯：照固定路線走
   if (sprint) p.stam -= 28 * dt; else p.stam = Math.min(100, p.stam + 16 * dt);
   const c = Math.cos(p.face), s = Math.sin(p.face);
   const mx = c * fwd - s * str, my = s * fwd + c * str;
@@ -2848,6 +2869,10 @@ function getTarget() {
     else if (f.type === 'bed' && G.phase === 'day') {
       if (G.t < DAY_LEN - 25) cands.push({ d, id: 'bed', label: '睡到傍晚', sub: '按住 E', hold: 1.2, action: sleep });
     } else if (f.type === 'workbench') cands.push({ d, id: 'workbench', label: '使用工作台（合成燈泡）', hold: 0, action: openCraft });
+    else if (f.type === 'slide') {   // 第二世界的溜滑梯：站在爬梯那一頭（西邊）才能爬
+      if (p.x < f.x + 0.4 && Math.abs(p.y - f.y - f.h / 2) < 1.0) cands.push({ d: d - 0.3, id: 'slide', label: '爬上溜滑梯', sub: '按住 E，從另一頭滑下來', hold: 0.5, action: () => startSlide(f) });
+      else cands.push({ d: d + 0.3, id: 'slideSide', label: '溜滑梯', sub: '從有爬梯的那一頭（西邊）爬上去' });
+    }
     else if (f.type === 'gacha') cands.push({ d, id: 'gacha', label: `轉扭蛋（${GACHA_PRICE} 🪙 一次）`, hold: 0, action: openGacha });
     else if (f.type === 'tchest') {
       if (G.chests[f.id]) cands.push({ d, id: 'chestOpen', label: '寶箱：已經打開過了' });
@@ -3038,7 +3063,7 @@ function pickUp() {
 // ====================================================================
 // 跳（第二世界的新技能）
 // ====================================================================
-const JUMP_V = 4.4, JUMP_G = 12.5;   // 起跳速度、重力：大約 0.7 秒落地
+const JUMP_V = 5.2, JUMP_G = 22;     // 起跳速度、重力：跳 0.6 公尺高、0.47 秒落地（設計師說不要像在外太空一樣，要有重力）
 function tryJump() {
   if (!G || mode !== 'play' || curWorld < 2) return;
   const p = G.p;
@@ -3047,6 +3072,34 @@ function tryJump() {
   p.vz = JUMP_V;
   p.stam = Math.max(0, p.stam - 6);
   Sound.play('jump');
+}
+
+// ====================================================================
+// 第二世界的溜滑梯（設計師要求「溜滑梯要能玩」）：對著爬梯那一頭按住 E，爬上去、站上平台、從另一頭滑下來。
+// 整段是固定路線（直接改位置和高度），期間不能走動；天花板在第二世界加高了，站在平台上才不會撞到
+// ====================================================================
+let ride = null;
+const SLIDE_T = { climb: 1.3, top: 1.8, slide: 3.2, end: 3.5 };
+function startSlide(f) {
+  if (ride || G.p.grabbed) return;
+  ride = { f, t: 0, whoosh: false };
+  Object.assign(G.p, { z: 0, vz: 0, stunT: 0 });
+  Sound.play('jump');
+  if (!G.ev.slideTip) { G.ev.slideTip = 1; toast('🛝 爬上溜滑梯……從另一頭滑下來！', 'good'); }
+}
+function updateSlide(dt) {
+  const p = G.p, f = ride.f, T = SLIDE_T, cy = f.y + f.h / 2, t = (ride.t += dt);
+  const ease = k => k * k;
+  let x, h, pitch;
+  // pitch 正的是抬頭：爬梯時抬頭看上面，站上平台和滑下來時低頭看下面
+  if (t < T.climb) { const k = t / T.climb; x = f.x - 0.45 + k * 1.5; h = k * 1.45; pitch = 0.5 * (1 - k); }                        // 爬梯：一邊往上一邊往前
+  else if (t < T.top) { const k = (t - T.climb) / (T.top - T.climb); x = f.x + 1.05 + k * 0.55; h = 1.45; pitch = -0.25 * k; }     // 站在平台上往下看
+  else if (t < T.slide) {                                                                                                          // 滑下來：越滑越快
+    const k = ease((t - T.top) / (T.slide - T.top)); x = f.x + 1.6 + k * 3.3; h = 1.45 - k * 1.25; pitch = -0.35;
+    if (!ride.whoosh) { ride.whoosh = true; Sound.play('swish'); }
+  } else { const k = (t - T.slide) / (T.end - T.slide); x = f.x + 4.9 + k * 0.5; h = 0.2 * (1 - k); pitch = -0.35 * (1 - k); }      // 落地
+  p.x = x; p.y = cy; p.z = h; p.vz = 0; p.face = 0; p.pitch = pitch;
+  if (t >= T.end) { ride = null; p.z = 0; Sound.play('land'); makeNoise(5); }
 }
 
 // ====================================================================
@@ -3280,7 +3333,7 @@ function demoState() {
 const mm = $('minimap'), mmc = mm.getContext('2d');
 function drawMinimap() {
   const s = isPhone() ? 2.2 : 3.2, dpr = Math.min(window.devicePixelRatio || 1, 2); // 手機的小地圖小一點
-  const vw = Math.min(MAP_W, 44), vh = MAP_H;   // 第三世界的列車很長：只畫玩家附近 44 格，跟著玩家捲動
+  const vw = Math.min(MAP_W, 44), vh = MAP_H;   // 第三世界的列車很長（74 格）：只畫玩家附近 44 格，跟著玩家捲動
   const w = Math.round(vw * s * dpr), h = Math.round(vh * s * dpr);
   if (mm.width !== w || mm.height !== h) { mm.width = w; mm.height = h; mm.style.width = vw * s + 'px'; mm.style.height = vh * s + 'px'; }
   const ox = clamp(Math.round(G.p.x - vw / 2), 0, MAP_W - vw);
@@ -3490,7 +3543,7 @@ function updateHUD() {
   if (G.gift) alerts.push('🎁 臥室床邊有早晨禮物');
   if (G.treasure) alerts.push(`⭐ 寶藏星星在「${G.treasure.room}」`);
   const html = alerts.join('<br>');
-  if ($('alert').innerHTML !== html) $('alert').innerHTML = html;
+  if ($('alert').innerHTML !== html) { $('alert').innerHTML = html; if ($('toasts').children.length) placeToasts(); }
   $('coinText').textContent = G.coins || 0;
   setBar('hpFill', p.hp); setBar('sanFill', p.san); setBar('hungerFill', p.hunger);
   setBar('batFill', p.bat); setBar('stamFill', p.stam);
@@ -3508,19 +3561,21 @@ function toast(msg, cls = '') {
   if (msg === lastToast && now - lastToastT < 1500) return;
   lastToast = msg; lastToastT = now;
   const box = $('toasts'), el = document.createElement('div');
-  // 從左上角面板（時鐘、狀態列、小地圖）下面開始排，才不會蓋到面板；出現「👂」那一列時狀態列會變高
-  // 手機橫放時提示固定在最上面中間（style.css），不用算
-  if (isPhone() && innerWidth > innerHeight) box.style.top = '';
-  else {
-    const panels = Math.max(...['clock', 'bars', 'minimap'].map(id => $(id).getBoundingClientRect().bottom));
-    if (panels > 0) box.style.top = panels + 8 + 'px';
-  }
+  placeToasts();
   el.className = 'toast ' + cls; el.textContent = msg;
   box.appendChild(el);
   while (box.children.length > (isPhone() ? 3 : 4)) box.firstChild.remove(); // 手機最多留 3 則，不然會疊到下面
   if ($('bigText').classList.contains('show')) placeBelowToasts($('bigText'));
   if ($('cards').children.length) placeBelowToasts($('cards'));
   setTimeout(() => { el.style.opacity = 0; setTimeout(() => el.remove(), 500); }, 4200);
+}
+// 提示從左上角面板（時鐘、狀態列、小地圖）下面開始排，才不會蓋到面板；出現「👂」那一列或狀態列的提示變多時面板會變高，
+// 所以新提示出現、狀態列的提示改變時都要重算。手機橫放時提示固定在最上面中間（style.css），不用算
+function placeToasts() {
+  const box = $('toasts');
+  if (isPhone() && innerWidth > innerHeight) { box.style.top = ''; return; }
+  const panels = Math.max(...['clock', 'bars', 'minimap'].map(id => $(id).getBoundingClientRect().bottom));
+  if (panels > 0) box.style.top = panels + 8 + 'px';
 }
 // 畫面中間跳出來的東西（大字、燈泡卡）要在提示下面：平常在 style.css 的位置，
 // 提示多、換行或螢幕比較矮的時候就往下移，才不會被提示蓋住；燈泡卡還要避開大字（兩個都被往下推時會疊在一起）
@@ -3895,7 +3950,7 @@ function frame(ts) {
   else if (mode === 'title') { G.time += dt; for (const e of G.enemies) e.wob += dt; buildLights(); }
   else if (mode === 'cutscene') { updateCutscene(dt); if (mode === 'cutscene') buildLights(); }
   else buildLights();
-  Sound.music(musicState(), mode === 'play' ? musicIntensity() : 0);
+  Sound.music(musicState(), mode === 'play' ? musicIntensity() : 0, mode === 'title' ? 1 : curWorld);
   Sound.setStatic(mode === 'play' && G.ev.tvOn ? nearVol(Math.hypot(G.p.x - 15, G.p.y - 16)) : 0);
   if (window.Renderer) Renderer.render(dt);
   if (mode === 'play') updateHUD();
