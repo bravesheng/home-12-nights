@@ -1,6 +1,7 @@
 'use strict';
 // ===== 第三世界：末班列車 =====
-// 白天列車停在車站（地圖最下面一排），可以下車找物資和寶箱；晚上列車開走，車站鎖起來，
+// 地圖是一列長長的列車（機車室 → 行李車 → 普通車廂 → 餐車 → 景觀車廂 → 商務車廂 → 臥鋪車廂 → 盥洗室），北邊是走得到的車頂，南邊是車站。
+// 白天列車停在車站，從三節車廂的車門下車找物資和寶箱；晚上列車開走，車站鎖起來，
 // 要把木柴、木炭丟進機車室的火爐讓列車一直開。火熄了列車停下來，車外的東西就會擠進來。
 // 這個檔案在 game.js 之前載入，函式裡用到的 G、toast、move… 都是遊戲跑起來之後才呼叫。
 
@@ -49,18 +50,19 @@ function loadDay3(chests) {
   G.station = clamp(G.day - 1, 0, STATIONS_W3.length - 1);
   G.cold = COLD_DAYS.includes(G.day);
   G.train = { state: 'run', k: 0, t: 0, stopT: 0 };
-  G.chests3 = chests.filter(c => CHESTS3[c.lv] && inMap(c.x, c.y)).map(c => ({ x: c.x, y: c.y, lv: c.lv, open: !!c.open, out: !!c.out, face: chestFace(c.x, c.y) }));
+  G.chests3 = chests.filter(c => CHESTS3[c.lv] && inMap(c.x, c.y) && isStationRoom(roomGrid[c.y][c.x]) && !solid[c.y][c.x]).map(c => ({ x: c.x, y: c.y, lv: c.lv, open: !!c.open, out: !!c.out, face: chestFace(c.x, c.y) }));
   if (!G.chests3.length) placeChests3(); else rebuildChestGrid();
 }
 // 第 1 天的教學提示
 function dayTips3() {
   const ev = G.ev, t = G.t;
-  if (t > 3 && !ev.w3tip1) { ev.w3tip1 = 1; toast('🚂 歡迎來到末班列車。白天列車停在車站：從車廂往南的三扇門下車，去車站找物資和寶箱。'); }
-  if (t > 13 && !ev.w3tip2) { ev.w3tip2 = 1; toast(`🪵 晚上要把木柴、木炭丟進${RN('attic')}的火爐，列車才會一直開。${RN('basement')}的木堆每天都有木柴。`); }
+  if (t > 3 && !ev.w3tip1) { ev.w3tip1 = 1; toast(`🚂 歡迎來到末班列車。白天列車停在車站：從${RN('coach')}、${RN('dining')}、${RN('lounge')}往南的車門下車，去車站找物資和寶箱。`); }
+  if (t > 13 && !ev.w3tip2) { ev.w3tip2 = 1; toast(`🪵 晚上要把木柴、木炭丟進車頭${RN('engine')}的火爐，列車才會一直開。${RN('platform')}的木堆每天都有木柴。`); }
   if (t > 25 && !ev.w3tip3) { ev.w3tip3 = 1; toast('🚪 天黑前 20 秒會聽到汽笛，天黑前 3 秒車站的門就會鎖上，一定要先回到車上！', 'warn'); }
-  if (t > 37 && !ev.tipPan && !G.inv.pan) { ev.tipPan = 1; toast(`🍳 ${RN('kitchen')}的抽屜裡好像有一個平底鍋，可以拿來打怪物！`); }
-  if (t > 50 && !ev.w3tip4) { ev.w3tip4 = 1; toast(`🪙 神秘商人在${RN('basement')}，幸運機在${RN('garage')}，修車工具台在${RN('storage')}。`); }
+  if (t > 37 && !ev.tipPan && !G.inv.pan) { ev.tipPan = 1; toast(`🍳 ${RN('dining')}的抽屜裡好像有一個平底鍋，可以拿來打怪物！`); }
+  if (t > 50 && !ev.w3tip4) { ev.w3tip4 = 1; toast(`🪙 神秘商人在${RN('platform')}，幸運機在${RN('waiting')}，修車工具台在${RN('baggage')}。`); }
   if (t > 64 && !ev.w3tip5) { ev.w3tip5 = 1; toast('💡 這裡的藍鑽、紅鑽、紫鑽燈泡，變成了黃銅、鍍金、水晶吊燈燈泡。'); }
+  if (t > 78 && !ev.w3tip6) { ev.w3tip6 = 1; toast(`🪜 ${RN('baggage')}、${RN('lounge')}、${RN('wash')}裡有爬梯可以爬上車頂：風很大，但大部分的怪物上不來。`); }
 }
 // 白天：汽笛、鎖門、月台上飄過的蒸汽
 function updateDay3(dt) {
@@ -69,6 +71,7 @@ function updateDay3(dt) {
   if (!ev.lockWarned && G.t >= DAY_LEN - 3) { ev.lockWarned = true; lockStation(true); Sound.play('doorSlam'); toast('🚪 車站的門關上鎖住了，列車要開了。', 'warn'); }
   if (Math.random() < dt * 1.5) steamPuff();
   dustMotes(dt);
+  roofFx(dt);
 }
 // 空氣裡慢慢飄的灰塵光點（在玩家前面幾格的範圍，少量就好）
 function dustMotes(dt) {
@@ -80,7 +83,7 @@ function dustMotes(dt) {
 }
 // 月台上一團一團飄過的蒸汽
 function steamPuff() {
-  const x = rand(2, 15), y = rand(26.5, 31);
+  const P = W3.platform, x = rand(P.x0 + 1, P.x1 - 1), y = rand(P.y0 + 0.5, P.y1 + 0.5);
   for (let i = 0; i < 5; i++) G.fx.push({ type: 'smoke', x: x + rand(-0.3, 0.3), y: y + rand(-0.3, 0.3), h: rand(0.3, 1.6), vx: rand(0.6, 1.4), vy: rand(-0.15, 0.15), vh: rand(0.1, 0.4), life: rand(1.5, 2.6), max: 2.6, color: [205, 200, 195] });
 }
 
@@ -99,6 +102,7 @@ function updateNight3(dt) {
   if (mode !== 'play') return;
   if (ev.paxTurn) { ev.paxTurn.t += dt; if (ev.paxTurn.t > 16) ev.paxTurn = null; }
   dustMotes(dt);
+  roofFx(dt);
   ev.clackT -= dt;
   if (tr.k > 0.15 && ev.clackT <= 0) { ev.clackT = 0.56 / tr.k; Sound.play('clack', 0.3 * tr.k); }
 }
@@ -116,13 +120,42 @@ function scheduleNight3(add, again, night, n, hz) {
 }
 
 // ====================================================================
+// 車頂：從行李車、景觀車廂、盥洗室的爬梯上去，對著車頂的艙口爬回來（直接換位置；車頂比車廂地板高，3D 畫面照 floorH 擺）。
+// 風很大：風聲、迎面飛過的光點、鏡頭多晃一點；寒寂之境時體溫掉得最快。大部分的怪物爬不上來，檮杌會跳上來
+// ====================================================================
+const ladders = () => FURN.filter(f => f.type === 'ladder');
+function climbRoof(f) {
+  Object.assign(G.p, { x: f.up.x + 0.5, y: f.up.y + 0.5, z: 0, vz: 0, grabbed: null });
+  flow = null; Sound.play('land'); G.shake = Math.max(G.shake, 0.25); makeNoise(4);
+  if (!G.ev.roofTip) { G.ev.roofTip = 1; toast('🌬️ 你爬上了車頂。風很大，寒寂之境時體溫掉得更快；大部分的怪物爬不上來，但檮杌會跳上來。對著艙口按住 E 爬回車廂。', 'warn'); }
+}
+function climbDown(h) {
+  const f = ladders().find(l => l.up.x === h.x && l.up.y === h.y) || ladders()[0];
+  const at = besideFurn(f);
+  Object.assign(G.p, { x: at.x, y: at.y, z: 0, vz: 0, grabbed: null });
+  flow = null; Sound.play('land'); G.shake = Math.max(G.shake, 0.25); makeNoise(4);
+}
+function roofFx(dt) {
+  const p = G.p, k = trainK();
+  if (!onRoof(p.x, p.y)) return;
+  G.ev.roofWindT = (G.ev.roofWindT || 0) - dt;
+  if (G.ev.roofWindT <= 0) { G.ev.roofWindT = rand(2.5, 4.5); Sound.play('wind', 0.45 + 0.5 * k); }
+  if (k < 0.1) return;
+  G.shake = Math.max(G.shake, 0.04 * k);
+  for (let i = 0; i < 2; i++) if (Math.random() < dt * 14 * k) {
+    const x = p.x + rand(-5, 2), y = p.y + rand(-2.5, 2.5);
+    if (!onRoof(x, y)) continue;
+    G.fx.push({ type: 'spark', x, y, h: rand(0.3, 2.4), vx: rand(7, 10) * k, vy: rand(-0.3, 0.3), vh: rand(-0.2, 0.2), life: 0.35, max: 0.35, color: G.cold ? [220, 232, 255] : [150, 140, 125] });
+  }
+}
+
+// ====================================================================
 // 火爐：有沒有在燒（晚上有燃料才算；白天只有餘火）、燈光
 // ====================================================================
 const fireBurning = () => !!(G && G.fire && G.fire.queue.length && G.phase === 'night');
 function addLights3(L) {
-  for (const id of ['gaslamp1', 'gaslamp2']) {
-    const f = FURN_BY_ID[id];
-    if (f && f.room) L.push({ x: f.x + 0.5, y: f.y + 0.5, r: 2.8, tier: 0, room: f.room, f: 0.75 + Math.random() * 0.15, color: [255, 190, 110] });
+  for (const f of FURN) {
+    if (f.type === 'gaslamp' && f.room) L.push({ x: f.x + 0.5, y: f.y + 0.5, r: 2.8, tier: 0, room: f.room, f: 0.75 + Math.random() * 0.15, color: [255, 190, 110] });
   }
   const fb = FURN_BY_ID.firebox;
   if (fb && fb.room && G.fire) {
@@ -145,10 +178,11 @@ function alerts3() {
   }
   if (G.phase === 'night') {
     if (tr.state === 'slowing') a.push('🚂 列車在減速！快丟燃料進火爐');
-    else if (tr.state === 'stopped') a.push(`🚂 列車停了！→ ${RN('attic')}的火爐`);
+    else if (tr.state === 'stopped') a.push(`🚂 列車停了！→ ${RN('engine')}的火爐`);
     else if (tr.state === 'starting') a.push('🚂 列車重新開動中……');
     else if (fuelLeft() < 20) a.push(`🔥 火快熄了（剩 ${Math.round(fuelLeft())} 秒）`);
   }
+  if (onRoof(G.p.x, G.p.y)) a.push('🌬️ 你在車頂（對著艙口按住 E 爬回車廂）');
   return a;
 }
 // 狀態列：🔥 火力（火還能燒幾秒，低於 20 秒會閃）、🌡️ 體溫（只有寒寂之境顯示）
@@ -180,9 +214,17 @@ function addTargets3(cands) {
     }
   }
   chestTargets(cands);
-  // 包廂的門可以關（墮落戰神進不來）：對著門按 E。車站的門和連結處的門不行
+  // 爬梯：爬上車頂；車頂的艙口：爬回車廂
+  for (const f of FURN) {
+    if (f.type !== 'ladder' && f.type !== 'hatch') continue;
+    const cx = f.x + 0.5, cy = f.y + 0.5, rd = Math.hypot(cx - p.x, cy - p.y);
+    if (rd > (f.type === 'hatch' ? 1.0 : 1.4) || (rd > 0.5 && lookAngle(cx, cy) > 1.1)) continue;
+    if (f.type === 'ladder') cands.push({ d: rd - 0.2, id: 'ladder:' + f.id, label: '爬上車頂', sub: '按住 E', hold: 0.8, action: () => climbRoof(f) });
+    else cands.push({ d: rd - 0.4, id: 'hatch:' + f.id, label: '爬回車廂', sub: '按住 E', hold: 0.8, action: () => climbDown(f) });
+  }
+  // 包廂的門可以關（墮落戰神進不來）：對著門按 E。車站的門和車廂之間連結處的門不行
   for (const d of DOORS) {
-    if (d.front || d.station || d.locked) continue;
+    if (d.front || d.station || d.vest || d.locked) continue;
     const cx = d.x + 0.5, cy = d.y + 0.5, rd = Math.hypot(cx - p.x, cy - p.y);
     if (rd > 1.4 || rd < 0.55 || lookAngle(cx, cy) > 0.9) continue;
     if (d.closed) cands.push({ d: rd + 0.4, id: `door:${d.x},${d.y}`, label: '打開包廂門', hold: 0, action: () => { setDoor(d, false); Sound.play('click'); } });
@@ -233,7 +275,7 @@ function addFuel(id) {
 }
 function useFuel(id) {
   if (nearFirebox()) addFuel(id);
-  else toast(`🪵 走到${RN('attic')}的火爐前面按 E，就會把${ITEMS[id].name}丟進去。`);
+  else toast(`🪵 走到車頭${RN('engine')}的火爐前面按 E，就會把${ITEMS[id].name}丟進去。`);
 }
 // 火爐的互動：選著燃料就丟那個，沒選就丟背包裡最差的
 function fireboxTarget(cands, d) {
@@ -247,7 +289,7 @@ function trainStop() {
   tr.state = 'stopped'; tr.k = 0; tr.stopT = 0; tr.poundT = 0.3;
   Sound.play('trainStop'); G.shake = 0.8;
   showBig('列車停了……', '車外有東西貼在玻璃上。快丟燃料進火爐！');
-  toast('🚂 列車停了！窗外有一雙雙手和眼睛，車身被拍打、搖晃……每秒都在扣血，快去機車室丟燃料！', 'warn');
+  toast('🚂 列車停了！窗外有一雙雙手和眼睛，車身被拍打、搖晃……每秒都在扣血，快去車頭的機車室丟燃料！', 'warn');
 }
 function restartTrain() {
   const tr = G.train;
@@ -431,7 +473,7 @@ function chestMonster(c) {
 
 // ====================================================================
 // 寒寂之境（第 3、7、10、12 天）：整天下雪、零下 100 度，多了「體溫」。體溫歸零就死。
-// 每秒掉：車站（室外）2、列車上 0.8；機車室火爐有燒 +3；大白燈 3 格內 +5、被大白抱住 +10；熔岩暴君身邊 3 格 +4
+// 每秒掉：車頂 3、車站（室外）2、列車上 0.8；機車室火爐有燒 +3；大白燈 3 格內 +5、被大白抱住 +10；熔岩暴君身邊 3 格 +4
 // 大白燈（第 15 級）：燈下站著一個大白，走到它面前它會抱住你（被打只扣一半的血）。不管有沒有下雪都會回體溫
 // ====================================================================
 const BAYMAX_WARM_R = 3, BAYMAX_HUG_R = 1.0;
@@ -450,7 +492,7 @@ function nearestBaymax() {
 // 走路的速度：寒寂之境的車站積雪、體溫太低、被孢子噴到都會變慢
 function speedMult3() {
   const p = G.p, r = roomAt(p.x, p.y);
-  return (G.cold && isStationRoom(r) ? 0.75 : 1) * (G.cold && p.temp < 30 ? 0.8 : 1) * (p.slowT > 0 ? 0.6 : 1);
+  return (G.cold && (isStationRoom(r) || (r && r.roof)) ? 0.75 : 1) * (G.cold && p.temp < 30 ? 0.8 : 1) * (p.slowT > 0 ? 0.6 : 1);
 }
 function updateWarmth3(dt) {
   const p = G.p, nb = nearestBaymax();
@@ -462,9 +504,9 @@ function updateWarmth3(dt) {
   G.hugged = hugging; G.hugObj = nb ? nb.o : null;
   G.hug = clamp((G.hug || 0) + (hugging ? dt * 1.5 : -dt * 1.5), 0, 1);
   if (!G.cold) { p.temp = Math.min(100, p.temp + dt * 5); G.frost = 0; return; }
-  const r = roomAt(p.x, p.y);
-  let rate = isStationRoom(r) ? -2 : -0.8;
-  if (r && r.id === 'attic' && G.fire.queue.length) rate = 3;
+  const r = roomAt(p.x, p.y), outside = isStationRoom(r) || !!(r && r.roof);
+  let rate = r && r.roof ? -3 : isStationRoom(r) ? -2 : -0.8;   // 車頂風最大，掉得最快
+  if (r && r.id === 'engine' && G.fire.queue.length) rate = 3;
   if (nb) rate += hugging ? 10 : nb.d < BAYMAX_WARM_R ? 5 : 0;
   for (const e of G.enemies) if (e.kind === 'tyrant' && !e.dead && Math.hypot(e.x - p.x, e.y - p.y) < 3) rate += 4;
   p.temp = clamp(p.temp + rate * dt, 0, 100);
@@ -475,15 +517,15 @@ function updateWarmth3(dt) {
   if (rate > 0 && !G.ev.warmTip && p.temp < 60) { G.ev.warmTip = 1; toast('🔥 體溫正在回升。', 'good'); }
   if (p.temp <= 0) { gameOver('cold'); return; }
   // 下雪：車站裡飄雪；風聲
-  if (isStationRoom(r) || G.phase === 'night') {
+  if (outside || G.phase === 'night') {
     for (let i = 0; i < 3; i++) {
       const x = p.x + rand(-6, 6), y = p.y + rand(-6, 6), rr = roomAt(x, y);
-      if (!isStationRoom(rr)) continue;
+      if (!isStationRoom(rr) && !(rr && rr.roof)) continue;
       G.fx.push({ type: 'spark', x, y, h: rand(1.8, 2.6), vx: rand(0.2, 0.5), vy: rand(-0.1, 0.1), vh: -rand(0.5, 0.9), life: 3, max: 3, color: [230, 240, 255] });
     }
   }
   G.ev.windT = (G.ev.windT || 0) - dt;
-  if (G.ev.windT <= 0) { G.ev.windT = rand(6, 11); Sound.play('wind', isStationRoom(r) ? 0.9 : 0.4); }
+  if (G.ev.windT <= 0) { G.ev.windT = rand(6, 11); Sound.play('wind', outside ? 0.9 : 0.4); }
 }
 
 // ====================================================================
@@ -625,9 +667,17 @@ function updateLava(dt) {
   }
 }
 
-// ---------- 墮落戰神：只在走道裡走。看到你就衝過來，2 格內橫掃一劍（打飛、眩暈）；不進包廂，會在門外等 10 秒 ----------
-const HALL = ROOMS.find(r => r.id === 'hall');
-const inHall = (x, y) => y >= HALL.y && y < HALL.y + HALL.h && x >= HALL.x && x < HALL.x + HALL.w;
+// ---------- 墮落戰神：只在車廂的走道裡走（不進包廂、不上車頂、不去車站）。看到你就衝過來，2 格內橫掃一劍（打飛、眩暈）；
+// 你躲進包廂就在門外等 10 秒，然後繼續從列車的一頭巡邏到另一頭 ----------
+function inHall(x, y) {
+  const tx = Math.floor(x), ty = Math.floor(y);
+  if (!inMap(tx, ty)) return false;
+  const r = roomGrid[ty][tx];
+  if (r) return !!r.aisle;
+  const d = doorGrid[ty][tx];
+  return !!(d && d.vest);
+}
+const compDoorOf = r => DOORS.find(d => d.comp && d.rooms && d.rooms.includes(r)) || null;
 function updateWarlord(e, dt) {
   const p = G.p, n = diffN(), d = Math.hypot(e.x - p.x, e.y - p.y);
   e.cd = Math.max(0, e.cd - dt); e.stepT += dt;
@@ -653,38 +703,41 @@ function updateWarlord(e, dt) {
     }
     return;
   }
-  let tx, ty, sp;
+  let tx, ty, sp, f = null;
   if (playerInHall && los) {
     // 看到你就衝過來
-    tx = p.x; ty = p.y; sp = Math.min(4.0 + n * 0.01, 4.8); e.state = 'charge'; e.waitT = 0;
+    tx = p.x; ty = p.y; f = flow; sp = Math.min(4.0 + n * 0.01, 4.8); e.state = 'charge'; e.waitT = 0;
     if (!G.ev.warlordChargeTip) { G.ev.warlordChargeTip = 1; toast('⚔️ 墮落戰神看到你了，牠衝過來了！牠不會進包廂。', 'warn'); }
   } else if (e.state === 'charge' || e.state === 'wait') {
-    // 你躲進包廂了：在門外等 10 秒，然後往下一節走
-    if (e.state === 'charge') { e.state = 'wait'; e.waitT = 10; e.wx = clamp(p.x, HALL.x + 0.5, HALL.x + HALL.w - 0.5); }
+    if (e.state === 'charge') {
+      // 你不見了：躲進包廂的話就在包廂門外的走道上等 10 秒；爬上車頂、下車的話就在原地等
+      e.state = 'wait'; e.waitT = 10;
+      const pr = roomAt(p.x, p.y), door = pr && pr.comp ? compDoorOf(pr) : null;
+      if (door) { e.wx = door.x + 0.5; e.wy = door.y - 0.5; } else { e.wx = e.x; e.wy = e.y; }
+    }
     e.waitT -= dt;
-    tx = e.wx; ty = 12.5; sp = 2.2;
-    if (e.waitT <= 0) { e.state = 'patrol'; e.px = e.x < 22 ? HALL.x + HALL.w - 1.5 : HALL.x + 1.5; }
+    tx = e.wx; ty = e.wy; f = flowTo(Math.floor(tx), Math.floor(ty)); sp = 2.2;
+    if (e.waitT <= 0) { e.state = 'patrol'; e.pt = null; }
   } else {
-    // 巡邏：從走道的一頭走到另一頭
-    if (e.px === undefined || Math.abs(e.px - e.x) < 0.6) e.px = e.x < 22 ? HALL.x + HALL.w - 1.5 : HALL.x + 1.5;
-    tx = e.px; ty = 12.5; sp = Math.min(1.5 + n * 0.006, 2.0);
+    // 巡邏：從列車的一頭走到另一頭
+    if (!e.pt || Math.hypot(e.pt.x - e.x, e.pt.y - e.y) < 1.2) e.pt = W3.patrol[e.x < MAP_W / 2 ? 1 : 0];
+    tx = e.pt.x; ty = e.pt.y; f = flowTo(Math.floor(tx), Math.floor(ty)); sp = Math.min(1.5 + n * 0.006, 2.0);
   }
   if (e.spawn > 0) sp *= 0.3;
-  const dx = tx - e.x, dy = ty - e.y, l = Math.hypot(dx, dy) || 1;
+  const l = Math.hypot(tx - e.x, ty - e.y);
   if (l > 0.3) {
-    const ox = e.x, oy = e.y;
-    move(e, dx / l * sp * dt, dy / l * sp * dt, ENEMY_R);
-    e.y = clamp(e.y, HALL.y + 0.35, HALL.y + HALL.h - 0.35);   // 永遠待在走道裡
-    e.x = clamp(e.x, HALL.x + 0.35, HALL.x + HALL.w - 0.35);
+    const ox = e.x, oy = e.y, dir = pathDir(e, f, tx, ty, 0.1);
+    move(e, dir.x * sp * dt, dir.y * sp * dt, ENEMY_R);
+    if (!inHall(e.x, e.y)) { e.x = ox; e.y = oy; }   // 永遠待在走道裡
     if (Math.hypot(e.x - ox, e.y - oy) > 0.001) e.face = Math.atan2(e.y - oy, e.x - ox);
     if (e.stepT > (e.state === 'charge' ? 0.3 : 0.6) && d < 14) { e.stepT = 0; Sound.play('armor', nearVol(d) * 0.8); if (d < 6) G.shake = Math.max(G.shake, 0.05); }
   } else if (playerInHall) e.face = Math.atan2(p.y - e.y, p.x - e.x);
   if (playerInHall && d < 2.0 && e.cd <= 0 && e.spawn <= 0) { e.swing = 0.6; e.face = Math.atan2(p.y - e.y, p.x - e.x); Sound.play('armor', nearVol(d)); }
 }
-// 走道裡離你最遠的那一頭
+// 列車上離你最遠的那一頭
 function warlordSpawn() {
-  const p = G.p, x = p.x < 22 ? HALL.x + HALL.w - 2.5 : HALL.x + 2.5;
-  return { x, y: 12.5 };
+  const far = W3.patrol[G.p.x < MAP_W / 2 ? 1 : 0];
+  return { x: far.x, y: far.y };
 }
 
 // ---------- 檮杌・九瞳：四腳巨獸，九顆眼睛看得到一切。用手電筒把九顆眼睛一顆一顆照到閉上，牠就瞎了 10 秒（傷害 3 倍） ----------
@@ -715,6 +768,10 @@ function updateTaowu(e, dt) {
     if (shut > 0 && e.blind <= 0) { e.reopenT -= dt; if (e.reopenT <= 0) { e.reopenT = 3; const eye = [...e.eyes].reverse().find(x => x.shut); if (eye) eye.shut = false; } }
   }
   if (e.pose) return;
+  // 你跟牠一個在車頂、一個在車廂裡：4 秒後牠從離你最近的艙口跳過去
+  const pr = onRoof(p.x, p.y);
+  if (pr !== onRoof(e.x, e.y)) { e.climbT = (e.climbT || 0) + dt; if (e.climbT > 4) { e.climbT = 0; taowuClimb(e, pr); return; } }
+  else e.climbT = 0;
   // 咆哮（每 15 秒）：理智大掉、畫面模糊
   if (e.roarT <= 0) {
     e.roarT = 15; e.roar = 1.2;
@@ -749,6 +806,18 @@ function updateTaowu(e, dt) {
   for (const dr of DOORS) if (dr.closed && !dr.locked && Math.hypot(dr.x + 0.5 - e.x, dr.y + 0.5 - e.y) < 1.3) { setDoor(dr, false); Sound.play('doorSlam'); G.shake = Math.max(G.shake, 0.4); toast('💥 檮杌撞壞了包廂的門！', 'warn'); }
   if (e.stepT > 0.5 && d < 14) { e.stepT = 0; Sound.play('thump', nearVol(d) * 0.5); }
   if (d < 1.6 && e.cd <= 0 && e.spawn <= 0 && e.blind <= 0 && e.pounce <= 0) { e.pounce = 0.45; e.pounceA = Math.atan2(p.y - e.y, p.x - e.x); e.cd = 2.5; Sound.play('swish'); }
+}
+
+// 檮杌跳上車頂／跳回車廂（別的怪物都不會爬梯子）
+function taowuClimb(e, toRoof) {
+  const p = G.p;
+  let best = null, bd = Infinity;
+  for (const f of ladders()) { const dd = Math.hypot(f.up.x + 0.5 - p.x, f.up.y + 0.5 - p.y); if (dd < bd) { bd = dd; best = f; } }
+  if (!best) return;
+  const at = toRoof ? { x: best.up.x + 0.5, y: best.up.y + 0.5 } : besideFurn(best);
+  e.x = at.x; e.y = at.y; e.spawn = 0.8; e.pounce = 0; e.cd = 1.5;
+  Sound.play('roar', 0.8); G.shake = Math.max(G.shake, 0.6);
+  toast(toRoof ? '🐾 檮杌跳上了車頂！' : '🐾 檮杌跳回車廂裡了！', 'warn');
 }
 
 // ---------- 事件：生新怪物、乘客轉頭 ----------
@@ -896,7 +965,6 @@ function thumbTaowu(c, S) { c.save(); c.scale(S / 200, S / 200); c.translate(8, 
 // 大約 17 秒，點一下畫面可以跳過。做法跟第一到第二世界一樣：直接用遊戲的 3D 場景，鏡頭走設定好的路線
 // ====================================================================
 const CUT2 = { door: 2.6, fadeIn: 3.4, walk: 4.2, sit: 8.6, black: 9.6, wake: 11.6, title: 14.6, end: 17.2 };
-const CUT2_SEAT = { x: 16.2, y: 22.2, lookX: 14.5, lookY: 21.4 };
 function startCutscene2() {
   unlockW3();
   // 帶進第三世界的東西：背包、裝好的燈泡和燈具、硬幣、手電筒等級
@@ -940,7 +1008,7 @@ function cut2Sleep(c) {
 function updateCutscene2(dt) {
   const c = CUT, K = CUT2, ease = k => k * k * (3 - 2 * k);
   c.t += dt; G.time += dt;
-  const t = c.t, S = CUT2_SEAT, seatFace = Math.atan2(S.lookY - S.y, S.lookX - S.x);
+  const t = c.t, S = W3.seat, seatFace = Math.atan2(S.lookY - S.y, S.lookX - S.x);
   let black = 0;
   const wheels = () => { c.clackT -= dt; if (c.clackT <= 0) { c.clackT = 0.56; Sound.play('clack', 0.35); } };
   if (t < K.door) {
@@ -956,7 +1024,7 @@ function updateCutscene2(dt) {
     cut2Switch(c);
     black = t < K.fadeIn + 0.8 ? 1 - (t - K.fadeIn) / 0.8 : 0;
     const w = ease(clamp((t - K.walk) / (K.sit - K.walk), 0, 1));
-    const pts = [[22.5, 29.8, 0], [22.5, 25.5, 0], [22.5, 23.4, 0], [S.x, S.y, -0.5]];
+    const pts = [...W3.cutPath, [S.x, S.y, -0.5]];
     const seg = w * 3, i = Math.min(2, Math.floor(seg)), k = seg - i, a = pts[i], b = pts[i + 1];
     const x = a[0] + (b[0] - a[0]) * k, y = a[1] + (b[1] - a[1]) * k, h = a[2] + (b[2] - a[2]) * k;
     c.cam = { x, y, h, face: i < 2 ? -Math.PI / 2 : seatFace, pitch: 0.02 + Math.sin(t * 1.3) * 0.01 };
@@ -992,7 +1060,7 @@ function endCutscene2() {
   cut2Switch(CUT);
   // 第 1 天早上，列車停在第一個車站
   G.phase = 'day'; G.t = 0; G.train.k = 0; G.train.state = 'run'; G.ev.schedule = [];
-  Object.assign(G.p, { x: 19.5, y: 23, face: -Math.PI / 2, pitch: 0 });
+  Object.assign(G.p, { ...W3.start, pitch: 0, z: 0, vz: 0 });
   lockStation(false);
   CUT = null; $('cutscene').classList.add('hidden'); $('cutFade').style.opacity = '0'; $('hud').classList.remove('hidden'); cutCaption('');
   mode = 'play'; invDirty = true; lockPointer();

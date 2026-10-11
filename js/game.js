@@ -45,7 +45,7 @@ const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 let tiles, roomGrid, doorGrid, furnGrid, solid, mapCv;
 let dynSolid = null;   // 每天會變的障礙物（第三世界車站裡的寶箱）
 const FURN_BY_ID = {}; FURN.forEach(f => (FURN_BY_ID[f.id] = f));
-const FRONT_DOOR = DOORS.find(d => d.front);
+let FRONT_DOOR = DOORS.find(d => d.front);   // 現在這個世界的前門（第三世界是車尾連結處的門），換世界時重找
 const ROOM_CLIP = {};
 
 // ====================================================================
@@ -61,6 +61,9 @@ function applyWorld(w) {
   w = worldOf(w);
   if (w === curWorld && tiles) return;
   curWorld = w;
+  [MAP_W, MAP_H] = MAP_SIZE[w];   // 第三世界的地圖是一列長長的列車
+  ROOMS.length = 0; ROOMS.push(...roomsForWorld(w));
+  SOCKETS.length = 0; SOCKETS.push(...socketsForWorld(w));
   FURN.length = 0;
   FURN.push(...furnForWorld(w));
   for (const k in FURN_BY_ID) delete FURN_BY_ID[k];
@@ -68,7 +71,9 @@ function applyWorld(w) {
   DOORS.length = 0;
   DOORS.push(...doorsForWorld(w));
   for (const d of DOORS) { d.locked = false; d.closed = false; }
-  for (const r of ROOMS) Object.assign(r, w === 3 ? r.w3 : w === 2 ? r.w2 : r.w1);
+  FRONT_DOOR = DOORS.find(d => d.front);
+  Object.assign(MERCHANT_POS, w === 3 ? W3.merchant : MERCHANT_HOUSE);
+  Object.assign(GIFT_POS, w === 3 ? W3.gift : GIFT_HOUSE);
   buildMap();
   fixFlows.clear();
   flow = null;
@@ -121,6 +126,25 @@ function isWall(tx, ty) {
   return !!(d && (d.front || d.locked || d.closed));   // 鎖住、關上的門跟牆一樣
 }
 const isSolid = (tx, ty) => !inMap(tx, ty) || solid[ty][tx] || !!(dynSolid && dynSolid[ty][tx]);
+// 這個位置是不是站得住的地板（房間裡、不是牆也不是家具）
+const walkable = (x, y) => { const tx = Math.floor(x), ty = Math.floor(y); return inMap(tx, ty) && tiles[ty][tx] === 1 && !solid[ty][tx]; };
+// 地板的高度：第三世界的車頂比車廂的地板高（3D 畫面放東西、擺鏡頭時要加上去）
+function floorH(x, y) { const tx = Math.floor(x), ty = Math.floor(y); const r = inMap(tx, ty) ? roomGrid[ty][tx] : null; return r && r.roof ? ROOF_H : 0; }
+const onRoof = (x, y) => floorH(x, y) > 0;
+// 家具旁邊第一個站得住的格子的中心（衣櫃怪衝出來、從車頂爬下來時站的位置）
+function besideFurn(f) {
+  for (let y = f.y - 1; y <= f.y + f.h; y++) for (let x = f.x - 1; x <= f.x + f.w; x++) {
+    if (x >= f.x && x < f.x + f.w && y >= f.y && y < f.y + f.h) continue;
+    if (walkable(x + 0.5, y + 0.5)) return { x: x + 0.5, y: y + 0.5 };
+  }
+  return { x: f.x + f.w / 2, y: f.y + f.h / 2 };
+}
+// 前門裡面的兩個位置（開門時黑影從這裡擠進來）
+function frontInside() {
+  const d = FRONT_DOOR, a = besideFurn({ x: d.x, y: d.y, w: 1, h: 1 });
+  const b = { x: a.x + 0.1, y: a.y - 0.9 };
+  return [a, walkable(b.x, b.y) ? b : { x: a.x - 0.1, y: a.y + 0.9 }];
+}
 // 門關上或打開（鎖住的車站門、第三世界可以關的包廂門）：關上的門跟牆一樣擋人、擋光、擋怪物
 function setDoor(d, closed, locked = d.locked) {
   d.closed = closed; d.locked = locked;
@@ -167,7 +191,8 @@ function newGame(diff = 'normal', world = 1, carry = null) {
   applyWorld(world);
   G = freshState(world);
   G.diff = DIFFS[diff] ? diff : 'normal';
-  G.sockets.find(s => s.id === 's_living').bulb = 1;
+  if (world === 3) Object.assign(G.p, W3.start);   // 第三世界從景觀車廂開始
+  (G.sockets.find(s => s.id === (world === 3 ? 's_lounge' : 's_living')) || G.sockets[0]).bulb = 1;
   for (const f of FURN) if (f.loot) G.containers[f.id] = { items: [] };
   if (world === 3) startDay3(1);   // 列車停在第一站、放今天的寶箱
   refillContainers(0.6);
@@ -234,10 +259,12 @@ function loadGame() {
   G.diff = DIFFS[s.diff] ? s.diff : 'normal'; // 舊存檔沒有難度，當成普通
   G.day = Math.min(s.day, LAST_NIGHT);
   Object.assign(G.p, s.p);
+  // 地圖改版過（第三世界）的舊存檔：位置不在地板上就回到起點；放在牆裡的燈和掉落物就不要了
+  if (!walkable(G.p.x, G.p.y)) Object.assign(G.p, world === 3 ? W3.start : { x: 19.5, y: 23, face: -Math.PI / 2 });
   G.inv = s.inv || {};
   G.selId = s.selId;
   (s.sockets || []).forEach((b, i) => { if (G.sockets[i]) G.sockets[i].bulb = b; });
-  G.lamps = (s.lamps || []).map(l => ({ kind: 'lamp', ...l, dying: 0, room: roomGrid[l.y][l.x] }));
+  G.lamps = (s.lamps || []).filter(l => walkable(l.x + 0.5, l.y + 0.5)).map(l => ({ kind: 'lamp', ...l, dying: 0, room: roomGrid[l.y][l.x] }));
   G.containers = s.containers || {};
   for (const f of FURN) if (f.loot && !G.containers[f.id]) G.containers[f.id] = { items: [] };
   G.stats = Object.assign(G.stats, s.stats || {});
@@ -247,8 +274,9 @@ function loadGame() {
     pl.grow = f.g === undefined ? 1 : f.g;
     return pl;
   });
-  G.coins = s.coins || 0; G.chests = s.chests || {}; G.gift = s.gift || null; G.treasure = s.treasure || null;
-  G.pickups = (s.pickups || []).map(pk => ({ ...pk, t: Math.random() * 6 }));
+  G.coins = s.coins || 0; G.chests = s.chests || {}; G.gift = s.gift || null;
+  G.treasure = s.treasure && walkable(s.treasure.x, s.treasure.y) ? s.treasure : null;
+  G.pickups = (s.pickups || []).filter(pk => walkable(pk.x, pk.y)).map(pk => ({ ...pk, t: Math.random() * 6 }));
   G.ev.deliveryAt = s.delivery === undefined ? -1 : s.delivery;
   if (s.stock && s.stock.length) G.stock = s.stock; else makeStock();
   // 第三世界：火爐、體溫、大白燈的數量、今天的寶箱（舊存檔沒有這些就用預設）
@@ -417,7 +445,7 @@ function buildLights() {
   };
   G.sockets.forEach(s => add(s, 1));
   G.lamps.forEach(l => add(l, LAMP_TYPES[l.type].mult));
-  if (G.stock && merchantHere()) L.push({ x: MERCHANT_POS.x + 0.3, y: MERCHANT_POS.y, r: 3.2, tier: 0, room: roomGrid[29][11], f: 0.85 + Math.random() * 0.08, color: [255, 190, 110] });
+  if (G.stock && merchantHere()) L.push({ x: MERCHANT_POS.x + 0.3, y: MERCHANT_POS.y, r: 3.2, tier: 0, room: roomAt(MERCHANT_POS.x, MERCHANT_POS.y), f: 0.85 + Math.random() * 0.08, color: [255, 190, 110] });
   if (G.ev && G.ev.tvOn) L.push({ x: 15, y: 15.9, r: 2.6, tier: 0, room: roomGrid[16][15], f: 0.55 + Math.random() * 0.35, color: [140, 170, 255], tv: true });
   if (isW3()) addLights3(L);   // 火爐的火光、月台的煤氣燈
   for (const b of G.booms || []) L.push({ x: b.x, y: b.y, r: 4.5, tier: 0, room: b.room, f: b.life / 0.35 * 1.3, color: [255, 190, 110] });
@@ -529,6 +557,8 @@ function computeFlowFrom(sx, sy) {
 function pathDir(e, f, gx, gy, wobble = 0.35) {
   const tx = Math.floor(e.x), ty = Math.floor(e.y);
   const d = f && inMap(tx, ty) ? f[ty][tx] : Infinity;
+  // 走不到目標（例如你在車頂、牠在車廂裡）：慢慢亂晃，不要一直撞牆
+  if (d === Infinity && f) { const a = e.wob * 0.6 + tx * 1.3; return { x: Math.cos(a) * 0.45, y: Math.sin(a) * 0.45 }; }
   if (d !== Infinity && d > 1) {
     let bv = d, best = null;
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
@@ -2427,7 +2457,7 @@ function startNight() {
 // 第二、三世界同一時間最多 3 隻大怪物，免得太擠
 const bossFull = () => curWorld >= 2 && G.enemies.filter(e => BOSSES.includes(e.kind)).length >= 3;
 // 房間名字（會跟著世界變）
-const RN = id => ROOMS.find(r => r.id === id).name;
+const RN = id => (ROOMS.find(r => r.id === id) || { name: id }).name;
 function startDay(d) {
   G.day = d; G.phase = 'day'; G.t = 0; G.power = true;
   for (const e of G.enemies) puff(e.x, e.y);
@@ -2446,7 +2476,7 @@ function startDay(d) {
   Sound.play('dawn');
   saveGame();
   toast(`💾 已自動存檔，${isW3() ? '車站和列車上' : isW2() ? '箱子和籃子' : '櫃子'}裡的物資也刷新了。`, 'good');
-  if (G.gift) toast(`🎁 ${RN('bedroom')}的床邊有一份早晨禮物！`, 'good');
+  if (G.gift) toast(`🎁 ${FURN_BY_ID.bed && FURN_BY_ID.bed.room ? FURN_BY_ID.bed.room.name : RN('bedroom')}的床邊有一份早晨禮物！`, 'good');
   if (G.treasure) toast(`⭐ 今天的寶藏星星藏在「${G.treasure.room}」，快去找！`, 'good');
 }
 function triggerEvent(type) {
@@ -2456,7 +2486,7 @@ function triggerEvent(type) {
       if (!G.power) return;
       G.power = false;
       Sound.play('powerDown');
-      toast(isW3() ? `⚡ 發電機跳掉了！拿手電筒去${RN('attic')}的發電機，按住 E 重新啟動。` : `⚡ 停電了！拿手電筒去${RN('laundry')}的電箱，按住 E 恢復電力。`, 'warn');
+      toast(isW3() ? `⚡ 發電機跳掉了！拿手電筒去${RN('engine')}的發電機，按住 E 重新啟動。` : `⚡ 停電了！拿手電筒去${RN('laundry')}的電箱，按住 E 恢復電力。`, 'warn');
       break;
     case 'knock':
       ev.knock = 20; ev.knockTick = 0;
@@ -2464,11 +2494,11 @@ function triggerEvent(type) {
       break;
     case 'closet':
       ev.closet = 18; ev.closetLight = 0; ev.closetTick = 0;
-      toast('🚪 臥室的衣櫃在晃動……快去按住 E 壓住它！', 'warn');
+      { const cl = FURN_BY_ID.closet; toast(`🚪 ${cl.room ? cl.room.name : ''}的${cl.name || '衣櫃'}在晃動……快去按住 E 壓住它！`, 'warn'); }
       break;
     case 'phone':
       ev.phone = 15; ev.phoneTick = 0;
-      toast(isW3() ? `☎️ ${RN('living')}的對講機響了……是車長室打來的？` : isW2() ? `☎️ ${RN('living')}的電話亭響了。` : '☎️ 客廳的電話響了。');
+      toast(isW3() ? `☎️ ${RN('lounge')}的對講機響了……是車長室打來的？` : isW2() ? `☎️ ${RN('living')}的電話亭響了。` : '☎️ 客廳的電話響了。');
       break;
     case 'blob': {
       if (!spawnEnemy('blob')) break;
@@ -2624,7 +2654,7 @@ function updateEvents(dt) {
     if (ev.closetTick <= 0) { Sound.play('thump'); ev.closetTick = Math.max(0.6, ev.closet / 12); }
     if (ev.closet < 0) {
       ev.closet = 0;
-      const e = spawnEnemy('fast', { x: 30.5, y: 2.5 });
+      const e = spawnEnemy('fast', besideFurn(FURN_BY_ID.closet));
       if (e) e.spawn = 0.4;
       p.san -= 12 * D().san;
       Sound.play('hurt');
@@ -2896,7 +2926,7 @@ function openFrontDoor() {
   makeNoise(10);
   if (G.phase === 'night' && ev.knock > 0) {
     ev.knock = 0;
-    for (const at of [{ x: 1.5, y: 12.5 }, { x: 1.6, y: 11.6 }]) { const e = spawnEnemy('shadow', at); if (e) e.spawn = 0.3; }
+    for (const at of frontInside()) { const e = spawnEnemy('shadow', at); if (e) e.spawn = 0.3; }
     G.p.san -= 20 * D().san; G.shake = 0.6;
     Sound.play('hurt');
     toast('你打開了門……門外什麼都沒有。然後，有東西擠了進來！', 'warn');
@@ -3233,7 +3263,7 @@ function resize() { if (window.Renderer) Renderer.resize(); }
 function demoState() {
   const s = freshState();
   s.phase = 'night'; s.t = 30;
-  const set = (id, b) => { s.sockets.find(o => o.id === id).bulb = b; };
+  const set = (id, b) => { const o = s.sockets.find(o => o.id === id); if (o) o.bulb = b; };
   set('s_living', 3); set('s_hall2', 1); set('s_kitchen', 5);
   s.lamps.push({ kind: 'lamp', type: 'floor', x: 24, y: 17, room: roomGrid[17][24], bulb: 9, dying: 0 });
   s.lamps.push({ kind: 'lamp', type: 'desk', x: 13, y: 17, room: roomGrid[17][13], bulb: 6, dying: 0 });
@@ -3245,15 +3275,17 @@ function demoState() {
 const mm = $('minimap'), mmc = mm.getContext('2d');
 function drawMinimap() {
   const s = isPhone() ? 2.2 : 3.2, dpr = Math.min(window.devicePixelRatio || 1, 2); // 手機的小地圖小一點
-  const w = Math.round(MAP_W * s * dpr), h = Math.round(MAP_H * s * dpr);
-  if (mm.width !== w) { mm.width = w; mm.height = h; mm.style.width = MAP_W * s + 'px'; mm.style.height = MAP_H * s + 'px'; }
+  const vw = Math.min(MAP_W, 44), vh = MAP_H;   // 第三世界的列車很長：只畫玩家附近 44 格，跟著玩家捲動
+  const w = Math.round(vw * s * dpr), h = Math.round(vh * s * dpr);
+  if (mm.width !== w || mm.height !== h) { mm.width = w; mm.height = h; mm.style.width = vw * s + 'px'; mm.style.height = vh * s + 'px'; }
+  const ox = clamp(Math.round(G.p.x - vw / 2), 0, MAP_W - vw);
   const c = mmc;
   c.setTransform(1, 0, 0, 1, 0, 0);
   c.clearRect(0, 0, w, h);
-  c.setTransform(s * dpr, 0, 0, s * dpr, 0, 0);
+  c.setTransform(s * dpr, 0, 0, s * dpr, -ox * s * dpr, 0);
   for (const r of ROOMS) {
     const lit = G.lights.some(L => L.room === r && !L.candle);
-    c.fillStyle = lit ? 'rgba(255,220,140,.3)' : 'rgba(120,110,140,.28)';
+    c.fillStyle = lit ? 'rgba(255,220,140,.3)' : r.roof ? 'rgba(90,110,140,.3)' : 'rgba(120,110,140,.28)';
     c.fillRect(r.x, r.y, r.w, r.h);
   }
   for (const d of DOORS) { if (d.front) continue; c.fillStyle = d.locked ? 'rgba(220,60,60,.6)' : d.closed ? 'rgba(200,170,110,.5)' : 'rgba(120,110,140,.28)'; c.fillRect(d.x, d.y, 1, 1); }
@@ -3265,12 +3297,13 @@ function drawMinimap() {
   const blink = Math.sin(G.time * 8) > 0;
   const mark = (x, y, col) => { if (!blink) return; c.fillStyle = col; c.beginPath(); c.arc(x, y, 0.95, 0, 7); c.fill(); };
   if (!G.power) { const b = FURN_BY_ID.breaker; mark(b.x + 0.5, b.y + 0.5, '#ffd400'); }
-  if (G.ev.knock > 0) mark(0.5, 12.5, '#ff4455');
-  if (G.ev.closet > 0) mark(30.5, 1.5, '#ff4455');
-  if (G.ev.phone > 0) mark(26.5, 23.5, '#7ee081');
+  const fd = FRONT_DOOR, cl = FURN_BY_ID.closet, ph = FURN_BY_ID.phone;
+  if (G.ev.knock > 0) mark(fd.x + 0.5, fd.y + 0.5, '#ff4455');
+  if (G.ev.closet > 0 && cl) mark(cl.x + cl.w / 2, cl.y + cl.h / 2, '#ff4455');
+  if (G.ev.phone > 0 && ph) mark(ph.x + 0.5, ph.y + 0.5, '#7ee081');
   for (const o of [...G.sockets, ...G.lamps]) if (o.eaten > 0) mark(o.x + 0.5, o.y + 0.5, '#b06bff');
   if (G.ev.tvOn) mark(15, 15.5, '#6fa8ff');
-  if (G.phase === 'day' && G.ev.delivery > 0) mark(0.5, 12.5, '#7ee081');
+  if (G.phase === 'day' && G.ev.delivery > 0) mark(fd.x + 0.5, fd.y + 0.5, '#7ee081');
   if (G.gift) { c.fillStyle = '#ffd166'; c.beginPath(); c.arc(GIFT_POS.x, GIFT_POS.y, 0.8, 0, 7); c.fill(); }
   if (merchantHere()) { c.fillStyle = '#c38bff'; c.beginPath(); c.arc(MERCHANT_POS.x, MERCHANT_POS.y, 0.8, 0, 7); c.fill(); }
   for (const fl of G.flowers) {
@@ -3422,7 +3455,7 @@ function updateHUD() {
   const left = Math.ceil((night ? NIGHT_LEN : DAY_LEN) - G.t);
   $('phaseText').textContent = `${fmtClock()}　${night ? '天亮' : '天黑'}還有 ${left} 秒`;
   const alerts = [];
-  if (!G.power) alerts.push(isW3() ? `⚡ 發電機跳掉了！→ ${RN('attic')}` : `⚡ 停電中！→ ${RN('laundry')}電箱`);
+  if (!G.power) alerts.push(isW3() ? `⚡ 發電機跳掉了！→ ${RN('engine')}` : `⚡ 停電中！→ ${RN('laundry')}電箱`);
   if (isW3()) alerts.push(...alerts3());
   if (G.p.grabbed) alerts.push('🌿 草叢人抓住你的腳了！連按「跳」');
   if (G.ev.knock > 0) alerts.push('🚪 有人在敲門（別開）');
@@ -3729,6 +3762,7 @@ function toTitle() {
   Sound.setDrone(0);
   if (document.pointerLockElement) document.exitPointerLock();
   if (CUT) { CUT = null; $('cutscene').classList.add('hidden'); }
+  applyWorld(1);   // 主選單的背景永遠是第一世界的客廳
   G = demoState();
   for (const id of ['pause', 'gameover', 'help', 'book', 'diffPick', 'worldPick']) $(id).classList.add('hidden');
   $('hud').classList.add('hidden');

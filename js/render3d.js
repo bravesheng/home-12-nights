@@ -5,16 +5,25 @@
 import * as THREE from '../lib/three.module.js';
 
 const WALL_H = 2.7, EYE = 1.55, LMS = 4;
-const LMW = MAP_W * LMS, LMH = MAP_H * LMS;
+let LMW = 0, LMH = 0;   // 光照貼圖的大小（跟著地圖走，見 allocLM）
 const SRGB = THREE.SRGBColorSpace;
 
 let renderer, scene, camera, spot, viewFlash, lensMat, placeGhost, strongRing;
 const uni = { uLM: { value: null }, uLMSize: { value: new THREE.Vector2(MAP_W, MAP_H) }, uAmb: { value: 0.012 } };
-const lmBytes = new Uint8Array(LMW * LMH * 4);
-const lmAcc = new Float32Array(LMW * LMH * 3);
-const texRoom = new Array(LMW * LMH).fill(null);
-const texDoor = new Array(LMW * LMH).fill(null);
-let lmTex;
+let lmBytes, lmAcc, texRoom, texDoor, lmTex;
+// 光照貼圖的大小跟著地圖走（第三世界的地圖是一列長長的列車）：第一次和換世界時配置
+function allocLM() {
+  if (LMW === MAP_W * LMS && LMH === MAP_H * LMS) return;
+  LMW = MAP_W * LMS; LMH = MAP_H * LMS;
+  lmBytes = new Uint8Array(LMW * LMH * 4); lmAcc = new Float32Array(LMW * LMH * 3);
+  texRoom = new Array(LMW * LMH).fill(null); texDoor = new Array(LMW * LMH).fill(null);
+  if (lmTex) lmTex.dispose();
+  lmTex = new THREE.DataTexture(lmBytes, LMW, LMH, THREE.RGBAFormat);
+  lmTex.magFilter = lmTex.minFilter = THREE.LinearFilter;
+  lmTex.needsUpdate = true;
+  uni.uLM.value = lmTex;
+  uni.uLMSize.value.set(MAP_W, MAP_H);
+}
 
 // ====================================================================
 // 材質與幾何
@@ -99,10 +108,12 @@ function octa(g, r, x, y, z, mat) {
   g.add(m);
   return m;
 }
+// 一個物件的材質（可能是一個或一組，例如面向月台的牆有六個面）裡自己建的那些
+const ownMats = o => (Array.isArray(o.material) ? o.material : o.material ? [o.material] : []).filter(m => m.userData.own);
 function disposeGroup(g) {
   g.parent && g.parent.remove(g);
   g.traverse(o => {
-    if (o.material && o.material.userData.own) o.material.dispose();
+    for (const m of ownMats(o)) m.dispose();
     if (o.userData.ownGeo) o.geometry.dispose();
     if (o.isInstancedMesh) o.dispose();
   });
@@ -223,6 +234,14 @@ function floorTex(type) {
         c.strokeStyle = 'rgba(0,0,0,.35)'; c.lineWidth = 1;
         for (let i = 0; i < 3; i++) { let x = rnd() * w, y = rnd() * h; c.beginPath(); c.moveTo(x, y); for (let k = 0; k < 4; k++) { x += (rnd() - 0.5) * 20; y += (rnd() - 0.5) * 20; c.lineTo(x, y); } c.stroke(); }
         c.fillStyle = 'rgba(0,0,0,.12)'; c.fillRect(0, 0, w, 1); c.fillRect(0, 0, 1, h);
+        break;
+      }
+      case 'roof': {   // 車頂的鋼板：黑漆、一排排鉚釘、煤灰
+        c.fillStyle = '#2b2b2f'; c.fillRect(0, 0, w, h);
+        c.strokeStyle = 'rgba(0,0,0,.5)'; c.lineWidth = 1.5; c.strokeRect(0.5, 0.5, w - 1, h - 1);
+        for (let i = 4; i < w; i += 8) { c.fillStyle = '#4a4b50'; c.beginPath(); c.arc(i, 4, 1.4, 0, 7); c.fill(); c.beginPath(); c.arc(i, h - 4, 1.4, 0, 7); c.fill(); }
+        for (let i = 0; i < 8; i++) { c.fillStyle = `rgba(0,0,0,${0.1 + rnd() * 0.2})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 4 + rnd() * 12, 3 + rnd() * 6, rnd() * 3, 0, 7); c.fill(); }
+        for (let i = 0; i < 40; i++) { c.fillStyle = `rgba(255,255,255,${rnd() * 0.06})`; c.fillRect(rnd() * w, rnd() * h, 2, 1); }
         break;
       }
       case 'wood3': {
@@ -529,10 +548,12 @@ function updateLightmap(dark) {
   const amb = 0.95 * day;
   const cold = isW3() && G.cold;   // 寒寂之境：偏白偏藍
   const tg = isW2() ? 0.95 : cold ? 1.0 : isW3() ? 0.9 : 0.97, tb = isW2() ? 1.02 : cold ? 1.08 : isW3() ? 0.74 : 0.92; // 第二世界的白天帶一點粉紫色，第三世界偏褐色（像老照片）
+  const blood = !!(G.ev && G.ev.blood && G.phase === 'night'), moon = (1 - day) * 0.05;   // 車頂晚上有一點月光（紅月偏紅）
   for (let i = 0, n = LMW * LMH; i < n; i++) {
     const r = texRoom[i];
     const a = r ? amb * (1 - (r.dayDark || 0)) : texDoor[i] ? amb * 0.9 : 0;
     lmAcc[i * 3] = a; lmAcc[i * 3 + 1] = a * tg; lmAcc[i * 3 + 2] = a * tb;
+    if (r && r.roof) { lmAcc[i * 3] += moon * (blood ? 1 : 0.5); lmAcc[i * 3 + 1] += moon * (blood ? 0.3 : 0.62); lmAcc[i * 3 + 2] += moon * (blood ? 0.25 : 1); }
   }
   for (const L of G.lights) {
     const c = L.color || (L.candle ? [255, 160, 70] : bulbRGB(L.tier));
@@ -565,13 +586,13 @@ function scaleUV(g, su, sv) {
   const uv = g.attributes.uv;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * su, uv.getY(i) * sv);
 }
-function addFloor(x, y, w, h, type) {
+function addFloor(x, y, w, h, type, hgt = 0) {
   const g = new THREE.PlaneGeometry(w, h);
   scaleUV(g, w, h);
   const m = new THREE.Mesh(g, floorMat(type));
   m.userData.ownGeo = true;
   m.rotation.x = -Math.PI / 2;
-  m.position.set(x + w / 2, 0, y + h / 2);
+  m.position.set(x + w / 2, hgt, y + h / 2);
   m.receiveShadow = true;
   houseGroup.add(m);
 }
@@ -585,22 +606,26 @@ function setWorld() {
     scene.remove(houseGroup);
     houseGroup.traverse(o => {
       if (o.userData.ownGeo) o.geometry.dispose();
-      if (o.material && o.material.userData.own) o.material.dispose();
+      for (const m of ownMats(o)) m.dispose();
+      if (o.isInstancedMesh) o.dispose();
     });
   }
   windows.length = 0; decoFlowers.length = 0;
   frontDoorPanel = null; doorGlow = null; wallEyes = null; flowerEyes = null; ceilMat = null;
   if (backdrop) { disposeGroup(backdrop.g); backdrop = null; }
-  doorPanels.clear(); panes3 = []; walnutMat = stationMat = null; stopEyes = null; curtains = [];
+  doorPanels.clear(); panes3 = []; walnutMat = stationMat = ironMat = wallMat3 = null; stopEyes = null; curtains = []; locoSmoke = null;
   for (const [c, r] of chestMap) { disposeGroup(r.g); chestMap.delete(c); }
   for (const k in furn3d) delete furn3d[k];
+  allocLM();
+  precomputeTexels();
+  bookPlace();
   buildHouse();
   buildFurniture();
 }
 function buildHouse() {
   houseGroup = new THREE.Group(); scene.add(houseGroup);
   const w2 = isW2(), w3 = isW3();
-  for (const r of ROOMS) addFloor(r.x, r.y, r.w, r.h, r.floor);
+  for (const r of ROOMS) addFloor(r.x, r.y, r.w, r.h, r.floor, r.roof ? ROOF_H : 0);   // 車頂的地板比較高
   for (const d of DOORS) addFloor(d.x, d.y, 1, 1, d.rooms[0] ? d.rooms[0].floor : 'wood');
 
   // 天花板：第二世界是藍天白雲（萬物甦醒時雲會睜開眼睛發光）
@@ -612,14 +637,25 @@ function buildHouse() {
     cm.userData.own = true;
   } else if (w3) {
     // 第三世界：象牙白、一格一格線板的天花板（泛黃、有水漬）
-    const ct = ceil3Tex.clone(); ct.needsUpdate = true; ct.repeat.set(MAP_W / 2, MAP_H / 2);
+    const ct = ceil3Tex.clone(); ct.needsUpdate = true;
     cm = patchLM(new THREE.MeshLambertMaterial({ map: ct })); cm.userData.own = true;
   } else cm = lm('#6d6674');
-  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(MAP_W, MAP_H), cm);
-  ceil.userData.ownGeo = true;
-  ceil.rotation.x = Math.PI / 2;
-  ceil.position.set(MAP_W / 2, WALL_H, MAP_H / 2);
-  houseGroup.add(ceil);
+  if (w3) {
+    // 第三世界：每個房間各一片天花板（車頂沒有天花板，看得到天空）；車站的屋頂從車頂看得到，上面再蓋一片柏油屋頂
+    const top = patchLM(new THREE.MeshLambertMaterial({ map: tarTex })); top.userData.own = true;
+    for (const r of ROOMS) {
+      if (r.roof) continue;
+      const g = new THREE.PlaneGeometry(r.w, r.h); scaleUV(g, r.w / 2, r.h / 2);
+      const m = new THREE.Mesh(g, cm); m.userData.ownGeo = true; m.rotation.x = Math.PI / 2; m.position.set(r.x + r.w / 2, WALL_H, r.y + r.h / 2); houseGroup.add(m);
+      if (r.station) { const tp = new THREE.Mesh(g, top); tp.rotation.x = -Math.PI / 2; tp.position.set(r.x + r.w / 2, WALL_H + 0.03, r.y + r.h / 2); houseGroup.add(tp); }
+    }
+  } else {
+    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(MAP_W, MAP_H), cm);
+    ceil.userData.ownGeo = true;
+    ceil.rotation.x = Math.PI / 2;
+    ceil.position.set(MAP_W / 2, WALL_H, MAP_H / 2);
+    houseGroup.add(ceil);
+  }
 
   // 牆（只放在靠近室內的牆格）；第二世界是一棵一棵的樹
   const list = [];
@@ -650,7 +686,7 @@ function buildHouse() {
   const archFlowers = [];
   for (const d of DOORS) {
     const g = new THREE.Group(); g.position.set(d.x, 0, d.y); houseGroup.add(g);
-    box(g, 0, 1, 2.15, WALL_H, 0, 1, w3 ? (d.y >= 26 ? stationMat : walnutMat) : wallMat);
+    box(g, 0, 1, 2.15, WALL_H, 0, 1, w3 ? wallMat3(d.x, d.y) : wallMat);
     // 門上下是牆 → 通道東西向，門框在南北兩側；否則在東西兩側
     const eastWest = !!(tiles[d.y - 1] && tiles[d.y - 1][d.x] === 0);
     if (w3 && !d.front) addDoorPanel(d, g, eastWest);
@@ -683,7 +719,7 @@ function buildHouse() {
   if (archFlowers.length) addInstancedFlowers(archFlowers, 0.05, ['#ff9ec8', '#ffffff', '#fff3a8', '#c9a8ff']);
 
   if (w2) { buildGardenDeco(list); return; }
-  if (w3) { buildBackdrop(); buildStopEyes(); return; }
+  if (w3) { buildBackdrop(); buildStopEyes(); buildRoof3(); return; }
   // 窗戶（白天透進光、晚上一片漆黑）
   const W = [['n', 17.5], ['n', 27.5], ['n', 38.5], ['e', 19.5], ['e', 22.5], ['e', 12.5], ['w', 23.5], ['e', 30.5], ['s', 21.5], ['s', 28.5]];
   const frameMat = lm('#d8d2c8');
@@ -827,7 +863,7 @@ const frontLen = (f, side) => (side === 's' || side === 'n' ? f.w : f.h);
 
 function buildFurniture() {
   for (const f of FURN) {
-    const g = new THREE.Group(); g.position.set(f.x, 0, f.y); houseGroup.add(g);
+    const g = new THREE.Group(); g.position.set(f.x, floorH(f.x + 0.5, f.y + 0.5), f.y); houseGroup.add(g);   // 車頂上的家具比較高
     const r = { g, top: 0.8 };
     furn3d[f.id] = r;
     const W = f.w, D = f.h, side = frontSide(f), len = frontLen(f, side);
@@ -921,7 +957,7 @@ function buildFurniture() {
         r.top = 0.92;
         break;
       case 'cabinet': {
-        const h = { shoecab: 0.9, nightstand: 0.55, dresser: 1.0, filecab: 1.3, toolcab: 1.6, kcab: 0.9 }[f.id] || 0.9;
+        const h = { shoecab: 0.9, nightstand: 0.55, dresser: 1.0, filecab: 1.3, toolcab: 1.6, kcab: 0.9 }[f.id.replace(/\d+$/, '')] || 0.9;
         cabinet(h, f.id === 'filecab' || f.id === 'toolcab' ? '#7d8288' : '#8a6a4e');
         if (f.id === 'kcab') box(g, 0, W, 0.9, 0.94, 0, D, lm('#d9cbb5'));
         if (f.id === 'dresser') fb(g, f, side, 0.2, len - 0.2, 1.1, 1.9, 0.02, 0.05, lm('#b9d3de'), false);
@@ -1535,7 +1571,7 @@ function addDecor(res, g, y, tier, th) {
   }
 }
 function buildFixture(o) {
-  const g = new THREE.Group(); g.position.set(o.x + 0.5, 0, o.y + 0.5); scene.add(g);
+  const g = new THREE.Group(); g.position.set(o.x + 0.5, floorH(o.x + 0.5, o.y + 0.5), o.y + 0.5); scene.add(g);
   const th = THEME[o.bulb], metal = lm(th.metal), edge = lm(th.edge), metal2 = lm(th.metal, { side: THREE.DoubleSide });
   const bh = bulbPos(o).h;
   const res = { g, bulbs: [], halos: [], spin: null, rays: null, gems: null };
@@ -1617,7 +1653,7 @@ function syncFixtures(t) {
     for (const [o, f] of fixMap) {
       if (o.type !== 'socket' && o.type !== 'chand') continue;
       const a = sw * (o.type === 'chand' ? 1.5 : 1);
-      f.g.rotation.z = a; f.g.position.x = o.x + 0.5 + Math.sin(a) * WALL_H; f.g.position.y = WALL_H * (1 - Math.cos(a));
+      f.g.rotation.z = a; f.g.position.x = o.x + 0.5 + Math.sin(a) * WALL_H; f.g.position.y = floorH(o.x + 0.5, o.y + 0.5) + WALL_H * (1 - Math.cos(a));
     }
   }
 }
@@ -1632,7 +1668,7 @@ function syncCandles(t) {
     seen.add(c);
     let r = candleMap.get(c);
     if (!r) {
-      const g = new THREE.Group(); g.position.set(c.x, 0, c.y); scene.add(g);
+      const g = new THREE.Group(); g.position.set(c.x, floorH(c.x, c.y), c.y); scene.add(g);
       cyl(g, 0.03, 0.03, 0.14, 0, 0, 0, lm('#f3ecd8'), 8);
       const fl = new THREE.Mesh(geo('cflame', () => new THREE.ConeGeometry(0.018, 0.06, 8)), ownBasic({ color: 0xffcf6a, fog: false }));
       fl.position.y = 0.18; g.add(fl);
@@ -2151,7 +2187,7 @@ function syncNewMonster(e, r, t, p = G.p) {
       break;
     }
     case 'momo': {
-      r.g.position.y = (e.air || 0) * 0.45;
+      r.g.position.y = floorH(e.x, e.y) + (e.air || 0) * 0.45;
       const crouch = e.hopping > 0 ? 1 - e.air : (e.hopT < 0.15 && e.stun <= 0 && e.cd <= 0 ? 1 : 0);
       r.g.scale.set(1, 1 - 0.12 * crouch, 1);
       r.face.rotation.z = e.stun > 0 ? Math.sin(t * 30) * 0.12 : 0;
@@ -2215,7 +2251,7 @@ function syncNewMonster(e, r, t, p = G.p) {
       r.body.visible = k > 0.02;
       r.body.position.y = -1.6 * (1 - k);
       r.body.rotation.x = e.state === 'lunge' ? 0.5 : e.state === 'grab' ? 0.12 + Math.sin(t * 20) * 0.04 : 0;
-      r.g.position.y = 0;
+      r.g.position.y = floorH(e.x, e.y);
       break;
     }
     case 'snail': {
@@ -2226,7 +2262,7 @@ function syncNewMonster(e, r, t, p = G.p) {
       r.stalks.scale.y += (st - r.stalks.scale.y) * 0.2;
       r.stalks.rotation.z = Math.sin(t * 1.3) * 0.08;
       r.mouth.scale.y = e.chew > 0 ? 0.55 + Math.abs(Math.sin(t * 14)) * 0.6 : 0.92 + 0.08 * Math.sin(t * 2);  // 嚼：一張一合
-      r.g.position.y = 0;
+      r.g.position.y = floorH(e.x, e.y);
       break;
     }
     case 'kronos': case 'tyrant': case 'warlord': case 'taowu': syncMonster3(e, r, t, p, d, dt); break;
@@ -2235,7 +2271,7 @@ function syncNewMonster(e, r, t, p = G.p) {
       const shut = e.blind > 0 ? 0.15 : 1;
       for (const bl of r.blooms) bl.scale.y += (shut * bl.scale.x - bl.scale.y) * 0.25;
       r.face.rotation.z = e.blind > 0 ? Math.sin(t * 6) * 0.15 : Math.sin(e.wob * 0.9) * 0.06;
-      r.g.position.y = Math.sin(e.wob * 1.5) * 0.03;
+      r.g.position.y = floorH(e.x, e.y) + Math.sin(e.wob * 1.5) * 0.03;
       // 眼球微微抖；頭髮走路時跟著晃、被照瞎了甩頭時甩得更厲害，追你時往後飄
       r.eye.rotation.set(Math.sin(t * 9) * 0.05, Math.sin(t * 6.3) * 0.08 - 0.1, 0);
       const moving = e.state === 'hunt' || e.blind > 0, hu = r.hairU;
@@ -2899,7 +2935,7 @@ function syncLava3(t) {
   for (let i = 0; i < n; i++) {
     const l = lava[lava.length - n + i], hot = clamp((l.life - 4) / 11, 0, 1);
     _q.setFromEuler(_e.set(-Math.PI / 2, 0, l.a, 'XYZ'));
-    _m4.compose(_v.set(l.x, 0.014 + i * 0.00005, l.y), _q, _sc.set(l.r, l.r * 0.8, 1));
+    _m4.compose(_v.set(l.x, floorH(l.x, l.y) + 0.014 + i * 0.00005, l.y), _q, _sc.set(l.r, l.r * 0.8, 1));
     lavaMesh.setMatrixAt(i, _m4);
     _lcol.setRGB(0.12 + hot * 0.88, 0.06 + hot * 0.4 * (0.7 + 0.3 * Math.sin(t * 4 + i)), 0.04 + hot * 0.05);
     lavaMesh.setColorAt(i, _lcol);
@@ -2981,7 +3017,7 @@ function syncAngels(t) {
     seen.add(a);
     let r = angelMap.get(a);
     if (!r) { r = buildAngel(); angelMap.set(a, r); }
-    r.g.position.set(a.x, a.h, a.y);
+    r.g.position.set(a.x, a.h + floorH(a.x, a.y), a.y);
     const look = a.target && a.target.x !== undefined ? a.target : G.p;
     r.g.rotation.y = Math.atan2(look.x - a.x, look.y - a.y);
     const flap = Math.sin(t * (a.state === 'home' ? 8 : 18)) * 0.6;
@@ -3060,7 +3096,7 @@ function syncExtras(t) {
   if (gift.visible) gift.userData.glow.material.opacity = 0.45 + 0.3 * Math.sin(t * 3);
   treasureStar.visible = !!G.treasure && mode !== 'title';
   if (treasureStar.visible) {
-    treasureStar.position.set(G.treasure.x, 0.7 + Math.sin(t * 2) * 0.08, G.treasure.y);
+    treasureStar.position.set(G.treasure.x, floorH(G.treasure.x, G.treasure.y) + 0.7 + Math.sin(t * 2) * 0.08, G.treasure.y);
     treasureStar.rotation.y = t * 1.5;
   }
   const seen = new Set();
@@ -3071,7 +3107,7 @@ function syncExtras(t) {
       s = new THREE.Sprite(new THREE.SpriteMaterial({ map: pickupTex(pk.id), transparent: true, depthWrite: false }));
       s.material.userData.own = true; s.scale.setScalar(0.32); scene.add(s); pickMap.set(pk, s);
     }
-    s.position.set(pk.x, 0.3 + Math.sin(pk.t * 3) * 0.05, pk.y);
+    s.position.set(pk.x, floorH(pk.x, pk.y) + 0.3 + Math.sin(pk.t * 3) * 0.05, pk.y);
     s.visible = !(pk.age > 100 && Math.sin(t * 12) < 0); // 快消失時會閃
   }
   for (const [pk, s] of pickMap) if (!seen.has(pk)) { scene.remove(s); s.material.dispose(); pickMap.delete(pk); }
@@ -3135,7 +3171,7 @@ function syncHpBars() {
     const key = t.lv + ':' + Math.ceil(ratio * 40);
     if (key !== b.key) { b.key = key; drawHpBar(b.ctx, t, ratio); b.tex.needsUpdate = true; }
     b.sp.visible = !t.dead && !t.hidden && d < 11 && (ratio < 1 || d < 7) && (t.kind ? enemyAlpha(t) > 0.1 : t.grow >= 1);
-    b.sp.position.set(t.x, barH(t), t.y);
+    b.sp.position.set(t.x, barH(t) + floorH(t.x, t.y), t.y);
   }
   for (const [t, b] of hpMap) if (!seen.has(t)) { scene.remove(b.sp); b.sp.material.dispose(); b.tex.dispose(); hpMap.delete(t); }
 }
@@ -3152,7 +3188,7 @@ function syncFireballs(t) {
       g.add(outer, core); scene.add(g);
       r = { g, outer }; fbMap.set(f, r);
     }
-    r.g.position.set(f.x, f.h, f.y);
+    r.g.position.set(f.x, f.h + floorH(f.x, f.y), f.y);
     r.outer.scale.setScalar(0.5 + 0.1 * Math.sin(t * 30));
   }
   for (const [f, r] of fbMap) if (!seen.has(f)) { disposeGroup(r.g); fbMap.delete(f); }
@@ -3230,7 +3266,8 @@ function syncEnemy(e, r, t, p) {
   {
     const a = enemyAlpha(e);
     r.g.visible = a > 0.02;
-    r.g.position.set(e.x, Math.sin(e.wob * 2) * 0.04, e.y);
+    const fh = floorH(e.x, e.y);   // 在車頂上的怪物比較高
+    r.g.position.set(e.x, fh + Math.sin(e.wob * 2) * 0.04, e.y);
     r.g.rotation.y = Math.atan2(p.x - e.x, p.y - e.y);
     for (const m of r.mats) m.opacity = a * (m === r.mat ? 0.94 : 1);
     const eo = a * (0.6 + 0.4 * Math.sin(e.wob * 5));
@@ -3239,12 +3276,12 @@ function syncEnemy(e, r, t, p) {
     if (e.kind === 'woman') {
       // 被看著時完全不動、頭歪一邊；沒被看著時飄著、會抖
       const jit = e.seen ? 0 : (Math.random() - 0.5) * 0.015;
-      r.g.position.set(e.x + jit, e.seen ? 0.06 : 0.06 + Math.sin(e.wob * 1.6) * 0.05, e.y + jit);
+      r.g.position.set(e.x + jit, fh + (e.seen ? 0.06 : 0.06 + Math.sin(e.wob * 1.6) * 0.05), e.y + jit);
       r.face.rotation.z = e.seen ? 0.22 : Math.sin(e.wob * 0.8) * 0.1;
     } else if (e.kind === 'blob') {
       const R = 0.4 * (e.size || 1), eating = e.eatT > 0;
       const hop = !eating && e.h < R + 0.05 ? Math.abs(Math.sin(e.wob * 6)) * 0.14 : 0;
-      r.g.position.set(e.x, e.h + hop, e.y);
+      r.g.position.set(e.x, fh + e.h + hop, e.y);
       const sq = eating ? Math.sin(e.wob * 14) * 0.1 : Math.sin(e.wob * 12) * 0.07;
       r.body.scale.set(R * (1 + sq), R * (1 - sq), R * (1 + sq));
       r.body.rotation.y = e.wob * 0.5;
@@ -3260,7 +3297,7 @@ function syncGhosts() {
     seen.add(gh);
     let r = ghostMap.get(gh);
     if (!r) { const g = new THREE.Group(); scene.add(g); r = { g, eyes: eyePair(g, 1.5, 0, 0xdddddd, 0.07, 0.06) }; ghostMap.set(gh, r); }
-    r.g.position.set(gh.x, 0, gh.y);
+    r.g.position.set(gh.x, floorH(gh.x, gh.y), gh.y);
     r.g.rotation.y = Math.atan2(p.x - gh.x, p.y - gh.y);
     for (const ey of r.eyes) ey.material.opacity = clamp(gh.life, 0, 1) * 0.7;
   }
@@ -3287,10 +3324,10 @@ function syncParticles() {
     const k = clamp(f.life / f.max, 0, 1);
     if (f.type === 'smoke') {
       if (ns >= PMAX) continue;
-      sp.set([f.x, f.h, f.y], ns * 3); sc.set([f.color[0] / 255, f.color[1] / 255, f.color[2] / 255], ns * 3); ns++;
+      sp.set([f.x, f.h + floorH(f.x, f.y), f.y], ns * 3); sc.set([f.color[0] / 255, f.color[1] / 255, f.color[2] / 255], ns * 3); ns++;
     } else {
       if (ng >= PMAX) continue;
-      gp.set([f.x, f.h, f.y], ng * 3); gc.set([f.color[0] / 255 * k, f.color[1] / 255 * k, f.color[2] / 255 * k], ng * 3); ng++;
+      gp.set([f.x, f.h + floorH(f.x, f.y), f.y], ng * 3); gc.set([f.color[0] / 255 * k, f.color[1] / 255 * k, f.color[2] / 255 * k], ng * 3); ng++;
     }
   }
   glowPts.geometry.setDrawRange(0, ng); smokePts.geometry.setDrawRange(0, ns);
@@ -3462,7 +3499,7 @@ function syncProjectiles(t) {
       const gl = ownSprite(glowTex, 0x9fd8ff); gl.scale.setScalar(0.16); g.add(gl);
       scene.add(g); shotMap.set(sh, g);
     }
-    g.position.set(sh.x, sh.h, sh.y);
+    g.position.set(sh.x, sh.h + floorH(sh.x, sh.y), sh.y);
   }
   for (const [sh, g] of shotMap) if (!seen.has(sh)) { disposeGroup(g); shotMap.delete(sh); }
   seen = new Set();
@@ -3475,7 +3512,7 @@ function syncProjectiles(t) {
       const spark = ownSprite(glowTex, 0xffc060); spark.position.y = 0.065; g.add(spark);
       scene.add(g); r = { g, spark }; bombMap.set(b, r);
     }
-    r.g.position.set(b.x, b.h + 0.02, b.y);
+    r.g.position.set(b.x, b.h + 0.02 + floorH(b.x, b.y), b.y);
     r.g.rotation.set(0, b.spin * 0.3, Math.PI / 2 + (b.h > 0.07 ? b.spin : 0));
     const fast = b.fuse < 0.4;
     r.spark.scale.setScalar((fast ? 0.16 : 0.1) + Math.random() * 0.08);
@@ -3494,7 +3531,7 @@ function syncStun(t) {
       for (let i = 0; i < 3; i++) { const st = ownSprite(starShapeTex, 0xffe066); st.scale.setScalar(0.17); g.add(st); }
       scene.add(g); stunMap.set(e, g);
     }
-    g.position.set(e.x, barH(e) - 0.32, e.y);
+    g.position.set(e.x, barH(e) - 0.32 + floorH(e.x, e.y), e.y);
     g.children.forEach((st, i) => {
       const a = t * 5 + i * Math.PI * 2 / 3;
       st.position.set(Math.cos(a) * 0.27, Math.sin(t * 7 + i) * 0.03, Math.sin(a) * 0.27);
@@ -3546,13 +3583,13 @@ function updateCamera(dt, t) {
   } else if (cut) {
     // 破關動畫：鏡頭照著設定好的路線走
     const c = CUT.cam;
-    x = c.x; z = c.y; y = EYE + (c.h || 0) + Math.sin(t * 2.2) * 0.01; face = c.face; pitch = c.pitch;
+    x = c.x; z = c.y; y = EYE + (c.h || 0) + floorH(c.x, c.y) + Math.sin(t * 2.2) * 0.01; face = c.face; pitch = c.pitch;
   } else {
     const p = G.p;
     const moving = (p.moved || 0) > 0.001 && !(p.z > 0);
     bobPh += moving ? (p.moved || 0) * 6.5 : 0;
     bobAmt += ((moving ? 1 : 0) - bobAmt) * Math.min(1, dt * 8);
-    x = p.x; z = p.y; y = EYE + (p.z || 0) + Math.sin(bobPh) * 0.035 * bobAmt;
+    x = p.x; z = p.y; y = EYE + (p.z || 0) + floorH(p.x, p.y) + Math.sin(bobPh) * 0.035 * bobAmt;   // 車頂比較高
     face = p.face; pitch = p.pitch;
     // 被草叢人抓住：鏡頭往下看、抖動
     if (p.grabbed) { pitch -= 0.1; y -= 0.12; x += (Math.random() - 0.5) * 0.02; }
@@ -3594,24 +3631,17 @@ function updatePlaceGhost() {
   const h = { desk: 0.6, floor: 1.7, chand: 0.6 }[it.lamp];
   placeGhost.visible = true;
   placeGhost.scale.set(1, h / 0.9, 1);
-  placeGhost.position.set(tt.x + 0.5, it.lamp === 'chand' ? 2.3 : h / 2, tt.y + 0.5);
+  placeGhost.position.set(tt.x + 0.5, floorH(tt.x + 0.5, tt.y + 0.5) + (it.lamp === 'chand' ? 2.3 : h / 2), tt.y + 0.5);
 }
 
 // ====================================================================
 // 第三世界：末班列車。鍍金年代的豪華特快車（深胡桃木、黃銅、暗紅絨布、象牙白的天花板），全部都要「舊」；
 // 最下面一排是車站。牆上有真的窗戶，窗外是會捲動的三層風景（遠山和天空、樹林、電線桿）
 // ====================================================================
-let walnutTex, stationWallTex, carriageTex, ceil3Tex, doorPanelTex, carriageDoorTex, glassTex, skyFarTex, nearTex, yardTex, sheetTex, velvetTex;
+let walnutTex, stationWallTex, carriageTex, ceil3Tex, doorPanelTex, carriageDoorTex, glassTex, skyFarTex, skyTopTex, nearTex, yardTex, sheetTex, velvetTex, ironWallTex, tarTex, ballastTex;
 const midTexes = {};
-let backdrop = null, panes3 = [], walnutMat = null, stationMat = null, curtains = [];
+let backdrop = null, panes3 = [], walnutMat = null, stationMat = null, ironMat = null, wallMat3 = null, curtains = [], locoSmoke = null;
 const doorPanels = new Map();
-// 窗戶的位置（牆格）：列車的北、東、西面，車站的南、東、西面
-const WINDOWS_W3 = [
-  ...[3, 5, 7, 14, 16, 19, 25, 27, 30, 36, 38, 40].map(x => [x, 0]),
-  ...[3, 6, 17, 20, 23, 28, 30].map(y => [0, y]),
-  ...[3, 6, 12, 17, 20, 23, 28, 30].map(y => [43, y]),
-  ...[4, 8, 12, 20, 24, 28, 34, 38].map(x => [x, 32]),
-];
 function makeTrainTextures() {
   const grime = (c, w, h, n, a = 0.18) => { for (let i = 0; i < n; i++) { c.fillStyle = `rgba(20,12,6,${rnd() * a})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 4 + rnd() * 20, 2 + rnd() * 10, rnd() * 3, 0, 7); c.fill(); } };
   // 車廂內牆：上面是泛黃的象牙白壁紙（扇形的裝飾藝術花紋）和線板，中間一條發黑長銅綠的黃銅線，下面是深胡桃木的鑲板（木紋、刮痕、踢腳板）
@@ -3701,6 +3731,26 @@ function makeTrainTextures() {
     for (let i = 0; i < 300; i++) { c.fillStyle = `rgba(${120 + rnd() * 60 | 0},${30 + rnd() * 20 | 0},${40 + rnd() * 20 | 0},.35)`; c.fillRect(rnd() * w, rnd() * h, 1.5, 1.5); }
     for (let i = 0; i < 5; i++) { c.fillStyle = `rgba(0,0,0,${0.15 + rnd() * 0.2})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 5 + rnd() * 12, 3 + rnd() * 8, rnd() * 3, 0, 7); c.fill(); }
   });
+  // 機車室的牆：鉚釘鐵板，有鏽水和煤灰
+  ironWallTex = canvasTex(256, 512, (c, w, h) => {
+    c.fillStyle = '#3a3b3f'; c.fillRect(0, 0, w, h);
+    c.strokeStyle = 'rgba(0,0,0,.5)'; c.lineWidth = 3;
+    for (let y = 0; y <= h; y += 128) { c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke(); }
+    c.beginPath(); c.moveTo(128, 0); c.lineTo(128, h); c.stroke();
+    for (let y = 16; y < h; y += 32) for (const x of [12, 116, 140, 244]) { c.fillStyle = '#55575c'; c.beginPath(); c.arc(x, y, 4, 0, 7); c.fill(); c.fillStyle = 'rgba(0,0,0,.5)'; c.beginPath(); c.arc(x + 1.5, y + 1.5, 2.2, 0, 7); c.fill(); }
+    for (let i = 0; i < 10; i++) { c.fillStyle = `rgba(120,70,30,${0.12 + rnd() * 0.25})`; const x = rnd() * w; c.fillRect(x, rnd() * h * 0.6, 2 + rnd() * 4, 60 + rnd() * 160); }
+    grime(c, w, h, 24, 0.35);
+  });
+  // 車站的柏油屋頂（從車頂往下看得到）
+  tarTex = canvasTex(128, 128, (c, w, h) => { c.fillStyle = '#1e1d1f'; c.fillRect(0, 0, w, h); for (let i = 0; i < 300; i++) { c.fillStyle = `rgba(255,255,255,${rnd() * 0.08})`; c.fillRect(rnd() * w, rnd() * h, 2, 2); } grime(c, w, h, 10, 0.3); });
+  // 地面：碎石路基、枕木和一條平行的鐵軌（一張貼圖是 4×4 格）
+  ballastTex = canvasTex(256, 256, (c, w, h) => {
+    c.fillStyle = '#4a4742'; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 900; i++) { const g = 50 + rnd() * 70 | 0; c.fillStyle = `rgb(${g},${g - 4},${g - 8})`; c.fillRect(rnd() * w, rnd() * h, 2 + rnd() * 3, 2 + rnd() * 3); }
+    c.fillStyle = '#3a2d22'; for (let x = 6; x < w; x += 38) c.fillRect(x, 96, 14, 72);
+    c.fillStyle = '#6a6a6e'; c.fillRect(0, 108, w, 5); c.fillRect(0, 150, w, 5); c.fillStyle = 'rgba(255,255,255,.35)'; c.fillRect(0, 108, w, 1); c.fillRect(0, 150, w, 1);
+    grime(c, w, h, 14, 0.25);
+  });
   // ---------- 車外的風景（三層視差）：遠山和天空、中景（照天數換）、近景的電線桿；白天停在車站看到的站場 ----------
   skyFarTex = canvasTex(1024, 256, (c, w, h) => {
     const g = c.createLinearGradient(0, 0, 0, 170); g.addColorStop(0, '#5f7ea3'); g.addColorStop(0.7, '#a9b4bd'); g.addColorStop(1, '#cfc4ad');
@@ -3710,6 +3760,9 @@ function makeTrainTextures() {
     c.fillStyle = '#4e5046'; c.fillRect(0, 178, w, h - 178);
     for (let i = 0; i < 60; i++) { c.fillStyle = `rgba(0,0,0,${0.1 + rnd() * 0.2})`; c.beginPath(); c.ellipse(rnd() * w, 180 + rnd() * 76, 10 + rnd() * 40, 2 + rnd() * 4, 0, 0, 7); c.fill(); }
   });
+  skyFarTex.wrapT = THREE.ClampToEdgeWrapping;   // 上下不重複，接天空的地方才不會有一條線
+  // 遠山上面再接一片天空（從車頂看得到更高的地方）：顏色跟遠山那張貼圖的最上面一樣
+  skyTopTex = canvasTex(8, 8, (c, w, h) => { c.fillStyle = '#5f7ea3'; c.fillRect(0, 0, w, h); });
   const mid = (name, draw) => { midTexes[name] = canvasTex(1024, 256, (c, w, h) => { c.clearRect(0, 0, w, h); draw(c, w, h); }); };
   // 平原：草地、籬笆、遠遠的農舍
   mid('plain', (c, w, h) => {
@@ -3770,17 +3823,36 @@ function makeTrainTextures() {
     grime(c, w, h, 20, 0.2);
   });
 }
-// ---------- 牆：車廂是胡桃木壁板、車站是磚牆；從月台看到的那一面是墨綠色的車身；牆上開真的窗戶 ----------
+// ---------- 牆：車廂是胡桃木壁板（機車室是鉚釘鐵板）、車站是磚牆；列車面向月台的那一面是墨綠色的車身；牆上開真的窗戶 ----------
 function buildTrainWalls(list) {
-  const win = new Set(WINDOWS_W3.map(([x, y]) => x + ',' + y));
-  const train = [], station = [], side = [];
-  for (const [x, y] of list) {
-    if (win.has(x + ',' + y)) continue;
-    if (y === 25) side.push([x, y]); else if (y >= 26) station.push([x, y]); else train.push([x, y]);
-  }
   walnutMat = patchLM(new THREE.MeshLambertMaterial({ map: walnutTex })); walnutMat.userData.own = true;
   stationMat = patchLM(new THREE.MeshLambertMaterial({ map: stationWallTex })); stationMat.userData.own = true;
+  ironMat = patchLM(new THREE.MeshLambertMaterial({ map: ironWallTex })); ironMat.userData.own = true;
   const carriage = patchLM(new THREE.MeshLambertMaterial({ map: carriageTex })); carriage.userData.own = true;
+  const sideMats = [walnutMat, walnutMat, walnutMat, walnutMat, carriage, walnutMat];   // +z 那一面朝著月台
+  // 每一格牆是哪一種：看它旁邊（含斜角）是哪些房間。只跟車頂相鄰的是車頂的邊緣，不蓋牆（邊條在 buildRoof3）
+  const roomN = (x, y) => (inMap(x, y) ? roomGrid[y][x] : null);
+  const kindOf = (x, y) => {
+    let train = false, station = false, engine = false, platformS = false;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const r = roomN(x + dx, y + dy);
+      if (!r || r.roof) continue;
+      if (r.station) { station = true; if (dy === 1) platformS = true; } else { train = true; if (r.id === 'engine') engine = true; }
+    }
+    if (!train && !station) return 'roof';
+    if (train && platformS) return 'side';
+    if (train) return engine ? 'iron' : 'walnut';
+    return 'station';
+  };
+  const matOf = k => (k === 'side' ? sideMats : k === 'station' ? stationMat : k === 'iron' ? ironMat : walnutMat);
+  wallMat3 = (x, y) => matOf(kindOf(x, y));
+  const win = new Set(W3_WINDOWS.map(w => w.x + ',' + w.y));
+  const groups = { walnut: [], iron: [], station: [], side: [] };
+  for (const [x, y] of list) {
+    if (win.has(x + ',' + y)) continue;
+    const k = kindOf(x, y);
+    if (k !== 'roof') groups[k].push([x, y]);
+  }
   const mtx = new THREE.Matrix4();
   const inst = (tiles, mat) => {
     if (!tiles.length) return;
@@ -3790,35 +3862,30 @@ function buildTrainWalls(list) {
     im.castShadow = true; im.receiveShadow = true; im.computeBoundingSphere();
     houseGroup.add(im);
   };
-  inst(train, walnutMat); inst(station, stationMat);
-  inst(side, [walnutMat, walnutMat, walnutMat, walnutMat, carriage, walnutMat]);   // +z 那一面朝著月台
-  // 窗戶：牆上真的開一個洞（窗台到 0.95、窗楣 2.0 以上、兩邊留窗框），黃銅窗框、髒玻璃；外面是會捲動的風景
+  for (const k in groups) inst(groups[k], matOf(k));
+  // 窗戶：牆上真的開一個洞（窗台到 0.95、窗楣 2.0 以上、兩邊留窗框），黃銅窗框、髒玻璃；外面是會捲動的風景（窗戶都在東西向的牆上）
   const brass = lm('#6e5726');
   panes3 = [];
-  for (const [x, y] of WINDOWS_W3) {
-    const g = new THREE.Group(); g.position.set(x, 0, y); houseGroup.add(g);
-    const m = y >= 26 ? stationMat : walnutMat, ns = y === 0 || y === 32;
+  for (const w of W3_WINDOWS) {
+    const { x, y } = w, g = new THREE.Group(); g.position.set(x, 0, y); houseGroup.add(g);
+    const m = matOf(kindOf(x, y));
     box(g, 0, 1, 0, 0.95, 0, 1, m); box(g, 0, 1, 2.0, WALL_H, 0, 1, m);
-    if (ns) { box(g, 0, 0.15, 0.95, 2.0, 0, 1, m); box(g, 0.85, 1, 0.95, 2.0, 0, 1, m); }
-    else { box(g, 0, 1, 0.95, 2.0, 0, 0.15, m); box(g, 0, 1, 0.95, 2.0, 0.85, 1, m); }
-    const fr = (a0, a1, b0, b1) => (ns ? box(g, a0, a1, b0, b1, 0.47, 0.53, brass, false) : box(g, 0.47, 0.53, b0, b1, a0, a1, brass, false));
+    box(g, 0, 0.15, 0.95, 2.0, 0, 1, m); box(g, 0.85, 1, 0.95, 2.0, 0, 1, m);
+    const fr = (a0, a1, b0, b1) => box(g, a0, a1, b0, b1, 0.47, 0.53, brass, false);
     fr(0.12, 0.88, 0.93, 0.98); fr(0.12, 0.88, 1.98, 2.03); fr(0.12, 0.17, 0.95, 2.0); fr(0.83, 0.88, 0.95, 2.0); fr(0.485, 0.515, 0.95, 2.0);
     const pm = ownBasic({ map: glassTex, transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide, fog: false, color: 0xffffff });
     const pane = new THREE.Mesh(geo('pane3', () => new THREE.PlaneGeometry(0.7, 1.05)), pm);
-    pane.position.set(0.5, 1.475, 0.5); if (!ns) pane.rotation.y = Math.PI / 2;
+    pane.position.set(0.5, 1.475, 0.5);
     g.add(pane); panes3.push(pm);
-    // 列車的窗戶：兩邊掛著暗紅絨布的窗簾，列車開的時候會微微飄（用頭髮的做法）
-    if (y < 26) {
+    // 列車的窗戶：車廂那一側掛著暗紅絨布的窗簾，列車開的時候會微微飄（用頭髮的做法）
+    if (w.train) {
       const cm = hairMat(velvetTex, 0.55), S = [];
-      // 窗簾掛在車廂內側（北牆的內側是 +z、西牆是 +x、東牆是 -x）
-      const inward = y === 0 ? [0, 0, 1] : x === 0 ? [1, 0, 0] : [-1, 0, 0];
       for (const side of [-1, 1]) for (let k = 0; k < 3; k++) {
         const u = 0.5 + side * (0.42 + k * 0.05), zz = 1.04 + k * 0.01;
-        const pt = (uu, yy, off) => (ns ? [uu, yy, zz + off] : [zz + off, yy, uu]);
-        S.push({ a: pt(u, 2.15, 0), b: pt(u + side * 0.02, 1.5, 0.02), c: pt(u + side * 0.05, 0.75, 0.03), w: 0.09, f: ns ? 0 : Math.PI / 2, ph: k + side * 2, tp: 0.1 });
+        S.push({ a: [u, 2.15, zz], b: [u + side * 0.02, 1.5, zz + 0.02], c: [u + side * 0.05, 0.75, zz + 0.03], w: 0.09, f: 0, ph: k + side * 2, tp: 0.1 });
       }
       const cur = new THREE.Mesh(hairGeo(`curtain${x},${y}`, S), cm);
-      if (inward[0] < 0) { cur.position.x = 1; cur.scale.x = -1; }   // 東牆：翻到牆的內側
+      if (w.dir === 's') { cur.position.z = 1; cur.scale.z = -1; }   // 南牆的窗：窗簾翻到北邊（車廂裡）
       cur.userData.ownGeo = true; g.add(cur);
       curtains.push(cm.userData.hair);
     }
@@ -3830,7 +3897,7 @@ function addDoorPanel(d, g, eastWest) {
   const edge = lm('#2a1a10');
   const pm = new THREE.Mesh(geo('doorpanel', () => new THREE.BoxGeometry(0.94, 2.12, 0.07)), [edge, edge, edge, edge, face, face]);
   const piv = new THREE.Group(); piv.position.set(0.5, 1.06, 0.5); g.add(piv);
-  if (!eastWest) piv.rotation.y = Math.PI / 2;
+  if (eastWest) piv.rotation.y = Math.PI / 2;   // 通道東西向：門板要橫跨南北
   pm.castShadow = true; piv.add(pm);
   doorPanels.set(d, { pm, k: d.closed || d.locked ? 0 : 1 });
 }
@@ -3842,7 +3909,7 @@ function syncDoors(dt) {
     r.pm.visible = r.k < 0.985;
   }
 }
-// ---------- 車外的風景：地圖四周各放幾層大貼圖，列車開的時候往後捲（遠的慢、近的快） ----------
+// ---------- 車外的風景：地圖南北各放幾層大貼圖，列車往西開的時候往東捲（遠的慢、近的快）；地上是會往後跑的碎石路基和平行的鐵軌 ----------
 function buildBackdrop() {
   backdrop = { g: new THREE.Group(), layers: [], scenery: '' };
   scene.add(backdrop.g);
@@ -3857,18 +3924,27 @@ function buildBackdrop() {
     return L;
   };
   const cx = MAP_W / 2, cz = MAP_H / 2;
-  // 北面（列車的窗戶）和南面（車站的窗戶）各三層加白天的站場；東西面只有遠山和中景（列車往西開，正面的風景不會捲動）
-  for (const [z, ry, dir] of [[-15, 0, 1], [MAP_H + 15, Math.PI, -1]]) {
-    mk(skyFarTex, 240, 26, cx, 6, z, ry, true, 0.012).dir = dir;
-    const mid = mk(midTexes.plain, 170, 9, cx, 3.2, z + dir * 7, ry, false, 0.07); mid.dir = dir; mid.isMid = true;
-    const near = mk(nearTex, 120, 6, cx, 2.6, z + dir * 11.5, ry, false, 0.24); near.dir = dir; near.isNear = true;
-    const yard = mk(yardTex, 120, 7, cx, 2.9, z + dir * 11.8, ry, false, 0); yard.isYard = true;
+  // 北面（列車的窗戶、車頂看出去）和南面（車站的窗戶）各三層加白天的站場；東西面只有遠山和中景（正面的風景不會捲動）
+  for (const [z, ry, dir] of [[-12, 0, -1], [MAP_H + 12, Math.PI, 1]]) {
+    const back = dir < 0 ? 1 : -1;   // 往地圖外面是哪個方向
+    mk(skyFarTex, 300, 26, cx, 6, z, ry, true, 0.012).dir = dir;
+    mk(skyTopTex, 300, 50, cx, 44, z, ry, true, 0);
+    const mid = mk(midTexes.plain, 230, 9, cx, 3.2, z - back * 7, ry, false, 0.07); mid.dir = dir; mid.isMid = true;
+    const near = mk(nearTex, 200, 6, cx, 2.6, z - back * 11.5, ry, false, 0.24); near.dir = dir; near.isNear = true;
+    const yard = mk(yardTex, 200, 7, cx, 2.9, z - back * 11.8, ry, false, 0); yard.isYard = true;
   }
   for (const [x, ry] of [[-15, Math.PI / 2], [MAP_W + 15, -Math.PI / 2]]) {
     mk(skyFarTex, 240, 26, x, 6, cz, ry, true, 0);
+    mk(skyTopTex, 240, 50, x, 44, cz, ry, true, 0);
     const mid = mk(midTexes.plain, 170, 9, x + (x < 0 ? 7 : -7), 3.2, cz, ry, false, 0); mid.isMid = true;
   }
-  backdrop.moon = ownSprite(moonTex, 0xfff4d0); backdrop.moon.scale.setScalar(3.2); backdrop.moon.position.set(cx + 20, 13, -13); backdrop.g.add(backdrop.moon);
+  // 地面：在車廂地板下面 1.2 公尺，從車頂的邊緣、窗戶往下看得到；列車開的時候跟著往後跑
+  const gt = ballastTex.clone(); gt.needsUpdate = true; gt.repeat.set(300 / 4, (MAP_H + 28) / 4);
+  const gm = new THREE.MeshBasicMaterial({ map: gt }); gm.userData.own = true;
+  const ground = new THREE.Mesh(geo(`ground${MAP_W}x${MAP_H}`, () => new THREE.PlaneGeometry(300, MAP_H + 28)), gm);
+  ground.rotation.x = -Math.PI / 2; ground.position.set(cx, -1.2, cz); backdrop.g.add(ground);
+  backdrop.layers.push({ m: ground, t: gt, speed: 1.44, dir: -1, isGround: true });
+  backdrop.moon = ownSprite(moonTex, 0xfff4d0); backdrop.moon.scale.setScalar(4.5); backdrop.moon.position.set(cx - 14, 12, -11.5); backdrop.g.add(backdrop.moon);
 }
 // 每一幀：風景捲動、照白天晚上變色、換中景、門板、窗玻璃結霜
 function syncTrain3(dt, t, dark) {
@@ -3896,6 +3972,7 @@ function syncTrain3(dt, t, dark) {
   for (const pm of panes3) pm.opacity = cold ? 0.82 : 0.45;
   // 窗簾：列車在開的時候飄得比較厲害
   for (const u of curtains) { u.uHT.value = t; u.uHAmp.value = 0.012 + 0.03 * k; }
+  syncLocoSmoke(dt, k);
 }
 // 第三世界的黃銅燈泡、鍍金燈泡、水晶吊燈燈泡（發光的部分放進 res.bulbs 一起變色）
 function addTrainBulb(res, g, x, y, z, tier, s) {
@@ -3948,6 +4025,17 @@ function addPassenger(g, r, x, z, face, y = 0) {
   for (const s of [-1, 1]) box(alive, s * 0.12 - 0.05, s * 0.12 + 0.05, 0.04, 0.42, 0.24, 0.38, coat);
   sph(alive, 0.12, 0, 1.06, 0, skin, 1, 1.15, 1, 12);
   cyl(alive, 0.12, 0.12, 0.12, 0, 1.13, 0, hat, 12); cyl(alive, 0.19, 0.19, 0.02, 0, 1.12, 0, hat, 14);
+  alive.visible = false;
+  (r.pax = r.pax || []).push({ g: pg, head, dead, alive, turn: 0, base: face });
+}
+// 躺著不動的乘客（臥鋪的下鋪）：蓋著白布的一團，看得出頭和腳的形狀
+function addLyingPassenger(g, r, x, z, face, y) {
+  const pg = new THREE.Group(); pg.position.set(x, y, z); pg.rotation.y = face; g.add(pg);
+  const dead = new THREE.Group(), alive = new THREE.Group(); pg.add(dead); pg.add(alive);
+  const sheet = sheetMat();
+  const head = sph(dead, 0.14, -0.6, 0.1, 0, sheet, 1.1, 0.75, 1, 12);
+  sph(dead, 0.26, -0.15, 0.08, 0, sheet, 1.3, 0.45, 0.9, 12);
+  box(dead, 0.1, 0.65, 0, 0.16, -0.17, 0.17, sheet);
   alive.visible = false;
   (r.pax = r.pax || []).push({ g: pg, head, dead, alive, turn: 0, base: face });
 }
@@ -4196,6 +4284,63 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
       r.top = 1.55;
       return true;
     }
+    case 'seats': { // 普通車廂的座位：每一格一組兩人座（暗紅絨布、胡桃木扶手），椅背朝車尾、面向車頭；牆那一側的上方是黃銅行李架
+      const vel = velvet();
+      for (let i = 0; i < W; i++) {
+        const x0 = i + 0.08, x1 = i + 0.92;
+        box(g, x0, x1, 0, 0.44, 0.12, D - 0.12, walnut);
+        box(g, x0 + 0.02, x1 - 0.02, 0.44, 0.52, 0.14, D - 0.14, vel);
+        box(g, x1 - 0.16, x1 - 0.02, 0.52, 1.12, 0.14, D - 0.14, vel);
+        box(g, x1 - 0.18, x1 - 0.16, 0.5, 1.14, 0.12, D - 0.12, walnut2, false);
+        fb(g, f, side, i + 0.1, i + 0.9, 0.52, 0.64, 0.02, 0.1, walnut2);   // 走道側的扶手
+      }
+      fb(g, f, side, 0.05, len - 0.05, 1.95, 1.98, D - 0.6, D - 0.55, brass2, false);
+      fb(g, f, side, 0.05, len - 0.05, 1.93, 1.96, D - 0.3, D - 0.25, brass2, false);
+      for (let u = 0.25; u < len; u += 0.75) { fb(g, f, side, u, u + 0.03, 1.9, 1.98, D - 0.6, D - 0.08, brass2, false); fb(g, f, side, u, u + 0.03, 1.55, 1.9, D - 0.1, D - 0.07, brass2, false); }
+      if (f.pax) addPassenger(g, r, 0.5, D / 2, -Math.PI / 2, 0.08);
+      r.top = 1.14;
+      return true;
+    }
+    case 'bunk': { // 臥鋪的上下鋪：胡桃木床架、兩層泛黃的床墊和暗紅的毯子、小鐵梯；下鋪躺著一個蓋白布的乘客
+      const mat = lm('#d6cdb9');
+      for (const [y0, y1] of [[0.35, 0.47], [1.35, 1.47]]) {
+        box(g, 0.03, W - 0.03, y0 - 0.08, y0, 0.03, D - 0.03, walnut);
+        box(g, 0.06, W - 0.06, y0, y1, 0.06, D - 0.06, mat);
+        fb(g, f, side, 0.1, 0.5, y1, y1 + 0.1, 0.15, D - 0.15, ivory);
+        fb(g, f, side, 0.6, len - 0.08, y1 - 0.02, y1 + 0.06, 0.08, D - 0.08, velvet());
+      }
+      for (const [x, z] of [[0.05, 0.05], [W - 0.05, 0.05], [0.05, D - 0.05], [W - 0.05, D - 0.05]]) box(g, x - 0.03, x + 0.03, 0, 1.6, z - 0.03, z + 0.03, walnut);
+      fb(g, f, side, len - 0.3, len - 0.27, 0, 1.4, 0.02, 0.05, iron, false); fb(g, f, side, len - 0.08, len - 0.05, 0, 1.4, 0.02, 0.05, iron, false);
+      for (let y = 0.3; y < 1.4; y += 0.28) fb(g, f, side, len - 0.3, len - 0.05, y, y + 0.03, 0.02, 0.05, iron, false);
+      if (f.pax) addLyingPassenger(g, r, W / 2, D / 2, faceOf(side), 0.47);
+      r.top = 1.6;
+      return true;
+    }
+    case 'bed': { // 臥鋪 A（你的床）：胡桃木床框、泛黃的床單和枕頭、暗紅的毯子；床底下會伸出手（跟第一世界一樣）
+      box(g, 0.03, W - 0.03, 0, 0.3, 0.03, D - 0.03, walnut);
+      box(g, 0.06, W - 0.06, 0.3, 0.48, 0.06, D - 0.06, lm('#d6cdb9'));
+      fb(g, f, side, 0.1, 0.55, 0.48, 0.6, 0.15, D - 0.15, ivory);
+      fb(g, f, side, 0.65, len - 0.06, 0.46, 0.56, 0.08, D - 0.08, velvet());
+      r.hand = new THREE.Group(); g.add(r.hand); r.hand.visible = false;
+      const skin = lm('#cfc6c0');
+      fb(r.hand, f, side, 0.9, 1.05, 0.02, 0.08, -0.25, 0.1, skin, false);
+      for (let i = 0; i < 4; i++) fb(r.hand, f, side, 0.88 + i * 0.05, 0.91 + i * 0.05, 0.02, 0.05, -0.4, -0.25, skin, false);
+      r.top = 0.6;
+      return true;
+    }
+    case 'ladder': { // 爬上車頂的鐵梯：釘在牆上的兩根鐵桿和橫桿，天花板上是艙口蓋
+      for (const u of [0.3, 0.7]) fb(g, f, side, u - 0.03, u + 0.03, 0.1, WALL_H, D - 0.22, D - 0.16, iron);
+      for (let y = 0.3; y < WALL_H - 0.1; y += 0.3) fb(g, f, side, 0.26, 0.74, y, y + 0.04, D - 0.24, D - 0.14, iron, false);
+      fb(g, f, side, 0.12, 0.88, WALL_H - 0.04, WALL_H - 0.005, D - 0.55, D - 0.05, lm('#2a2a2e'), false);
+      r.top = WALL_H;
+      return true;
+    }
+    case 'hatch': { // 車頂的艙口：鐵蓋子和拉環
+      box(g, 0.12, 0.88, 0, 0.05, 0.12, 0.88, iron);
+      const ring = new THREE.Mesh(geo('hatchring', () => new THREE.TorusGeometry(0.08, 0.015, 6, 14)), lm('#5e5e64')); ring.rotation.x = Math.PI / 2; ring.position.set(0.5, 0.06, 0.3); g.add(ring);
+      r.top = 0.1;
+      return true;
+    }
     case 'gacha': { // 幸運機：胡桃木的箱子、黃銅的搖把、玻璃罩裡的彩球
       box(g, 0.14, 0.86, 0, 0.8, 0.14, 0.86, walnut);
       cyl(g, 0.3, 0.3, 0.04, 0.5, 0.8, 0.5, brass2, 20);
@@ -4260,16 +4405,15 @@ let stopEyes = null;
 function buildStopEyes() {
   stopEyes = new THREE.Group(); houseGroup.add(stopEyes);
   const hand = ownLM('#8a8278', { transparent: true, opacity: 0.9 });
-  for (const [x, y] of WINDOWS_W3) {
-    if (y >= 26) continue;   // 只有列車的窗戶
-    const ns = y === 0;
+  for (const w of W3_WINDOWS) {
+    if (!w.train) continue;   // 只有列車的窗戶
+    const oz = w.dir === 's' ? w.y + 1.15 : w.y - 0.15;
     for (let i = 0; i < 2; i++) {
       const g = new THREE.Group();
-      const ox = ns ? x + 0.3 + i * 0.4 : (x === 0 ? -0.15 : x + 1.15), oz = ns ? -0.15 : y + 0.3 + i * 0.4;
-      g.position.set(ox, 1.3 + rnd() * 0.5, oz);
+      g.position.set(w.x + 0.3 + i * 0.4, 1.3 + rnd() * 0.5, oz);
       const e = ownSprite(glowTex, rnd() < 0.5 ? 0xffd9a0 : 0xff6a50); e.scale.setScalar(0.07 + rnd() * 0.05); g.add(e);
-      const e2 = e.clone(); e2.position.x = ns ? 0.09 : 0; e2.position.z = ns ? 0 : 0.09; g.add(e2);
-      if (rnd() < 0.6) { const h = box(g, -0.06, 0.06, -0.3, -0.1, -0.02, 0.02, hand, false); if (!ns) h.rotation.y = Math.PI / 2; for (let k = 0; k < 4; k++) { const f = box(g, -0.05 + k * 0.03, -0.035 + k * 0.03, -0.1, 0.02, -0.01, 0.01, hand, false); if (!ns) f.rotation.y = Math.PI / 2; } }
+      const e2 = e.clone(); e2.position.x = 0.09; g.add(e2);
+      if (rnd() < 0.6) { box(g, -0.06, 0.06, -0.3, -0.1, -0.02, 0.02, hand, false); for (let k = 0; k < 4; k++) box(g, -0.05 + k * 0.03, -0.035 + k * 0.03, -0.1, 0.02, -0.01, 0.01, hand, false); }
       g.userData.ph = rnd() * 6;
       stopEyes.add(g);
     }
@@ -4283,6 +4427,62 @@ function syncStopEyes(t) {
   if (!on) return;
   for (const g of stopEyes.children) { const k = Math.sin(t * 3 + g.userData.ph); g.visible = k > -0.6; g.position.y += Math.sin(t * 7 + g.userData.ph) * 0.002; }
 }
+// ---------- 車頂：走得到的北側低車頂（車頂房間的地板）、中間凸起的天窗層（一排小窗）、通風帽、車廂之間的蛇腹、車尾的邊條；
+// 車頭是煤水車（堆著煤）、駕駛室、鍋爐和煙囪，都在機車室的天花板上面，從車頂往車頭看得到 ----------
+function buildRoof3() {
+  const steel = lm('#28282c'), dark = lm('#17171a'), bellows = lm('#101012'), glass = ownBasic({ color: 0x3a2a14, transparent: true, opacity: 0.85, fog: false });
+  const g = new THREE.Group(); houseGroup.add(g);
+  const Z0 = 4, Z1 = 11, R = ROOF_H;   // 天窗層蓋住列車的北牆到南牆（y=4～10）
+  for (let i = 0; i < W3_CARS.length; i++) {
+    const c = W3_CARS[i], X0 = c.x0 - 1, X1 = c.x1 + 2;
+    if (c.id === 'engine') continue;
+    box(g, X0 + 0.35, X1 - 0.35, R - 0.2, R + 0.62, Z0 + 0.05, Z1 - 0.05, steel);       // 天窗層的身體
+    box(g, X0 + 0.25, X1 - 0.25, R + 0.62, R + 0.72, Z0 - 0.08, Z1 + 0.08, dark);        // 頂板（兩邊微微突出）
+    for (let x = X0 + 1; x < X1 - 1.2; x += 2) box(g, x + 0.2, x + 0.8, R + 0.18, R + 0.46, Z0 + 0.02, Z0 + 0.07, glass, false);   // 一排天窗
+    for (let x = X0 + 2.5; x < X1 - 2; x += 4) { cyl(g, 0.12, 0.12, 0.2, x, R + 0.72, 7.5, dark, 10); cyl(g, 0.3, 0.1, 0.1, x, R + 0.92, 7.5, dark, 10); }   // 通風帽
+    box(g, X0, X1, R - 0.12, R + 0.08, 0.86, 1.0, dark);                                // 北側的邊條
+    if (i < W3_CARS.length - 1) box(g, X1 - 0.5, X1 + 0.5, R - 0.2, R + 0.35, Z0 + 0.3, Z1 - 0.3, bellows);   // 車廂之間的蛇腹
+  }
+  box(g, MAP_W - 1, MAP_W - 0.85, R - 0.1, R + 0.3, 0.9, Z1, dark);   // 車尾的邊條
+  buildLoco(g, steel, dark);
+}
+// 車頭（復古蒸汽機車）：煤水車、駕駛室、橫躺的大鍋爐、蒸汽包、汽笛、煙囪；全部都在車頂的高度以上
+function buildLoco(g, steel, dark) {
+  const R = ROOF_H, black = lm('#141416'), coal = ownLM('#141416', { shade: 0.6 }), brass = lm('#8a6a2a');
+  // 煤水車：x 5～10（車頂走道的西端就是它的後壁），上面堆著煤
+  box(g, 5, 10, R - 0.2, R + 0.9, 0.9, 11.1, steel);
+  box(g, 5.2, 9.8, R + 0.9, R + 0.95, 1.1, 10.9, dark);
+  for (let i = 0; i < 26; i++) { const x = 5.6 + rnd() * 3.8, z = 1.6 + rnd() * 8.8; sph(g, 0.22 + rnd() * 0.2, x, R + 0.95 + rnd() * 0.25, z, coal, 1 + rnd() * 0.5, 0.6 + rnd() * 0.3, 1 + rnd() * 0.5, 7); }
+  // 駕駛室：x 1.8～5，屋頂比車頂高 1.3
+  box(g, 1.8, 5, R - 0.2, R + 1.25, 4.2, 10.8, steel);
+  box(g, 1.7, 5.1, R + 1.25, R + 1.35, 4.0, 11.0, dark);
+  // 鍋爐：橫躺的大圓筒（底部剛好貼著機車室的天花板），箍著幾圈鐵環；前面是煙囪、上面是蒸汽包和汽笛
+  const boiler = cyl(g, 1.25, 1.25, 6.3, 0, 0, 0, black, 24); boiler.rotation.z = Math.PI / 2; boiler.position.set(-1.35, R + 1.0, 7.5);
+  for (const x of [-3.6, -1.2, 1.2]) { const ring = cyl(g, 1.29, 1.29, 0.12, 0, 0, 0, dark, 24); ring.rotation.z = Math.PI / 2; ring.position.set(x, R + 1.0, 7.5); }
+  const C = W3.loco.chimney;
+  cyl(g, 0.3, 0.34, 1.3, C.x, R + 2.0, C.y, black, 14); cyl(g, 0.46, 0.3, 0.3, C.x, R + 3.3, C.y, black, 14);
+  sph(g, 0.6, -0.4, R + 2.1, 7.5, black, 1, 0.8, 1, 14); cyl(g, 0.06, 0.06, 0.5, 0.6, R + 2.1, 7.5, brass, 8);
+  for (const z of [6.3, 8.7]) box(g, -4.4, 1.8, R + 1.9, R + 1.94, z - 0.02, z + 0.02, brass, false);   // 扶手
+  // 煙囪的煙：十幾個會長大、變淡、往車尾飄的煙團
+  locoSmoke = { g: new THREE.Group(), puffs: [], x: C.x, y: R + 3.6, z: C.y };
+  g.add(locoSmoke.g);
+  for (let i = 0; i < 14; i++) {
+    const m = new THREE.SpriteMaterial({ map: glowTex, color: 0x3a383c, transparent: true, depthWrite: false, opacity: 0.5 }); m.userData.own = true;
+    const sp = new THREE.Sprite(m); locoSmoke.g.add(sp);
+    locoSmoke.puffs.push({ sp, age: i / 14 * 4, life: 4, dz: (rnd() - 0.5) * 0.6, dx: rnd() * 0.3 });
+  }
+}
+function syncLocoSmoke(dt, k) {
+  if (!locoSmoke) return;
+  for (const p of locoSmoke.puffs) {
+    p.age += dt * (0.6 + 0.4 * k);
+    if (p.age > p.life) { p.age -= p.life; p.dz = (rnd() - 0.5) * 0.6; }
+    const a = p.age, f = a / p.life;
+    p.sp.position.set(locoSmoke.x + p.dx + a * (0.4 + 3.2 * k), locoSmoke.y + a * 1.1 + f * f * 0.8, locoSmoke.z + p.dz * f);
+    p.sp.scale.setScalar(0.9 + f * 2.6);
+    p.sp.material.opacity = 0.5 * (1 - f) * (1 - f);
+  }
+}
 // 每一幀：火爐的火、煤氣燈閃爍、站牌的站名、乘客（過場動畫時活著；夜晚事件讓某個乘客的頭慢慢轉過來看你）
 function updateTrainFurniture(t) {
   const fb3 = furn3d.firebox;
@@ -4293,7 +4493,7 @@ function updateTrainFurniture(t) {
     fb3.fireMat.color.setRGB(1, 0.35 + 0.3 * k, 0.1);
     fb3.fireGlow.material.opacity = (0.3 + 0.5 * Math.abs(Math.sin(t * 9))) * k;
   }
-  for (const id of ['gaslamp1', 'gaslamp2']) { const r = furn3d[id]; if (!r || !r.flame) continue; r.flame.scale.set(1, 0.8 + 0.5 * Math.random(), 1); r.glow.material.opacity = 0.3 + 0.2 * Math.random(); }
+  for (const f of FURN) { if (f.type !== 'gaslamp') continue; const r = furn3d[f.id]; if (!r || !r.flame) continue; r.flame.scale.set(1, 0.8 + 0.5 * Math.random(), 1); r.glow.material.opacity = 0.3 + 0.2 * Math.random(); }
   const sg = furn3d.sign;
   if (sg && sg.signCv && sg.signName !== curStation()) {
     sg.signName = curStation();
@@ -4385,9 +4585,9 @@ function bookOk() {
     // 舞台：四周是暗色漸層的背景、腳下一圈地板（圖鑑卡片的範圍全部由這裡畫滿）
     const bg = canvasTex(8, 64, (c, w, h) => { const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#171320'); g.addColorStop(0.5, '#2e2640'); g.addColorStop(1, '#4a3d5e'); c.fillStyle = g; c.fillRect(0, 0, w, h); });
     const dome = new THREE.Mesh(new THREE.SphereGeometry(12, 16, 12), new THREE.MeshBasicMaterial({ map: bg, side: THREE.BackSide, fog: false }));
-    dome.position.set(BOOK_X, 1.0, BOOK_Y); book.scene.add(dome);
+    dome.position.set(BOOK_X, 1.0, BOOK_Y); book.scene.add(dome); book.dome = dome;
     const floor = new THREE.Mesh(new THREE.CircleGeometry(1.6, 32), new THREE.MeshBasicMaterial({ color: 0x231c2e, fog: false }));
-    floor.rotation.x = -Math.PI / 2; floor.position.set(BOOK_X, 0.002, BOOK_Y); book.scene.add(floor);
+    floor.rotation.x = -Math.PI / 2; floor.position.set(BOOK_X, 0.002, BOOK_Y); book.scene.add(floor); book.floor = floor;
     book.lm = new THREE.DataTexture(new Uint8Array([100, 96, 108, 255]), 1, 1, THREE.RGBAFormat);
     book.lm.needsUpdate = true;
     book.okFlag = true;
@@ -4395,7 +4595,16 @@ function bookOk() {
   return book.okFlag;
 }
 // 怪物都放在地圖中間同一個位置（lightAt 之類的函式要查得到房間），一次只顯示一隻
-const BOOK_X = Math.floor(MAP_W / 2) + 0.5, BOOK_Y = Math.floor(MAP_H / 2) + 0.5;
+let BOOK_X = Math.floor(MAP_W / 2) + 0.5, BOOK_Y = Math.floor(MAP_H / 2) + 0.5;
+// 換世界：怪物改放在這個世界最大的那間（第三世界是景觀車廂）的中間，舊的模型全部拆掉重建
+function bookPlace() {
+  const r = ROOMS.find(r => r.id === 'lounge') || ROOMS.find(r => r.id === 'living') || ROOMS[0];
+  BOOK_X = Math.floor(r.x + r.w / 2) + 0.5; BOOK_Y = Math.floor(r.y + r.h / 2) + 0.5;
+  for (const m of book.models.values()) disposeGroup(m.r.g);
+  book.models.clear();
+  if (book.dome) book.dome.position.set(BOOK_X, 1.0, BOOK_Y);
+  if (book.floor) book.floor.position.set(BOOK_X, 0.002, BOOK_Y);
+}
 function bookModel(spec) {
   const key = spec.flower ? 'f:' + spec.flower : spec.kind;
   let m = book.models.get(key);
@@ -4557,13 +4766,10 @@ function init() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x020104);
   scene.fog = new THREE.Fog(0x020104, 1.5, 13);
-  camera = new THREE.PerspectiveCamera(72, 1, 0.05, 60);
+  camera = new THREE.PerspectiveCamera(72, 1, 0.05, 160);   // 第三世界從車頂看得很遠（南面的風景在 35 格外）
   camera.rotation.order = 'YXZ';
   scene.add(camera);
-  lmTex = new THREE.DataTexture(lmBytes, LMW, LMH, THREE.RGBAFormat);
-  lmTex.magFilter = lmTex.minFilter = THREE.LinearFilter;
-  lmTex.needsUpdate = true;
-  uni.uLM.value = lmTex;
+  allocLM();
   precomputeTexels();
   makeTextures();
   makeMonsterTextures();

@@ -2,10 +2,13 @@
 // ===== 遊戲資料：地圖、家具、物品、燈泡 =====
 
 const TILE = 32;
-const MAP_W = 44, MAP_H = 33;
+// 地圖大小：第一、二世界是 44×33 的房子；第三世界是一列 108 格長的列車（換世界時由 applyWorld 設定）
+let MAP_W = 44, MAP_H = 33;
+const MAP_SIZE = { 1: [44, 33], 2: [44, 33], 3: [108, 23] };
 
 // 房間（格子座標，含邊界）。level 越高，找到的燈泡越好
-const ROOMS = [
+// ROOMS_HOUSE 是第一、二世界的房子；ROOMS 是現在這個世界用的清單，換世界時由 roomsForWorld 重新填
+const ROOMS_HOUSE = [
   { id: 'attic',    name: '閣樓',   x: 1,  y: 1,  w: 10, h: 9,  floor: 'attic',     level: 3, dayDark: 0.55 },
   { id: 'study',    name: '書房',   x: 12, y: 1,  w: 10, h: 9,  floor: 'wood2',     level: 2 },
   { id: 'bedroom',  name: '臥室',   x: 23, y: 1,  w: 10, h: 9,  floor: 'carpet',    level: 1 },
@@ -19,14 +22,16 @@ const ROOMS = [
   { id: 'laundry',  name: '洗衣間', x: 32, y: 26, w: 11, h: 6,  floor: 'tile',      level: 1 },
 ];
 
+const ROOMS = ROOMS_HOUSE.map(r => ({ ...r }));
+
 // 門（放在牆上的格子）。DOORS 是現在這個世界用的清單，換世界時由 doorsForWorld 重新填
-const DOORS_BASE = [
+const DOORS_HOUSE = [
   { x: 5, y: 10 }, { x: 16, y: 10 }, { x: 27, y: 10 }, { x: 38, y: 10 },
   { x: 5, y: 14 }, { x: 19, y: 14 }, { x: 20, y: 14 }, { x: 35, y: 14 },
-  { x: 5, y: 25, station: true }, { x: 22, y: 25, station: true }, { x: 37, y: 25, station: true },
+  { x: 5, y: 25 }, { x: 22, y: 25 }, { x: 37, y: 25 },
   { x: 0, y: 12, front: true },
 ];
-const DOORS = [...DOORS_BASE];
+const DOORS = DOORS_HOUSE.map(d => ({ ...d }));
 
 // 家具。loot = 可搜索的物資表；solid 預設為 true
 const FURN = [
@@ -91,17 +96,19 @@ const FURN = [
   { id: 'tchest2', type: 'tchest', name: '上鎖的寶箱', x: 5, y: 30, w: 2, h: 1 },
   { id: 'tchest3', type: 'tchest', name: '上鎖的寶箱', x: 20, y: 8, w: 2, h: 1 },
 ];
-const MERCHANT_POS = { x: 11.5, y: 29.3 };   // 神秘商人白天站在地下室
-const GIFT_POS = { x: 25.5, y: 3.5 };        // 早晨禮物放在臥室床邊
+// 神秘商人白天站的位置、早晨禮物放的位置（現在這個世界的；房子是地下室和臥室床邊，第三世界是月台和臥鋪旁邊）
+const MERCHANT_HOUSE = { x: 11.5, y: 29.3 }, GIFT_HOUSE = { x: 25.5, y: 3.5 };
+const MERCHANT_POS = { ...MERCHANT_HOUSE }, GIFT_POS = { ...GIFT_HOUSE };
 
-// 天花板燈座（每個房間固定的燈位）
-const SOCKETS = [
+// 天花板燈座（每個房間固定的燈位）。SOCKETS 是現在這個世界用的清單，換世界時由 socketsForWorld 重新填
+const SOCKETS_HOUSE = [
   { id: 's_living', x: 20, y: 19 }, { id: 's_kitchen', x: 35, y: 18 }, { id: 's_storage', x: 6, y: 19 },
   { id: 's_hall1', x: 9, y: 12 }, { id: 's_hall2', x: 21, y: 12 }, { id: 's_hall3', x: 33, y: 12 },
   { id: 's_bedroom', x: 28, y: 5 }, { id: 's_bathroom', x: 38, y: 5 }, { id: 's_study', x: 17, y: 7 },
   { id: 's_attic', x: 5, y: 5 }, { id: 's_basement', x: 8, y: 28 }, { id: 's_garage', x: 20, y: 29 },
   { id: 's_laundry', x: 37, y: 29 },
 ];
+const SOCKETS = SOCKETS_HOUSE.map(s => ({ ...s }));
 
 // 燈泡：第 1～11 級越後面越亮；第 12～14 級是有特殊能力的燈泡
 const BULBS = [null,
@@ -250,28 +257,12 @@ const ROOMS_W2 = {
   garage:   { name: '遊樂場',   floor: 'sand' },
   laundry:  { name: '水井邊',   floor: 'grass' },
 };
-// 第三世界：上面一排和走道是列車的車廂，最下面一排是車站（白天才能去，晚上列車開走就鎖門）
-const ROOMS_W3 = {
-  attic:    { name: '機車室',   floor: 'iron',     dayDark: 0.5 },
-  study:    { name: '頭等包廂', floor: 'carpet3' },
-  bedroom:  { name: '臥鋪車廂', floor: 'carpet3' },
-  bathroom: { name: '盥洗室',   floor: 'tile3' },
-  hall:     { name: '車廂走道', floor: 'runner' },
-  storage:  { name: '行李車',   floor: 'plank3' },
-  living:   { name: '交誼車廂', floor: 'carpet3' },
-  kitchen:  { name: '餐車',     floor: 'tile3' },
-  basement: { name: '月台',     floor: 'platform', dayDark: 0.15 },
-  garage:   { name: '候車室',   floor: 'wood3',    dayDark: 0.3 },
-  laundry:  { name: '站務室',   floor: 'plank3',   dayDark: 0.3 },
-};
-for (const r of ROOMS) {
-  const w2 = ROOMS_W2[r.id], w3 = ROOMS_W3[r.id];
-  r.w1 = { name: r.name, floor: r.floor, dayDark: r.dayDark };
-  r.w2 = { name: w2.name, floor: w2.floor, dayDark: w2.dayDark };
-  r.w3 = { name: w3.name, floor: w3.floor, dayDark: w3.dayDark };
+// 第三世界的房間在下面（ROOMS_W3：整列車、車頂和車站，格局跟房子完全不同）
+function roomsForWorld(w) {
+  if (w === 3) return ROOMS_W3.map(r => ({ ...r }));
+  return ROOMS_HOUSE.map(r => ({ ...r, ...(w === 2 ? ROOMS_W2[r.id] : {}) }));
 }
-const STATION_ROOMS = ['basement', 'garage', 'laundry'];   // 車站的三間（最下面一排）
-const isStationRoom = r => !!r && STATION_ROOMS.includes(r.id);
+const isStationRoom = r => !!(r && r.station);   // 車站的房間（白天才能去，晚上列車開走就鎖門）
 // 第二世界的家具：同一個位置、同樣大小，換成花園裡的東西（沒有電視、沒有衣櫃）
 const FURN_W2 = {
   rug1: { type: 'flowerbed', color: '#f08cc0' },
@@ -318,88 +309,188 @@ const FURN_W2 = {
 };
 // ====================================================================
 // 第三世界：末班列車（鍍金年代的豪華特快車，老舊、積灰、沒有人）
-// 家具可以換種類、換位置、增減（remove: true 就拿掉）；pax: true 的座位上坐著蓋白布的乘客
+// 地圖是一列 108 格長的列車（參考《無限列車》那種復古蒸汽機車，每節車廂功能不同），從車頭往車尾：
+// 機車室 → 行李車 → 普通車廂（走道兩側一排排座位）→ 餐車 → 景觀車廂 → 商務車廂（走道加三間包廂）→ 臥鋪車廂（走道加三間臥鋪）→ 盥洗室
+// 列車佔 y=5～9 這五排；北邊 y=1～3 是走得到的車頂（比車廂地板高，從車廂裡的爬梯上去）；南邊是車站（月台、候車室、站務室），白天才能去
 // ====================================================================
-const FURN_W3 = {
-  // 交誼車廂（客廳）
-  rug1: { type: 'rug', color: '#1f3d2e', deco: true },
-  tvcab: { type: 'gramocab', name: '留聲機櫃' },
-  sofa: { type: 'seat3', name: '絨布沙發', loot: 'cushions', pax: true },
-  ctable: { type: 'table3' },
-  bookshelf: { type: 'rack', name: '雜誌架' },
-  phone: { name: '對講機' },
-  plant1: { type: 'passenger', name: '扶手椅' },
-  // 餐車（廚房）
-  fridge: { type: 'icebox', name: '冰櫃' },
-  kdrawer: { type: 'counter', name: '餐車抽屜' },
-  kcab: { type: 'cabinet', name: '餐具櫃' },
-  dtable: { type: 'dining', name: '餐桌', pax: true },
-  // 行李車（儲藏室）
-  sshelf: { type: 'rack', name: '行李架', loot: 'luggage' },
-  boxA: { type: 'crates3', name: '木箱', loot: 'fuel' },
-  boxB: { type: 'trunks', name: '行李箱堆', loot: 'luggage' },
-  toolcab: { type: 'cabinet', name: '工具櫃' },
-  workbench: { name: '修車工具台' },
-  // 車廂走道
-  shoecab: { type: 'trunks', name: '行李箱', loot: 'luggage' },
-  plant2: { type: 'trunks', name: '行李箱', loot: 'luggage' },
-  // 臥鋪車廂（臥室）
-  rug2: { type: 'rug', color: '#5a2c2c', deco: true },
-  bed: { name: '臥鋪' },
-  nightstand: { type: 'cabinet', name: '床頭櫃', loot: 'luggage' },
-  dresser: { type: 'rack', name: '行李架', loot: 'luggage' },
-  // 盥洗室（浴室）
-  bathtub: { type: 'washstand' },
-  // 頭等包廂（書房）
-  sbook: { type: 'liquor', name: '酒櫃', loot: 'bar' },
-  desk: { type: 'seat3', name: '絨布長椅', loot: null, pax: true },
-  filecab: { type: 'minibar', name: '小吧台', loot: 'bar' },
-  tchest3: { type: 'gramophone', name: '留聲機', w: 1, h: 1 },
-  // 機車室（閣樓）：火爐、煤堆、鍋爐管線；電箱從站務室搬到這裡
-  chest1: { type: 'coalpile', name: '煤堆', loot: 'coal' },
-  chest2: { type: 'pipes' },
-  chest3: { type: 'coalpile', name: '煤堆', loot: 'coal' },
-  doll: { remove: true },
-  tchest1: { remove: true },
-  breaker: { name: '發電機', x: 1, y: 9, w: 1, h: 1 },
-  // 月台（地下室）
-  oldbox1: { type: 'woodpile', name: '木堆', loot: 'fuel' },
-  oldbox2: { type: 'bench3', name: '長椅', loot: 'station' },
-  boiler: { type: 'cart', name: '行李推車', loot: 'luggage', x: 15, y: 30, w: 2, h: 2 },
-  tchest2: { remove: true },
-  // 候車室（車庫）
-  toolbox: { type: 'bench3', name: '長椅', loot: 'station' },
-  gshelf: { type: 'ticket', name: '售票口', loot: 'station' },
-  car: { type: 'benches', name: '候車長椅', loot: 'cushions', pax: true, x: 23, y: 28, w: 5, h: 1 },
-  gacha: { name: '幸運機' },
-  // 站務室（洗衣間）
-  washer: { type: 'telegraph', name: '電報機', loot: 'general' },
-  basket: { type: 'coalsack', name: '煤袋', loot: 'coal' },
+const ROOF_H = 2.95;   // 車頂離車廂地板的高度（車廂的天花板是 2.7）
+// 每一節車廂（x0～x1 是車廂內部的範圍；兩節之間有一格牆，牆上是連結處的門）
+const W3_CARS = [
+  { id: 'engine', x0: 1, x1: 8 }, { id: 'baggage', x0: 10, x1: 21 }, { id: 'coach', x0: 23, x1: 40 }, { id: 'dining', x0: 42, x1: 55 },
+  { id: 'lounge', x0: 57, x1: 70 }, { id: 'business', x0: 72, x1: 85 }, { id: 'sleeper', x0: 87, x1: 100 }, { id: 'wash', x0: 102, x1: 106 },
+];
+// 房間：aisle 是車廂的走道（墮落戰神只在這裡走）、comp 是包廂（門可以關）、roof 是車頂、station 是車站
+const ROOMS_W3 = [
+  { id: 'engine',   name: '機車室',     x: 1,   y: 5,  w: 8,  h: 5, floor: 'iron',     level: 3, dayDark: 0.5, aisle: true },
+  { id: 'baggage',  name: '行李車',     x: 10,  y: 5,  w: 12, h: 5, floor: 'plank3',   level: 2, aisle: true },
+  { id: 'coach',    name: '普通車廂',   x: 23,  y: 5,  w: 18, h: 5, floor: 'runner',   level: 1, aisle: true },
+  { id: 'dining',   name: '餐車',       x: 42,  y: 5,  w: 14, h: 5, floor: 'tile3',    level: 0, aisle: true },
+  { id: 'lounge',   name: '景觀車廂',   x: 57,  y: 5,  w: 14, h: 5, floor: 'carpet3',  level: 0, aisle: true },
+  { id: 'business', name: '商務車廂',   x: 72,  y: 5,  w: 14, h: 2, floor: 'runner',   level: 2, aisle: true },
+  { id: 'comp1',    name: '商務包廂 A', x: 72,  y: 8,  w: 4,  h: 2, floor: 'carpet3',  level: 2, comp: true },
+  { id: 'comp2',    name: '商務包廂 B', x: 77,  y: 8,  w: 4,  h: 2, floor: 'carpet3',  level: 2, comp: true },
+  { id: 'comp3',    name: '商務包廂 C', x: 82,  y: 8,  w: 4,  h: 2, floor: 'carpet3',  level: 2, comp: true },
+  { id: 'sleeper',  name: '臥鋪車廂',   x: 87,  y: 5,  w: 14, h: 2, floor: 'runner',   level: 1, aisle: true },
+  { id: 'berth1',   name: '臥鋪 A',     x: 87,  y: 8,  w: 4,  h: 2, floor: 'carpet3',  level: 1, comp: true },
+  { id: 'berth2',   name: '臥鋪 B',     x: 92,  y: 8,  w: 4,  h: 2, floor: 'carpet3',  level: 1, comp: true },
+  { id: 'berth3',   name: '臥鋪 C',     x: 97,  y: 8,  w: 4,  h: 2, floor: 'carpet3',  level: 1, comp: true },
+  { id: 'wash',     name: '盥洗室',     x: 102, y: 5,  w: 5,  h: 5, floor: 'tile3',    level: 1, aisle: true },
+  { id: 'roof',     name: '車頂',       x: 10,  y: 1,  w: 97, h: 3, floor: 'roof',     level: 2, dayDark: 0, roof: true },
+  { id: 'platform', name: '月台',       x: 24,  y: 11, w: 47, h: 4, floor: 'platform', level: 3, dayDark: 0.15, station: true },
+  { id: 'waiting',  name: '候車室',     x: 30,  y: 16, w: 18, h: 6, floor: 'wood3',    level: 2, dayDark: 0.3, station: true },
+  { id: 'office',   name: '站務室',     x: 49,  y: 16, w: 12, h: 6, floor: 'plank3',   level: 1, dayDark: 0.3, station: true },
+];
+// 門：vest 是車廂之間連結處的門（一直開著）、comp 是包廂的門（可以關）、station 是下車站的門（晚上鎖）、front 是車尾的連結處門（敲門事件）
+const DOORS_W3 = [
+  { x: 9, y: 7, vest: true }, { x: 22, y: 7, vest: true }, { x: 41, y: 7, vest: true }, { x: 56, y: 7, vest: true },
+  { x: 71, y: 6, vest: true }, { x: 86, y: 6, vest: true }, { x: 101, y: 6, vest: true },
+  { x: 74, y: 7, comp: true }, { x: 79, y: 7, comp: true }, { x: 84, y: 7, comp: true },
+  { x: 89, y: 7, comp: true }, { x: 94, y: 7, comp: true }, { x: 99, y: 7, comp: true },
+  { x: 32, y: 10, station: true }, { x: 48, y: 10, station: true }, { x: 63, y: 10, station: true },
+  { x: 38, y: 15 }, { x: 56, y: 15 }, { x: 48, y: 18 },
+  { x: 107, y: 7, front: true },
+];
+// 天花板的燈座：長的車廂兩個、短的一個，每間包廂一個；車站的燈是月台兩盞、候車室和站務室各一盞
+const SOCKETS_W3 = [
+  { id: 's_engine', x: 5, y: 7 }, { id: 's_baggage', x: 16, y: 7 },
+  { id: 's_coach1', x: 27, y: 7 }, { id: 's_coach2', x: 36, y: 7 },
+  { id: 's_dining1', x: 46, y: 7 }, { id: 's_dining2', x: 52, y: 7 },
+  { id: 's_lounge', x: 63, y: 7 }, { id: 's_lounge2', x: 68, y: 7 },
+  { id: 's_business', x: 78, y: 5 }, { id: 's_comp1', x: 73, y: 8 }, { id: 's_comp2', x: 79, y: 8 }, { id: 's_comp3', x: 84, y: 8 },
+  { id: 's_sleeper', x: 93, y: 5 }, { id: 's_berth1', x: 88, y: 8 }, { id: 's_berth2', x: 93, y: 8 }, { id: 's_berth3', x: 98, y: 8 },
+  { id: 's_wash', x: 104, y: 7 },
+  { id: 's_platform1', x: 33, y: 12 }, { id: 's_platform2', x: 57, y: 12 },
+  { id: 's_waiting', x: 38, y: 18 }, { id: 's_office', x: 54, y: 18 },
+];
+// 第三世界的固定位置：開始的地方（景觀車廂中間，面向車頭）、神秘商人（月台）、早晨禮物（臥鋪 A 的床邊）、
+// 過場動畫坐的沙發和走的路線（月台 → 車門 → 車廂裡 → 沙發）、月台的範圍、墮落戰神巡邏的兩頭
+const W3 = {
+  start: { x: 63.5, y: 7.5, face: Math.PI },
+  merchant: { x: 28.5, y: 12.4 }, gift: { x: 88.5, y: 8.5 },
+  seat: { x: 59.6, y: 5.75, lookX: 62.5, lookY: 7.5 },
+  cutPath: [[63.5, 13.5, 0], [63.5, 10.5, 0], [63.5, 8.0, 0]],
+  platform: { x0: 24, x1: 70, y0: 11, y1: 14 },
+  patrol: [{ x: 5.5, y: 7.5 }, { x: 104.5, y: 7.5 }],
+  loco: { chimney: { x: -3.3, y: 7.5 } },   // 車頭煙囪的位置（在地圖外面，從車頂看得到）
 };
-const FURN_W3_ADD = [
-  { id: 'firebox', type: 'firebox', name: '火爐', x: 8, y: 4, w: 2, h: 2 },
-  { id: 'sign', type: 'sign', name: '站牌', x: 6, y: 31, w: 2, h: 1 },
-  { id: 'gaslamp1', type: 'gaslamp', x: 2, y: 26, w: 1, h: 1 },
-  { id: 'gaslamp2', type: 'gaslamp', x: 14, y: 31, w: 1, h: 1 },
-  { id: 'timetable', type: 'timetable', x: 36, y: 26, w: 2, h: 1 },
-  { id: 'srack', type: 'rack', name: '行李架', x: 42, y: 27, w: 1, h: 2, loot: 'luggage' },
+// 窗戶（牆格）：dir 是窗外的方向（n 北、s 南）；train 是列車的窗（掛窗簾、列車停下來時外面會貼著眼睛）
+const W3_WINDOWS = [];
+const winRow = (y, dir, xs, train) => { for (const x of xs) W3_WINDOWS.push({ x, y, dir, train }); };
+winRow(4, 'n', [12, 15, 20, 24, 27, 30, 33, 36, 39, 43, 46, 49, 52, 55, 58, 60, 62, 64, 66, 68, 70, 73, 76, 79, 82, 85, 88, 91, 94, 97, 100, 104], true);
+winRow(10, 's', [12, 17, 20, 24, 27, 30, 35, 38, 44, 47, 51, 54, 58, 60, 62, 65, 67, 69, 73, 78, 83, 88, 93, 98, 104], true);
+winRow(22, 's', [32, 35, 39, 42, 45, 51, 54, 58], false);   // 車站的南牆
+winRow(15, 'n', [34, 42], false);                            // 候車室看月台的窗
+// 家具（全部重新擺）。pax: true 的座位上坐著蓋白布的乘客；ladder 的 up 是爬上去之後站的車頂格子
+const seats3 = (id, x, y, o = {}) => ({ id, type: 'seats', name: '座位', x, y, w: 2, h: 1, ...o });
+const FURN_W3 = [
+  // 機車室：火爐、煤堆、鍋爐管線、發電機（停電事件變成發電機跳掉）
+  { id: 'firebox', type: 'firebox', name: '火爐', x: 1, y: 7, w: 2, h: 2 },
+  { id: 'coal1', type: 'coalpile', name: '煤堆', x: 1, y: 5, w: 2, h: 1, loot: 'coal' },
+  { id: 'coal2', type: 'coalpile', name: '煤堆', x: 4, y: 9, w: 2, h: 1, loot: 'coal' },
+  { id: 'pipes', type: 'pipes', x: 4, y: 5, w: 3, h: 1 },
+  { id: 'breaker', type: 'breaker', name: '發電機', x: 8, y: 5, w: 1, h: 1 },
+  // 行李車：木箱裡有木柴、行李箱堆、行李架、工具櫃、修車工具台、爬上車頂的鐵梯
+  { id: 'crates', type: 'crates3', name: '木箱', x: 10, y: 5, w: 2, h: 2, loot: 'fuel' },
+  { id: 'trunksA', type: 'trunks', name: '行李箱堆', x: 13, y: 5, w: 2, h: 2, loot: 'luggage' },
+  { id: 'brack', type: 'rack', name: '行李架', x: 17, y: 5, w: 3, h: 1, loot: 'luggage' },
+  { id: 'toolcab', type: 'cabinet', name: '工具櫃', x: 21, y: 5, w: 1, h: 2, loot: 'tool' },
+  { id: 'workbench', type: 'workbench', name: '修車工具台', x: 10, y: 9, w: 2, h: 1 },
+  { id: 'cartA', type: 'cart', name: '行李推車', x: 14, y: 8, w: 2, h: 2, loot: 'luggage' },
+  { id: 'trunksB', type: 'trunks', name: '行李箱', x: 19, y: 9, w: 2, h: 1, loot: 'luggage' },
+  { id: 'ladder1', type: 'ladder', name: '爬梯', x: 21, y: 9, w: 1, h: 1, up: { x: 21, y: 2 } },
+  // 普通車廂：走道兩側一排排的座位（有的坐著蓋白布的乘客），椅墊底下塞著舊報紙
+  seats3('seatN1', 23, 5, { pax: true }), seats3('seatN2', 26, 5, { loot: 'cushions' }), seats3('seatN3', 29, 5, { pax: true }),
+  seats3('seatN4', 32, 5), seats3('seatN5', 35, 5, { pax: true }), seats3('seatN6', 38, 5, { loot: 'cushions' }),
+  seats3('seatS1', 23, 9), seats3('seatS2', 26, 9, { pax: true }), seats3('seatS3', 29, 9, { loot: 'cushions' }),
+  seats3('seatS4', 34, 9, { pax: true }), seats3('seatS5', 37, 9),
+  { id: 'trunksC', type: 'trunks', name: '行李箱', x: 40, y: 5, w: 1, h: 1, loot: 'luggage' },
+  { id: 'trunksD', type: 'trunks', name: '行李箱', x: 40, y: 9, w: 1, h: 1, loot: 'luggage' },
+  // 餐車：廚房那一頭有抽屜（第 1 天一定有平底鍋）、爐子、水槽、冰櫃、餐具櫃；餐廳那一頭是鋪白桌布的餐桌
+  { id: 'kdrawer', type: 'counter', name: '餐車抽屜', x: 42, y: 5, w: 3, h: 1, loot: 'general' },
+  { id: 'stove', type: 'stove', x: 45, y: 5, w: 2, h: 1 },
+  { id: 'ksink', type: 'sink', x: 47, y: 5, w: 2, h: 1 },
+  { id: 'icebox', type: 'icebox', name: '冰櫃', x: 42, y: 8, w: 1, h: 2, loot: 'food' },
+  { id: 'kcab', type: 'cabinet', name: '餐具櫃', x: 44, y: 9, w: 3, h: 1, loot: 'food' },
+  { id: 'dtable1', type: 'dining', name: '餐桌', x: 50, y: 5, w: 2, h: 1, pax: true },
+  { id: 'dtable2', type: 'dining', name: '餐桌', x: 53, y: 5, w: 2, h: 1 },
+  { id: 'dtable3', type: 'dining', name: '餐桌', x: 50, y: 9, w: 2, h: 1 },
+  { id: 'dtable4', type: 'dining', name: '餐桌', x: 53, y: 9, w: 2, h: 1, pax: true },
+  { id: 'liquorD', type: 'liquor', name: '酒櫃', x: 55, y: 5, w: 1, h: 1, loot: 'bar' },
+  // 景觀車廂：大窗戶、絨布沙發、小圓桌、留聲機櫃、雜誌架、對講機；你從這裡開始，爬梯在車尾那一頭
+  { id: 'armchairA', type: 'passenger', name: '扶手椅', x: 57, y: 5, w: 1, h: 1, pax: true },
+  { id: 'sofa', type: 'seat3', name: '絨布沙發', x: 58, y: 5, w: 4, h: 1, loot: 'cushions', pax: true },
+  { id: 'gramocab', type: 'gramocab', name: '留聲機櫃', x: 64, y: 5, w: 3, h: 1, loot: 'general' },
+  { id: 'magrack', type: 'rack', name: '雜誌架', x: 69, y: 5, w: 2, h: 1, loot: 'general' },
+  { id: 'rug1', type: 'rug', x: 59, y: 6, w: 6, h: 3, solid: false, color: '#1f3d2e', deco: true },
+  { id: 'ctable', type: 'table3', x: 61, y: 7, w: 1, h: 1 },
+  { id: 'armchairB', type: 'passenger', name: '扶手椅', x: 57, y: 9, w: 1, h: 1, pax: true },
+  { id: 'sofa2', type: 'seat3', name: '絨布長椅', x: 65, y: 9, w: 3, h: 1, pax: true },
+  { id: 'phone', type: 'phone', name: '對講機', x: 70, y: 9, w: 1, h: 1 },
+  { id: 'ladder2', type: 'ladder', name: '爬梯', x: 70, y: 7, w: 1, h: 1, up: { x: 70, y: 2 } },
+  // 商務車廂：走道加三間包廂（絨布長椅、小吧台、酒櫃、留聲機）
+  { id: 'cseat1', type: 'seat3', name: '絨布長椅', x: 72, y: 9, w: 3, h: 1, pax: true },
+  { id: 'minibar1', type: 'minibar', name: '小吧台', x: 75, y: 8, w: 1, h: 1, loot: 'bar' },
+  { id: 'gramophone', type: 'gramophone', name: '留聲機', x: 77, y: 9, w: 1, h: 1 },
+  { id: 'cseat2', type: 'seat3', name: '絨布長椅', x: 78, y: 9, w: 3, h: 1, pax: true },
+  { id: 'liquor2', type: 'liquor', name: '酒櫃', x: 80, y: 8, w: 1, h: 1, loot: 'bar' },
+  { id: 'minibar3', type: 'minibar', name: '小吧台', x: 82, y: 8, w: 1, h: 1, loot: 'bar' },
+  { id: 'cseat3', type: 'seat3', name: '絨布長椅', x: 82, y: 9, w: 3, h: 1 },
+  { id: 'trunksE', type: 'trunks', name: '行李箱', x: 85, y: 9, w: 1, h: 1, loot: 'luggage' },
+  // 臥鋪車廂：走道加三間臥鋪。A 是你的臥鋪（睡覺、早晨禮物、床底下的手、衣物櫃），B、C 的上下鋪躺著蓋白布的乘客
+  { id: 'bed', type: 'bed', name: '臥鋪', x: 87, y: 9, w: 2, h: 1 },
+  { id: 'nightstand', type: 'cabinet', name: '床頭櫃', x: 89, y: 9, w: 1, h: 1, loot: 'luggage' },
+  { id: 'closet', type: 'closet', name: '衣物櫃', x: 90, y: 8, w: 1, h: 1, loot: 'clothes' },
+  { id: 'bunk1', type: 'bunk', name: '上下鋪', x: 92, y: 9, w: 2, h: 1, pax: true },
+  { id: 'nightstand2', type: 'cabinet', name: '床頭櫃', x: 94, y: 9, w: 1, h: 1, loot: 'luggage' },
+  { id: 'trunksF', type: 'trunks', name: '行李箱', x: 95, y: 9, w: 1, h: 1, loot: 'luggage' },
+  { id: 'nightstand3', type: 'cabinet', name: '床頭櫃', x: 97, y: 9, w: 1, h: 1, loot: 'luggage' },
+  { id: 'bunk2', type: 'bunk', name: '上下鋪', x: 98, y: 9, w: 2, h: 1, pax: true },
+  { id: 'dresser', type: 'rack', name: '行李架', x: 100, y: 8, w: 1, h: 1, loot: 'luggage' },
+  // 盥洗室：黃銅洗手台、藥櫃、馬桶、毛巾櫃；車尾的爬梯
+  { id: 'washstand', type: 'washstand', x: 102, y: 5, w: 3, h: 1 },
+  { id: 'medcab', type: 'medcab', name: '藥櫃', x: 106, y: 5, w: 1, h: 1, loot: 'medicine' },
+  { id: 'toilet', type: 'toilet', x: 106, y: 9, w: 1, h: 1 },
+  { id: 'toilet2', type: 'toilet', x: 102, y: 9, w: 1, h: 1 },
+  { id: 'towels', type: 'box', name: '毛巾櫃', x: 104, y: 9, w: 1, h: 1, loot: 'clothes' },
+  { id: 'ladder3', type: 'ladder', name: '爬梯', x: 102, y: 7, w: 1, h: 1, up: { x: 102, y: 2 } },
+  // 車頂：三個艙口（爬回車廂）、一個掉在車頂的行李箱
+  { id: 'hatch1', type: 'hatch', name: '艙口', x: 21, y: 2, w: 1, h: 1, solid: false },
+  { id: 'hatch2', type: 'hatch', name: '艙口', x: 70, y: 2, w: 1, h: 1, solid: false },
+  { id: 'hatch3', type: 'hatch', name: '艙口', x: 102, y: 2, w: 1, h: 1, solid: false },
+  { id: 'rooftrunk', type: 'trunks', name: '掉在車頂的行李箱', x: 45, y: 3, w: 1, h: 1, loot: 'luggage' },
+  // 月台：木堆、站牌、煤氣燈、長椅、行李推車、煤袋；神秘商人白天在這裡擺攤
+  { id: 'woodpile', type: 'woodpile', name: '木堆', x: 24, y: 11, w: 2, h: 2, loot: 'fuel' },
+  { id: 'sign', type: 'sign', name: '站牌', x: 28, y: 14, w: 2, h: 1 },
+  { id: 'gaslamp1', type: 'gaslamp', x: 34, y: 14, w: 1, h: 1 },
+  { id: 'gaslamp2', type: 'gaslamp', x: 50, y: 14, w: 1, h: 1 },
+  { id: 'gaslamp3', type: 'gaslamp', x: 66, y: 14, w: 1, h: 1 },
+  { id: 'pbench1', type: 'bench3', name: '長椅', x: 40, y: 14, w: 3, h: 1, loot: 'station' },
+  { id: 'pbench2', type: 'bench3', name: '長椅', x: 58, y: 14, w: 3, h: 1, loot: 'station' },
+  { id: 'trunksG', type: 'trunks', name: '行李箱', x: 45, y: 11, w: 2, h: 1, loot: 'luggage' },
+  { id: 'cartB', type: 'cart', name: '行李推車', x: 66, y: 11, w: 2, h: 2, loot: 'luggage' },
+  { id: 'coalsack', type: 'coalsack', name: '煤袋', x: 69, y: 13, w: 2, h: 2, loot: 'coal' },
+  // 候車室：時刻表、候車長椅（坐著蓋白布的乘客）、售票口、幸運機、行李架
+  { id: 'timetable', type: 'timetable', x: 36, y: 16, w: 2, h: 1 },
+  { id: 'wbench1', type: 'benches', name: '候車長椅', x: 33, y: 18, w: 5, h: 1, loot: 'cushions', pax: true },
+  { id: 'wbench2', type: 'benches', name: '候車長椅', x: 40, y: 20, w: 5, h: 1, loot: 'cushions' },
+  { id: 'ticket', type: 'ticket', name: '售票口', x: 43, y: 16, w: 4, h: 1, loot: 'station' },
+  { id: 'wbench3', type: 'bench3', name: '長椅', x: 30, y: 18, w: 1, h: 3, loot: 'station' },
+  { id: 'srack', type: 'rack', name: '行李架', x: 47, y: 19, w: 1, h: 2, loot: 'luggage' },
+  { id: 'gacha', type: 'gacha', name: '幸運機', x: 47, y: 21, w: 1, h: 1 },
+  // 站務室：電報機、雜物架、檔案櫃、站長桌、煤袋
+  { id: 'telegraph', type: 'telegraph', name: '電報機', x: 49, y: 16, w: 2, h: 1, loot: 'general' },
+  { id: 'oshelf', type: 'shelf', name: '雜物架', x: 53, y: 16, w: 3, h: 1, loot: 'tool' },
+  { id: 'filecab', type: 'cabinet', name: '檔案櫃', x: 60, y: 16, w: 1, h: 2, loot: 'tool' },
+  { id: 'odesk', type: 'desk', name: '站長桌', x: 51, y: 21, w: 3, h: 1, loot: 'general' },
+  { id: 'coalsack2', type: 'coalsack', name: '煤袋', x: 58, y: 20, w: 2, h: 2, loot: 'coal' },
 ];
 const FURN_W1 = FURN.map(f => ({ ...f }));
 function furnForWorld(w) {
-  if (w === 3) {
-    const list = [];
-    for (const f of FURN_W1) {
-      const o = FURN_W3[f.id];
-      if (o && o.remove) continue;
-      list.push({ ...f, ...(o || {}) });
-    }
-    return [...list, ...FURN_W3_ADD.map(f => ({ ...f }))];
-  }
+  if (w === 3) return FURN_W3.map(f => ({ ...f }));
   return FURN_W1.map(f => ({ ...f, ...(w === 2 ? FURN_W2[f.id] || {} : {}) }));
 }
-// 第三世界多兩扇門（月台↔候車室、候車室↔站務室），車站才像車站
-const DOORS_W3 = [{ x: 17, y: 28 }, { x: 31, y: 28 }];
-const doorsForWorld = w => [...DOORS_BASE, ...(w === 3 ? DOORS_W3 : [])];
+const doorsForWorld = w => (w === 3 ? DOORS_W3 : DOORS_HOUSE).map(d => ({ ...d }));
+const socketsForWorld = w => (w === 3 ? SOCKETS_W3 : SOCKETS_HOUSE).map(s => ({ ...s }));
 
 // 寶箱四級：每天早上在車站三間重新放；打開是賭：可能是物資，也可能跳出怪物（等級越高東西越好、怪物越強）
 const CHESTS3 = [null,
