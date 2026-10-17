@@ -609,7 +609,7 @@ function setWorld() {
     scene.remove(houseGroup);
     houseGroup.traverse(o => {
       if (o.userData.ownGeo) o.geometry.dispose();
-      for (const m of ownMats(o)) m.dispose();
+      for (const m of ownMats(o)) { for (const t of m.userData.maps || []) t.dispose(); m.dispose(); }
       if (o.isInstancedMesh) o.dispose();
     });
   }
@@ -3651,7 +3651,7 @@ function updatePlaceGhost() {
 // 第三世界：末班列車。鍍金年代的豪華特快車（深胡桃木、黃銅、暗紅絨布、象牙白的天花板），全部都要「舊」；
 // 最下面一排是車站。牆上有真的窗戶，窗外是會捲動的三層風景（遠山和天空、樹林、電線桿）
 // ====================================================================
-let walnutTex, stationWallTex, carriageTex, ceil3Tex, doorPanelTex, carriageDoorTex, glassTex, skyFarTex, skyTopTex, cloudTex, nearTex, yardTex, sheetTex, velvetTex, ironWallTex, tarTex, ballastTex;
+let walnutTex, stationWallTex, carriageTex, ceil3Tex, doorPanelTex, carriageDoorTex, glassTex, skyFarTex, skyTopTex, cloudTex, nearTex, yardTex, velvetTex, ironWallTex, tarTex, ballastTex;
 const midTexes = {};
 let backdrop = null, panes3 = [], walnutMat = null, stationMat = null, ironMat = null, wallMat3 = null, curtains = [], locoSmoke = null;
 const doorPanels = new Map();
@@ -3733,12 +3733,7 @@ function makeTrainTextures() {
     c.fillStyle = g; c.fillRect(0, 0, w, h);
   });
   glassTex.wrapS = glassTex.wrapT = THREE.ClampToEdgeWrapping;
-  // 蓋在乘客身上的白布（灰撲撲、有皺褶）、磨破的暗紅絨布
-  sheetTex = canvasTex(128, 128, (c, w, h) => {
-    c.fillStyle = '#cfc6b6'; c.fillRect(0, 0, w, h);
-    for (let i = 0; i < 20; i++) { c.strokeStyle = `rgba(80,70,60,${0.1 + rnd() * 0.2})`; c.lineWidth = 2 + rnd() * 3; const x = rnd() * w; c.beginPath(); c.moveTo(x, 0); c.quadraticCurveTo(x + (rnd() - 0.5) * 30, 64, x + (rnd() - 0.5) * 20, h); c.stroke(); }
-    grime(c, w, h, 10, 0.2);
-  });
+  // 磨破的暗紅絨布
   velvetTex = canvasTex(64, 64, (c, w, h) => {
     c.fillStyle = '#5a1f26'; c.fillRect(0, 0, w, h);
     for (let i = 0; i < 300; i++) { c.fillStyle = `rgba(${120 + rnd() * 60 | 0},${30 + rnd() * 20 | 0},${40 + rnd() * 20 | 0},.35)`; c.fillRect(rnd() * w, rnd() * h, 1.5, 1.5); }
@@ -4040,9 +4035,8 @@ function addTrainBulb(res, g, x, y, z, tier, s) {
 // ====================================================================
 // 第三世界的家具：鍍金年代的列車內裝（胡桃木、黃銅、暗紅絨布）和車站的東西，全部都舊舊的
 // ====================================================================
-let velvetMat = null, sheetMatC = null;
+let velvetMat = null;
 const velvet = () => velvetMat || (velvetMat = patchLM(new THREE.MeshLambertMaterial({ map: velvetTex })));
-const sheetMat = () => sheetMatC || (sheetMatC = patchLM(new THREE.MeshLambertMaterial({ map: sheetTex })));
 // 以「正面」為準的位置（u 沿著正面、v 從正面往內）換算成家具的本地座標；faceOf 是朝著正面的角度
 function fpos(f, side, u, v) {
   const W = f.w, D = f.h;
@@ -4052,32 +4046,861 @@ function fpos(f, side, u, v) {
   return [v, u];
 }
 const faceOf = side => ({ s: 0, n: Math.PI, e: Math.PI / 2, w: -Math.PI / 2 })[side];
-// 坐著不動的乘客：蓋著灰撲撲的白布，看不到臉；過場動畫才看得到活著的乘客（深色大衣和帽子）
-function addPassenger(g, r, x, z, face, y = 0) {
-  const pg = new THREE.Group(); pg.position.set(x, y, z); pg.rotation.y = face; g.add(pg);
-  const dead = new THREE.Group(), alive = new THREE.Group(); pg.add(dead); pg.add(alive);
-  const sheet = sheetMat(), coat = lm('#3a3632'), skin = lm('#cfc3b4'), hat = lm('#1c1a18');
-  const head = sph(dead, 0.16, 0, 1.04, 0.02, sheet, 1, 1.12, 1, 12);
-  sph(dead, 0.3, 0, 0.8, 0, sheet, 1.1, 0.72, 0.8, 12);
-  box(dead, -0.25, 0.25, 0.4, 0.6, -0.1, 0.34, sheet);
-  box(dead, -0.27, 0.27, 0.04, 0.42, 0.2, 0.4, sheet);
-  box(alive, -0.22, 0.22, 0.48, 0.96, -0.14, 0.18, coat); box(alive, -0.24, 0.24, 0.4, 0.6, 0.1, 0.42, coat);
-  for (const s of [-1, 1]) box(alive, s * 0.12 - 0.05, s * 0.12 + 0.05, 0.04, 0.42, 0.24, 0.38, coat);
-  sph(alive, 0.12, 0, 1.06, 0, skin, 1, 1.15, 1, 12);
-  cyl(alive, 0.12, 0.12, 0.12, 0, 1.13, 0, hat, 12); cyl(alive, 0.19, 0.19, 0.02, 0, 1.12, 0, hat, 14);
-  alive.visible = false;
-  (r.pax = r.pax || []).push({ g: pg, head, dead, alive, turn: 0, base: face });
+// ====================================================================
+// 第三世界的乘客：寫實、形形色色的 1920 年代乘客
+// 紳士、摩登女郎、老婆婆、學生、和服婦人、工人、胖商人、老先生、穿袴的女學生、車掌；膚色、髮色、衣服的顏色和花紋每個都不一樣
+// 平常（都死了）：臉色灰白、閉著眼，頭垂著、歪著或往後仰，一動也不動；過場動畫上車那一段還活著（膚色正常、睜著眼、坐直）
+// 夜晚事件「乘客轉頭」：頭慢慢抬起來轉向你，眼睛睜開，是混濁的死人眼
+// 臉和衣服的花紋都用畫布畫。一個乘客有幾十塊零件，做好之後合併成四、五個網格（純色的零件用頂點顏色合成一個），平板上才不會卡
+// 乘客自己的座標：y 從地板往上、+z 是面向的方向；z = -0.2 是背靠著椅背的地方，seat 是座面的高度
+// ====================================================================
+const PAX_TEX = 256, PAX_SHADE = 0.5, PAX_JAW = 0.22;
+const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const hexRGB = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const mixHex = (a, b, k) => { const A = hexRGB(a), B = hexRGB(b); return '#' + A.map((v, i) => Math.round(v + (B[i] - v) * k).toString(16).padStart(2, '0')).join(''); };
+const rgbaOf = (h, al) => `rgba(${hexRGB(h).join(',')},${al})`;
+const pickR = a => a[(rnd() * a.length) | 0];
+const PAX_SKIN = ['#f1d8c4', '#e9c7a8', '#dcb28c', '#c99870', '#a37050', '#70472f'];
+const PAX_DARK = ['#15110e', '#2b1d14', '#4a3020'];
+// 頭的大小（公尺）：男、女、胖
+const PAX_HEADS = { m: { key: 'm', rx: 0.077, ry: 0.107, rz: 0.094 }, f: { key: 'f', rx: 0.072, ry: 0.101, rz: 0.089 }, h: { key: 'h', rx: 0.085, ry: 0.108, rz: 0.097 } };
+const PAX_KINDS = {
+  // 紳士：三件式西裝、白襯衫打領帶、圓頂禮帽、修得很整齊的小鬍子
+  gent: () => ({ sex: 'm', age: 0.3 + rnd() * 0.35, skin: pickR(PAX_SKIN), hair: pickR([...PAX_DARK, '#6b3a22', '#a8874f']), style: 'short',
+    hat: rnd() < 0.75 ? 'bowler' : null, hatCol: pickR(['#14120f', '#2a2018', '#2c2c30']), bandCol: '#0c0b0a',
+    top: 'suit', c1: pickR(['#2b2b30', '#232a3c', '#3b2d22', '#4b4b50']), c2: pickR(['#6e1f26', '#1f2c4c', '#2a4a34', '#5a4420']),
+    legs: 'trousers', shoe: 'men', collar: 'shirt', cuff: '#e8e4da', hands: 'lap', mustache: rnd() < 0.6 ? 'thin' : null }),
+  // 摩登女郎：壓得低低的鐘形帽、鮑伯頭、毛領大衣、長長的珍珠項鍊、手套、紅唇，腿上放著手提包
+  lady: () => ({ sex: 'f', age: 0.15 + rnd() * 0.25, skin: pickR(PAX_SKIN.slice(0, 5)), hair: pickR([...PAX_DARK, '#6b3a22', '#a8874f']), style: 'bob',
+    hat: 'cloche', hatCol: pickR(['#5a1f2a', '#1f2a44', '#5a5650', '#8a6a48', '#1c1a1e']), bandCol: pickR(['#c9a24a', '#1c1a1e', '#e0d6c4', '#7a1a24']),
+    top: 'coat', c1: pickR(['#9a7450', '#5e2228', '#24484a', '#4a2a44', '#2a2a30']), c2: pickR(['#7a1a2a', '#e0d6c4', '#2a3a5a']),
+    legs: 'skirt', shoe: 'heel', shoeCol: pickR(['#141210', '#4a1a1e']), collar: 'fur', collarCol: pickR(['#8a6a4a', '#d8d0c0', '#3a2a20', '#6a6460']),
+    hands: 'bag', bagCol: pickR(['#2a1a14', '#5a2a1a', '#1c1c20']), glove: pickR(['#e8e0d0', '#1c1a1e', '#5a3a2a']), makeup: true, lips: '#8e2228' }),
+  // 老婆婆：灰白的髮髻、披肩、開襟毛衣、駝著背，手上捏著手帕
+  granny: () => ({ sex: 'f', age: 0.85 + rnd() * 0.15, skin: pickR(PAX_SKIN.slice(0, 5)), hair: pickR(['#8e8a84', '#b4b0aa', '#d8d4cc']), style: 'bun',
+    top: 'cardigan', c1: pickR(['#6a5a4c', '#7a5858', '#5a5a44', '#4a4e58']), c2: '#d8cfbd', legs: 'long', legCol: pickR(['#2a2622', '#3a3230', '#2c2a34']),
+    shoe: 'men', collar: 'shawl', collarCol: pickR(['#3a3436', '#4a3a30', '#5a4a4a', '#2e3a3a']), hands: 'kerchief', glasses: rnd() < 0.4, hunch: 0.16 }),
+  // 學生：立領的黑色學生服、一排金色鈕扣、學生帽，腿上放著課本
+  student: () => ({ sex: 'm', age: 0, skin: pickR(PAX_SKIN.slice(1, 5)), hair: pickR(PAX_DARK.slice(0, 2)), style: 'short',
+    hat: 'student', hatCol: '#141418', top: 'gakuran', c1: '#17181d', legs: 'trousers', shoe: 'men', collar: 'stand', collarCol: '#17181d', collarTrim: '#e8e4da',
+    hands: 'book', bookCol: pickR(['#5a1e1e', '#1e3a2a', '#2a2a4a', '#5a4a2a']), glasses: rnd() < 0.35 }),
+  // 和服婦人：花紋和服、寬腰帶、盤起來的日本髮髻和髮簪
+  kimono: () => ({ sex: 'f', age: 0.3 + rnd() * 0.25, skin: pickR(PAX_SKIN.slice(0, 3)), hair: '#15110e', style: 'updo',
+    top: 'kimono', pat: pickR(['flower', 'asanoha', 'flower']), c1: pickR(['#26304a', '#5a2a40', '#245250', '#6a1f24', '#4a3a5a']), c2: pickR(['#e8d8c8', '#e8b8c0', '#d8c080']),
+    c3: pickR(['#b8964a', '#8a2a2a', '#d8ccb0', '#2a2a2a']), c4: pickR(['#c83a4a', '#e8e0d0', '#3a6a8a']),
+    legs: 'kimono', shoe: 'zori', hands: 'folded', lips: '#a8242c', smallLips: true }),
+  // 工人：鴨舌帽、背心、袖子捲到手肘、鬍渣，手上攤開一份報紙
+  worker: () => ({ sex: 'm', age: 0.3 + rnd() * 0.3, skin: pickR(PAX_SKIN.slice(2)), hair: pickR(PAX_DARK), style: 'short',
+    hat: 'flat', hatCol: pickR(['#3a342c', '#4a4238', '#2c2e30']), top: 'vest', c1: pickR(['#cfc8b6', '#8090a4', '#b8b0a0']), c2: pickR(['#3e3026', '#45454a', '#2a2624']), stripe: rnd() < 0.5,
+    rolled: true, legs: 'trousers', legCol: pickR(['#3a3630', '#2e3440', '#4a3e30']), shoe: 'boot', shoeCol: '#2a1e16', hands: 'paper', stubble: true }),
+  // 胖商人：禿頭、八字鬍、背心上掛著懷錶鏈，兩手放在肚子上
+  merchant: () => ({ sex: 'm', age: 0.5 + rnd() * 0.2, build: 'h', skin: pickR(PAX_SKIN.slice(0, 5)), hair: pickR(['#4a3020', '#8e8a84', '#2b1d14']), style: 'bald',
+    top: 'vestW', c1: '#e4e0d6', c2: pickR(['#4a1f24', '#22332a', '#3a2a1c']), c3: pickR(['#1c1a1e', '#6e1f26', '#2a3a5a']),
+    legs: 'trousers', legCol: pickR(['#2a2a2e', '#3a3026']), shoe: 'men', collar: 'shirt', hands: 'belly', mustache: 'walrus' }),
+  // 老先生：白髮、白鬍子、圓眼鏡、粗呢大衣和圍巾，兩手拄著拐杖
+  oldman: () => ({ sex: 'm', age: 0.9 + rnd() * 0.1, skin: pickR(PAX_SKIN), hair: '#d8d4cc', style: 'thin',
+    top: 'tweed', c1: pickR(['#5a5048', '#4a4a44', '#5a4a3a']), legs: 'trousers', legCol: pickR(['#3a3632', '#2e2e30']), shoe: 'men', shoeCol: '#2a1a10',
+    collar: 'scarf', collarCol: pickR(['#6a2026', '#2a3a5a', '#5a4a2a']), hands: 'cane', beard: true, glasses: true }),
+  // 女學生（大正時代）：矢絣花紋的和服配深紅的袴、半束的長髮綁著大緞帶、皮靴
+  girl: () => ({ sex: 'f', age: 0, sc: 0.94, skin: pickR(PAX_SKIN.slice(0, 4)), hair: pickR(PAX_DARK.slice(0, 2)), style: 'half', ribbon: pickR(['#b0222a', '#e8e0d0', '#3a5a8a', '#6a2a6a']),
+    top: 'hakama', pat: 'yagasuri', c1: pickR(['#5a2a6a', '#8a2a3a', '#2a3a6a']), c2: '#ece4ea', c3: pickR(['#5a1e2e', '#3a1e3a', '#2a2a40']),
+    legs: 'hakama', shoe: 'boot', shoeCol: '#4a2e1a', hands: 'folded' }),
+  // 車掌：深藍色制服、兩排金扣子、立領、有帽徽的大盤帽
+  conductor: () => ({ sex: 'm', age: 0.4 + rnd() * 0.3, skin: pickR(PAX_SKIN), hair: pickR([...PAX_DARK, '#8e8a84']), style: 'short',
+    hat: 'conductor', hatCol: '#1a2134', top: 'uniform', c1: '#1b2236', legs: 'trousers', shoe: 'men', collar: 'stand', collarCol: '#1b2236', collarTrim: '#c9a24a',
+    cuff: '#c9a24a', hands: 'lap', mustache: rnd() < 0.5 ? 'thin' : null }),
+};
+// 死掉的姿勢：頭往前垂、歪向一邊、往後仰（嘴巴開開的）、直挺挺地坐著
+const PAX_POSES = { slump: [0.62, 0.15], side: [0.18, 0.5], back: [-0.42, 0.1], still: [0.06, 0] };
+function paxSpec(kind) {
+  const p = { kind, sc: 1, ...PAX_KINDS[kind]() };
+  p.build = p.build || p.sex;
+  p.hd = PAX_HEADS[p.build];
+  p.sc *= 0.96 + rnd() * 0.08;
+  // 死人的膚色：往同樣深淺的青灰色靠（深膚色的人還是深的，只是沒了血色）
+  const [sr, sg, sb] = hexRGB(p.skin), lum = 0.3 * sr + 0.59 * sg + 0.11 * sb;
+  p.deadSkin = mixHex(p.skin, '#' + [0.95, 0.98, 1.05].map(k => Math.round(clamp(lum * k, 0, 255)).toString(16).padStart(2, '0')).join(''), 0.6);
+  p.iris = p.skin === PAX_SKIN[0] && rnd() < 0.6 ? pickR(['#4a6a8a', '#5a6a4a', '#6a6a6a']) : pickR(['#2a1a10', '#3a2414', '#4a3018']);
+  p.brow = p.age > 0.8 ? mixHex(p.hair, '#8a8680', 0.3) : mixHex(p.hair, '#000000', 0.1);
+  p.lips = p.lips || mixHex(p.skin, p.sex === 'f' ? '#a24a4a' : '#8a4a44', p.sex === 'f' ? 0.45 : 0.35);
+  p.shoeCol = p.shoeCol || pickR(['#141210', '#3a2416']);
+  p.legCol = p.legCol || (p.legs === 'hakama' ? p.c3 : p.c1);
+  p.sleeve = p.c1;
+  p.torsoH = p.build === 'h' ? 0.62 : p.sex === 'f' ? 0.58 : 0.6;
+  p.pose = p.hands === 'paper' ? 'slump' : p.kind === 'granny' ? pickR(['slump', 'side']) : pickR(['slump', 'side', 'back', 'still', 'slump', 'side']);
+  const [px, pz] = PAX_POSES[p.pose], s = rnd() < 0.5 ? -1 : 1;
+  p.deadPose = { x: px, y: 0, z: pz * s };
+  p.alivePose = { x: p.hands === 'paper' ? 0.32 : 0.05, y: 0, z: 0 };
+  return p;
 }
-// 躺著不動的乘客（臥鋪的下鋪）：蓋著白布的一團，看得出頭和腳的形狀
-function addLyingPassenger(g, r, x, z, face, y) {
-  const pg = new THREE.Group(); pg.position.set(x, y, z); pg.rotation.y = face; g.add(pg);
-  const dead = new THREE.Group(), alive = new THREE.Group(); pg.add(dead); pg.add(alive);
-  const sheet = sheetMat();
-  const head = sph(dead, 0.14, -0.6, 0.1, 0, sheet, 1.1, 0.75, 1, 12);
-  sph(dead, 0.26, -0.15, 0.08, 0, sheet, 1.3, 0.45, 0.9, 12);
-  box(dead, 0.1, 0.65, 0, 0.16, -0.17, 0.17, sheet);
-  alive.visible = false;
-  (r.pax = r.pax || []).push({ g: pg, head, dead, alive, turn: 0, base: face });
+// 每種乘客輪流出現，相鄰的才不會一樣；prefer 是這個位置比較適合的種類（例如餐車多半是穿得體面的人）
+let paxBag = [];
+function paxNextKind(prefer) {
+  if (!paxBag.length) {
+    paxBag = Object.keys(PAX_KINDS);
+    for (let i = paxBag.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; [paxBag[i], paxBag[j]] = [paxBag[j], paxBag[i]]; }
+  }
+  const i = prefer ? Math.max(0, paxBag.findIndex(k => prefer.includes(k))) : 0;
+  return paxBag.splice(i, 1)[0];
+}
+
+// ---------- 材質 ----------
+// 純色零件用的「假材質」：只記顏色，合併時換成頂點顏色；skin 是皮膚（活著和死掉的顏色不同）、hair 是頭髮（有髮絲的紋路）
+const paxColCache = new Map();
+function pcol(color, flag = '') {
+  const key = color + flag;
+  let m = paxColCache.get(key);
+  if (!m) { m = new THREE.MeshBasicMaterial(); Object.assign(m.userData, { vc: color, skin: flag === 'skin', hair: flag === 'hair' }); paxColCache.set(key, m); }
+  return m;
+}
+let paxVCMatC = null, paxHairMatC = null, paxPaperMatC = null;
+const paxVCMat = () => paxVCMatC || (paxVCMatC = patchLM(new THREE.MeshLambertMaterial({ vertexColors: true }), PAX_SHADE));
+function paxHairMat() {
+  if (paxHairMatC) return paxHairMatC;
+  // 一絲一絲的灰階髮絲，顏色用頂點顏色乘上去
+  const t = canvasTex(64, 128, (c, w, h) => {
+    c.fillStyle = '#d8d8d8'; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 90; i++) {
+      const v = 110 + rnd() * 145 | 0, x = rnd() * w;
+      c.strokeStyle = `rgba(${v},${v},${v},.6)`; c.lineWidth = 0.6 + rnd();
+      c.beginPath(); c.moveTo(x, 0); c.bezierCurveTo(x + (rnd() - 0.5) * 6, h * 0.3, x + (rnd() - 0.5) * 6, h * 0.7, x + (rnd() - 0.5) * 4, h); c.stroke();
+    }
+  });
+  t.repeat.set(6, 1);
+  return (paxHairMatC = patchLM(new THREE.MeshLambertMaterial({ vertexColors: true, map: t, side: THREE.DoubleSide }), PAX_SHADE));
+}
+// 自己畫的貼圖（臉、衣服）：材質和貼圖都跟著家具一起丟掉
+function paxTexMat(maps, opts = {}) {
+  const m = patchLM(new THREE.MeshLambertMaterial({ map: maps[0], ...opts }), PAX_SHADE);
+  m.userData.own = true; m.userData.maps = maps;
+  return m;
+}
+// 報紙：報頭「末班日報」、頭條、一欄一欄的字和一張照片
+function paxPaperMat() {
+  if (paxPaperMatC) return paxPaperMatC;
+  const t = canvasTex(512, 384, (c, w, h) => {
+    c.fillStyle = '#d9d1bd'; c.fillRect(0, 0, w, h);
+    c.fillStyle = '#2a2622'; c.textAlign = 'center';
+    c.font = 'bold 40px "Songti TC","Noto Serif TC","PingFang TC",serif'; c.fillText('末班日報', w / 4, 48);
+    c.font = 'bold 32px "Songti TC","Noto Serif TC","PingFang TC",serif'; c.fillText('乘客全數失蹤', w * 3 / 4, 46);
+    for (const x0 of [0, w / 2]) {
+      c.fillRect(x0 + 14, 60, w / 2 - 28, 3);
+      for (let col = 0; col < 4; col++) for (let y = 72; y < h - 14; y += 8) {
+        if (x0 > 0 && col < 2 && y < 180) continue;
+        if (rnd() < 0.06) continue;
+        c.fillStyle = `rgba(40,36,32,${0.35 + rnd() * 0.3})`; c.fillRect(x0 + 18 + col * 58, y, 50 * (0.55 + rnd() * 0.45), 3);
+      }
+    }
+    // 照片：黑黑的一列火車
+    c.fillStyle = '#7a7468'; c.fillRect(w / 2 + 18, 72, 108, 100);
+    c.fillStyle = '#2a2622'; c.fillRect(w / 2 + 24, 120, 96, 30); c.fillRect(w / 2 + 30, 104, 14, 18);
+    for (let i = 0; i < 4; i++) { c.fillStyle = '#c8c0a8'; c.fillRect(w / 2 + 50 + i * 18, 126, 10, 8); }
+    for (let i = 0; i < 8; i++) { c.fillStyle = `rgba(140,110,60,${0.08 + rnd() * 0.12})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 10 + rnd() * 30, 8 + rnd() * 20, rnd() * 3, 0, 7); c.fill(); }
+    c.fillStyle = 'rgba(0,0,0,.25)'; c.fillRect(w / 2 - 1, 0, 2, h);
+  });
+  return (paxPaperMatC = patchLM(new THREE.MeshLambertMaterial({ map: t, side: THREE.DoubleSide }), PAX_SHADE));
+}
+
+// ---------- 合併零件 ----------
+const _pv = new THREE.Vector3(), _pn = new THREE.Matrix3(), _pc = new THREE.Color(), _pa = new THREE.Vector3(), _pw = new THREE.Vector3();
+// 把 root 底下的零件照材質合成幾個網格：純色的零件合成一個頂點顏色的網格，頭髮另外一個；皮膚的頂點範圍記在 skins（換膚色用）
+function paxMerge(root, skins) {
+  root.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert(), buckets = new Map(), parts = [];
+  root.traverse(o => { if (o.isMesh) parts.push(o); });
+  for (const o of parts) {
+    const u = o.material.userData, key = u.vc ? (u.hair ? 'hair' : 'vc') : o.material.uuid;
+    let b = buckets.get(key);
+    if (!b) buckets.set(key, b = { mat: u.vc ? (u.hair ? paxHairMat() : paxVCMat()) : o.material, list: [] });
+    b.list.push({ o, m: new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld) });
+  }
+  for (const b of buckets.values()) {
+    if (b.list.length === 1 && !b.mat.vertexColors) continue;   // 只有一塊（頭、身體）就不用合併
+    let nv = 0, ni = 0;
+    for (const { o } of b.list) { nv += o.geometry.attributes.position.count; ni += o.geometry.index.count; }
+    const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), col = b.mat.vertexColors ? new Float32Array(nv * 3) : null, idx = new Uint32Array(ni), skinR = [];
+    let vo = 0, io = 0;
+    for (const { o, m } of b.list) {
+      const g = o.geometry, P = g.attributes.position, N = g.attributes.normal, U = g.attributes.uv, I = g.index, n = P.count;
+      _pn.getNormalMatrix(m);
+      if (col) _pc.set(o.material.userData.vc);
+      for (let i = 0; i < n; i++) {
+        const k = (vo + i) * 3;
+        _pv.fromBufferAttribute(P, i).applyMatrix4(m); pos[k] = _pv.x; pos[k + 1] = _pv.y; pos[k + 2] = _pv.z;
+        _pv.fromBufferAttribute(N, i).applyMatrix3(_pn).normalize(); nor[k] = _pv.x; nor[k + 1] = _pv.y; nor[k + 2] = _pv.z;
+        if (U) { uv[(vo + i) * 2] = U.getX(i); uv[(vo + i) * 2 + 1] = U.getY(i); }
+        if (col) { col[k] = _pc.r; col[k + 1] = _pc.g; col[k + 2] = _pc.b; }
+      }
+      for (let i = 0; i < I.count; i++) idx[io++] = I.getX(i) + vo;
+      if (col && o.material.userData.skin) skinR.push(vo, n);
+      vo += n;
+      o.parent.remove(o);
+      if (o.userData.ownGeo) g.dispose();
+    }
+    const mg = new THREE.BufferGeometry();
+    mg.setAttribute('position', new THREE.BufferAttribute(pos, 3)); mg.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); mg.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    if (col) mg.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    mg.setIndex(new THREE.BufferAttribute(idx, 1));
+    mg.computeBoundingSphere();
+    const mesh = new THREE.Mesh(mg, b.mat); mesh.castShadow = true; mesh.receiveShadow = true; mesh.userData.ownGeo = true;
+    root.add(mesh);
+    if (skinR.length) skins.push({ attr: mg.attributes.color, r: skinR });
+  }
+}
+
+// ---------- 小零件 ----------
+const pel = (g, x, y, z, sx, sy, sz, mat, seg = 8) => sph(g, 1, x, y, z, mat, sx, sy, sz, seg);
+function pmesh(g, gm, mat, x, y, z, sx = 1, sy = 1, sz = 1, rx = 0, ry = 0, rz = 0) {
+  const m = new THREE.Mesh(gm, mat); m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.rotation.set(rx, ry, rz); m.castShadow = true; m.receiveShadow = true; g.add(m); return m;
+}
+// 兩點之間的膠囊（手腳）：兩頭是圓的，關節接起來才不會有縫
+function pcap(g, a, b, r, mat) {
+  const d = _pa.subVectors(b, a), l = Math.max(0.01, Math.round(d.length() * 100) / 100);
+  const m = new THREE.Mesh(geo(`pcap${r},${l}`, () => new THREE.CapsuleGeometry(r, l, 2, 8)), mat);
+  m.position.addVectors(a, b).multiplyScalar(0.5);
+  m.quaternion.setFromUnitVectors(UP, d.normalize());
+  g.add(m);
+  return m;
+}
+const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+const P_DOME = () => geo('paxDome', () => new THREE.SphereGeometry(1, 18, 8, 0, Math.PI * 2, 0, Math.PI / 2));
+const P_DISC = () => geo('paxDisc', () => new THREE.CylinderGeometry(1, 1, 1, 24));
+const P_RING = () => geo('paxRing', () => new THREE.CylinderGeometry(1, 1, 1, 24, 1, true));
+const P_VISOR = () => geo('paxVisor', () => new THREE.CylinderGeometry(1, 1, 1, 14, 1, false, -Math.PI / 2, Math.PI));
+// 手肘的位置：從肩膀和手的位置反推（往外、往下、往後彎）
+function paxElbow(sh, h, lu, lf, pole) {
+  const d = h.clone().sub(sh), len = Math.min(d.length(), lu + lf - 0.001), dir = d.normalize();
+  const a = (lu * lu - lf * lf + len * len) / (2 * len), hh = Math.sqrt(Math.max(0, lu * lu - a * a));
+  const n = pole.clone().addScaledVector(dir, -pole.dot(dir)).normalize();
+  return sh.clone().addScaledVector(dir, a).addScaledVector(n, hh);
+}
+
+// ---------- 頭 ----------
+// 單位球上的點 → 頭的形狀：下巴和下顎比較窄、後腦勺凸一點、脖子後面收進去
+function paxHeadPt(x, y, z, hd, out) {
+  if (y < 0) { const t = -y; x *= 1 - PAX_JAW * t * t; z *= z > 0 ? 1 - 0.06 * t * t : 1 - 0.25 * t * t; }
+  if (z < 0) z *= 1 + 0.06 * sstep(-0.6, 0, y);
+  return out.set(x * hd.rx, y * hd.ry, z * hd.rz);
+}
+// 頭：貼圖只畫前半個頭（左右各 90°），後腦勺用貼圖最左、最右一欄的顏色（頭髮或脖子）
+function paxHeadGeo(hd) {
+  return geo('paxhead' + hd.key, () => {
+    const g = new THREE.SphereGeometry(1, 28, 20, -Math.PI / 2), P = g.attributes.position, U = g.attributes.uv;
+    for (let i = 0; i < P.count; i++) { paxHeadPt(P.getX(i), P.getY(i), P.getZ(i), hd, _pv); P.setXYZ(i, _pv.x, _pv.y, _pv.z); U.setX(i, U.getX(i) * 2 - 0.5); }
+    g.computeVertexNormals();
+    return g;
+  });
+}
+// 頭髮蓋住的範圍：a 是從正面往右轉的角度、th 是從頭頂往下的角度；回傳離髮際線多遠（正的是頭髮）。畫在臉上的頭髮和頭髮的立體形狀都照這個
+function paxHairLine(style) {
+  const A = Math.abs;
+  switch (style) {
+    case 'bald': return (a, th) => Math.min(th - 1.05 - 2 * (1 - sstep(0.85, 1.25, A(a))), 1.95 - th);   // 禿頭：只剩耳朵上面和後腦勺一圈
+    case 'thin': return (a, th) => 0.62 - 0.16 * Math.exp(-(((A(a) - 0.5) / 0.2) ** 2)) + 0.98 * sstep(0.7, 1.25, A(a)) + 0.35 * sstep(1.35, 1.57, A(a)) - th;   // 額頭兩邊禿上去
+    case 'bob': return (a, th) => 0.8 + 0.05 * Math.sin(a * 3) + 1.42 * sstep(0.85, 1.12, A(a)) - th;   // 鮑伯頭：兩邊蓋住耳朵到下巴
+    case 'half': return (a, th) => 0.8 + 1.55 * sstep(0.88, 1.12, A(a)) - th;
+    case 'bun': case 'updo': return (a, th) => 0.8 + 0.8 * sstep(0.62, 1.2, A(a)) + 0.32 * sstep(1.35, 1.57, A(a)) - th;   // 往上梳，露出後頸
+    default: return (a, th) => 0.86 + 0.76 * sstep(0.62, 1.2, A(a)) + 0.36 * sstep(1.35, 1.57, A(a)) - th;   // 短髮：鬢角到耳朵中間
+  }
+}
+// 頭髮的厚度（公尺）
+const PAX_HAIR_T = {
+  short: (a, th, d) => 0.003 + 0.011 * sstep(0, 0.3, d),
+  thin: (a, th, d) => 0.002 + 0.005 * sstep(0, 0.3, d),
+  bald: (a, th, d) => 0.002 + 0.005 * sstep(0, 0.12, d),
+  bob: (a, th, d) => 0.004 + 0.012 * sstep(0, 0.25, d) + 0.014 * sstep(1.5, 2.1, th) * sstep(0.85, 1.2, Math.abs(a)),
+  half: (a, th, d) => 0.004 + 0.012 * sstep(0, 0.25, d) + 0.01 * sstep(1.5, 2.2, th),
+  bun: (a, th, d) => 0.003 + 0.009 * sstep(0, 0.3, d),
+  updo: (a, th, d) => 0.004 + 0.01 * sstep(0, 0.3, d) + 0.02 * Math.exp(-(((th - 1.3) / 0.3) ** 2)) * sstep(0.7, 1.3, Math.abs(a)),
+};
+// 頭髮：從同一顆頭的網格裡挑出頭髮蓋住的三角形，往外推出厚度（髮際線那邊薄到貼著皮膚）
+function paxHairGeo(style, hd, hat) {
+  return geo('paxhair' + style + hd.key + (hat ? 'h' : ''), () => {
+    const g = new THREE.SphereGeometry(1, 28, 20, -Math.PI / 2), P = g.attributes.position, I = g.index.array, fn = paxHairLine(style), T = PAX_HAIR_T[style] || PAX_HAIR_T.short;
+    const d = new Float32Array(P.count), keep = [];
+    for (let i = 0; i < P.count; i++) {
+      const x = P.getX(i), y = P.getY(i), z = P.getZ(i), a = Math.atan2(x, z), th = Math.acos(clamp(y, -1, 1));
+      d[i] = fn(a, th);
+      paxHeadPt(x, y, z, hd, _pv);
+      const len = _pv.length() || 1;
+      _pv.multiplyScalar((len + T(a, th, Math.max(0, d[i])) * (hat ? 0.15 + 0.85 * sstep(0.9, 1.4, th) : 1)) / len);
+      P.setXYZ(i, _pv.x, _pv.y, _pv.z);
+    }
+    for (let k = 0; k < I.length; k += 3) { const a = d[I[k]], b = d[I[k + 1]], c = d[I[k + 2]]; if (Math.max(a, b, c) > 0 && a + b + c > -0.06) keep.push(I[k], I[k + 1], I[k + 2]); }
+    g.setIndex(keep);
+    g.computeVertexNormals();
+    return g;
+  });
+}
+// 臉上的位置（公分，以頭的中心為原點，x 往右、y 往上）→ 貼圖上的位置
+function paxFaceMap(hd, x, y) {
+  const v = clamp(y / 100 / hd.ry, -0.995, 0.995), th = Math.acos(v), t = Math.max(0, -v);
+  const u = clamp(x / 100 / (hd.rx * (1 - PAX_JAW * t * t) * Math.sin(th)), -0.995, 0.995);
+  return [PAX_TEX / 2 + Math.asin(u) * PAX_TEX / Math.PI, th * PAX_TEX / Math.PI];
+}
+// 畫臉：st 是 alive（活著，睜眼）、dead（死了，閉眼）、stare（死了，轉過頭來睜著混濁的眼睛）
+function paintPaxHead(c, p, st) {
+  const S = PAX_TEX, hd = p.hd, dead = st !== 'alive', f = p.sex === 'f', age = p.age;
+  const skin = dead ? p.deadSkin : p.skin, sh = mixHex(skin, dead ? '#2a2a3a' : '#4a2418', 0.4);
+  // 在臉上某一點畫東西：在那附近把座標換成公分（y 往上），mirror = -1 左右翻過來（左右對稱的五官）
+  const at = (x, y, fn, mirror = 1) => {
+    const [X, Y] = paxFaceMap(hd, x, y), [X1] = paxFaceMap(hd, x + 0.25, y), [, Y1] = paxFaceMap(hd, x, y + 0.25);
+    c.save(); c.setTransform((X1 - X) / 0.25 * mirror, 0, 0, (Y1 - Y) / 0.25, X, Y); fn(); c.restore();
+  };
+  // soft：邊緣淡出的一團顏色（陰影、紅暈），比實心的橢圓自然
+  const soft = (x, y, rx, ry, col, a) => { c.save(); c.translate(x, y); c.scale(rx, ry); const g = c.createRadialGradient(0, 0, 0, 0, 0, 1); g.addColorStop(0, rgbaOf(col, a)); g.addColorStop(1, rgbaOf(col, 0)); c.fillStyle = g; c.beginPath(); c.arc(0, 0, 1, 0, 7); c.fill(); c.restore(); };
+  const ell = (x, y, rx, ry, col) => { c.fillStyle = col; c.beginPath(); c.ellipse(x, y, rx, ry, 0, 0, 7); c.fill(); };
+  const curve = (pts, col, w) => {
+    c.strokeStyle = col; c.lineWidth = w; c.lineCap = 'round'; c.beginPath(); c.moveTo(pts[0], pts[1]);
+    if (pts.length === 6) c.quadraticCurveTo(pts[2], pts[3], pts[4], pts[5]); else c.lineTo(pts[2], pts[3]);
+    c.stroke();
+  };
+  c.fillStyle = skin; c.fillRect(0, 0, S, S);
+  for (let i = 0; i < 500; i++) { c.fillStyle = rgbaOf(sh, 0.035); c.fillRect(rnd() * S, rnd() * S, 2, 2); }
+  const gd = c.createLinearGradient(0, S * 0.72, 0, S); gd.addColorStop(0, rgbaOf(sh, 0)); gd.addColorStop(1, rgbaOf(sh, 0.6));
+  c.fillStyle = gd; c.fillRect(0, S * 0.72, S, S * 0.28);   // 下巴底下比較暗
+  // 整張臉的明暗：額頭和鼻樑比較亮、太陽穴和兩頰外側比較暗、眉毛底下凹進去；男生下巴有一點青青的鬍渣影
+  at(0, 0, () => {
+    soft(0, 4.6, 4.6, 2.6, '#ffffff', dead ? 0.06 : 0.1);
+    for (const s of [-1, 1]) { soft(s * 5.8, 0.5, 2.6, 6.5, sh, 0.35); soft(s * 4.6, -4.5, 2.2, 3.5, sh, 0.22); soft(s * 3.0, 1.7, 2.3, 0.9, sh, dead ? 0.35 : 0.22); }
+    soft(0, -1.6, 0.9, 2.2, '#ffffff', 0.07);
+    if (!f && !p.beard) soft(0, -7.2, 4.2, 2.8, '#3a4048', 0.13);
+  });
+  // 臉頰：活著是紅潤的，死了是凹陷、發青的
+  for (const s of [-1, 1]) at(s * 3.7, -2.6, () => soft(0, 0, 2.6, 2.2, dead ? '#505a6e' : '#c8604f', dead ? 0.22 : f ? 0.25 : 0.14));
+  // 眼睛
+  const ex = f ? 3.0 : 3.15, ey = 0.9, ew = f ? 1.35 : 1.4;
+  for (const s of [-1, 1]) at(s * ex, ey, () => {
+    soft(0.1, 0.2, 2.3, 1.5, sh, dead ? 0.42 : 0.2);                   // 眼窩的影子
+    if (dead) soft(0.2, -1.0, 1.8, 0.8, '#463c5f', 0.35);              // 發青的眼袋
+    if (p.makeup) soft(0.1, 0.6, 1.8, 0.9, '#46283c', 0.45);            // 眼影
+    if (st === 'dead') {
+      // 閉著的眼睛：往下彎的眼皮線（女生有睫毛）
+      c.fillStyle = rgbaOf(sh, 0.22); c.beginPath(); c.moveTo(-ew, -0.05); c.quadraticCurveTo(-0.1, 1.05, ew, 0.15); c.quadraticCurveTo(0, -0.5, -ew, -0.05); c.fill();
+      curve([-ew, -0.05, 0, -0.5, ew, 0.15], '#2a1a16', f ? 0.24 : 0.17);
+      if (f) for (let i = 1; i < 7; i++) {
+        const t = i / 7, x = ew * (2 * t - 1), y = (1 - t) * (1 - t) * -0.05 + 2 * (1 - t) * t * -0.25 + t * t * 0.15;
+        curve([x, y, x + (t - 0.3) * 0.3, y - 0.4], '#2a1a16', 0.08);
+      }
+    } else {
+      const path = () => { c.beginPath(); c.moveTo(-ew, -0.05); c.quadraticCurveTo(-0.15, 1.05, ew, 0.18); c.quadraticCurveTo(0.1, -0.7, -ew, -0.05); c.closePath(); };
+      path(); c.fillStyle = st === 'stare' ? '#c6c4ba' : '#e6dfd2'; c.fill();
+      c.save(); path(); c.clip();
+      ell(-0.05, 0.12, 0.62, 0.62, st === 'stare' ? mixHex(p.iris, '#a8aaa8', 0.65) : p.iris);   // 虹膜
+      ell(-0.05, 0.12, st === 'stare' ? 0.34 : 0.25, st === 'stare' ? 0.34 : 0.25, st === 'stare' ? '#4a4a4c' : '#0a0706');   // 瞳孔
+      if (st === 'stare') ell(-0.05, 0.12, 0.7, 0.7, 'rgba(225,230,230,.35)');   // 混濁的一層
+      c.fillStyle = 'rgba(40,20,15,.3)'; c.fillRect(-2, 0.45, 4, 1);           // 上眼皮的影子
+      c.restore();
+      if (st === 'alive') ell(0.15, 0.42, 0.13, 0.13, 'rgba(255,255,255,.85)');
+      curve([-ew, -0.05, -0.15, 1.05, ew, 0.18], '#24160f', f ? 0.26 : 0.18);   // 上眼皮和睫毛
+      curve([-ew * 0.9, -0.1, 0.1, -0.7, ew * 0.95, 0.12], rgbaOf(sh, 0.5), 0.08);
+    }
+    curve([-ew * 0.85, 0.75, 0, 1.55, ew * 1.05, 0.85], rgbaOf(sh, 0.45), 0.1);   // 眼皮的摺痕
+    if (age > 0.55) {
+      curve([-ew * 0.7, -0.75, 0, -1.3, ew * 0.95, -0.6], rgbaOf(sh, age * 0.4), 0.1);   // 眼袋
+      for (let k = -1; k <= 1; k++) curve([ew + 0.4, 0.1 + k * 0.35, ew + 1.4, k * 0.6], rgbaOf(sh, (age - 0.4) * 0.45), 0.08);   // 魚尾紋
+    }
+  }, s);
+  // 眉毛
+  for (const s of [-1, 1]) at(s * 3.0, 2.55, () => {
+    const w = f ? 0.3 : 0.55, arch = f ? 0.9 : 0.45;
+    c.globalAlpha = 0.55;
+    for (let k = 0; k < 4; k++) curve([-1.85, -0.15 + k * 0.06, 0.1, arch - k * 0.05, 1.75, f ? -0.25 : -0.05], p.brow, w * (1 - k * 0.18));
+    c.globalAlpha = 1;
+  }, s);
+  // 鼻子：鼻樑兩邊的影子、鼻孔、鼻子底下的影子（鼻子本身是立體的）
+  at(0, -1.2, () => { for (const s of [-1, 1]) soft(s * 1.05, -0.6, 0.55, 2.0, sh, 0.25); soft(0, -1.6, 0.5, 0.45, '#ffffff', 0.14); });
+  for (const s of [-1, 1]) at(s * 0.85, -3.6, () => ell(0, 0, 0.38, 0.2, 'rgba(45,22,18,.55)'));
+  at(0, -3.3, () => { soft(0, -0.6, 1.6, 0.5, sh, 0.3); for (const s of [-1, 1]) curve([s * 0.3, -0.9, s * 0.35, -1.9], rgbaOf(sh, 0.25), 0.12); });   // 鼻子底下的影子、人中
+  // 法令紋、抬頭紋、嘴角往下的紋
+  at(0, -4.6, () => { for (const s of [-1, 1]) curve([s * 1.35, 1.3, s * 2.5, 0.3, s * 2.7, -1.6], rgbaOf(sh, 0.1 + age * 0.35), 0.16); });
+  if (age > 0.55) {
+    at(0, 4.4, () => { for (let k = 0; k < 3; k++) curve([-3.2, k * 0.75, 0, k * 0.75 + 0.35, 3.2, k * 0.75], rgbaOf(sh, (age - 0.4) * 0.45), 0.12); });
+    for (const s of [-1, 1]) at(s * 2.7, -7.2, () => curve([0, 0.8, 0.15, -0.4, 0.5, -1.6], rgbaOf(sh, (age - 0.4) * 0.4), 0.14), s);
+  }
+  // 嘴：上唇有唇峰、下唇比較亮；死了嘴唇發紫灰，頭往後仰的嘴巴開開的
+  at(0, -5.9, () => {
+    const lip = dead ? mixHex(p.lips, '#7c7888', 0.65) : p.lips, w = p.smallLips ? 1.35 : f ? 1.85 : 2.2;
+    c.fillStyle = mixHex(lip, '#000000', 0.2);
+    c.beginPath(); c.moveTo(-w, 0); c.bezierCurveTo(-w * 0.6, 0.3, -0.55, 0.72, 0, 0.48); c.bezierCurveTo(0.55, 0.72, w * 0.6, 0.3, w, 0); c.quadraticCurveTo(0, -0.12, -w, 0); c.fill();
+    c.fillStyle = lip;
+    c.beginPath(); c.moveTo(-w * 0.88, -0.04); c.quadraticCurveTo(0, f ? -1.2 : -1.0, w * 0.88, -0.04); c.quadraticCurveTo(0, -0.18, -w * 0.88, -0.04); c.fill();
+    if (dead && p.pose === 'back') { soft(0, -0.25, w * 0.55, 0.55, '#160a0a', 1); ell(0, -0.25, w * 0.4, 0.32, '#120808'); }
+    curve([-w, 0, 0, -0.16, w, 0], 'rgba(45,18,18,.7)', 0.11);
+    soft(0, -0.55, w * 0.4, 0.2, '#ffffff', 0.12);   // 下唇的光
+    soft(0, -1.7, w * 0.8, 0.5, sh, 0.3);            // 下唇底下的影子
+  });
+  // 鬍子
+  if (p.stubble) at(0, -6, () => {
+    for (let i = 0; i < 320; i++) {
+      const a = rnd() * Math.PI * 2, rr = Math.sqrt(rnd()), x = Math.cos(a) * 4.8 * rr, y = Math.sin(a) * 3.8 * rr;
+      if (Math.abs(x) < 2.4 && y > -1.3 && y < 0.7) continue;
+      c.fillStyle = rgbaOf(p.hair, 0.22); c.fillRect(x, y, 0.16, 0.16);
+    }
+  });
+  if (p.mustache === 'thin') at(0, -4.85, () => {
+    c.fillStyle = rgbaOf(p.hair, 0.92); c.beginPath(); c.moveTo(-2.1, -0.35); c.quadraticCurveTo(-1.1, 0.45, 0, 0.2); c.quadraticCurveTo(1.1, 0.45, 2.1, -0.35); c.quadraticCurveTo(1.0, -0.05, 0, -0.15); c.quadraticCurveTo(-1.0, -0.05, -2.1, -0.35); c.fill();
+  });
+  if (p.mustache === 'walrus' || p.beard) at(0, -4.9, () => {
+    c.fillStyle = p.hair; c.beginPath(); c.moveTo(-3.0, -1.3); c.bezierCurveTo(-2.6, 0.2, -1.0, 0.7, 0, 0.35); c.bezierCurveTo(1.0, 0.7, 2.6, 0.2, 3.0, -1.3); c.bezierCurveTo(2.0, -0.7, 1.0, -0.9, 0, -0.75); c.bezierCurveTo(-1.0, -0.9, -2.0, -0.7, -3.0, -1.3); c.fill();
+    for (let i = 0; i < 40; i++) { const x = (rnd() - 0.5) * 5.6; curve([x, 0.2 - Math.abs(x) * 0.25, x * 1.08, -0.6 - Math.abs(x) * 0.18], rgbaOf(mixHex(p.hair, '#000000', 0.3), 0.4), 0.07); }
+  });
+  if (p.beard) at(0, -6.0, () => {
+    // 白色的大鬍子：從兩頰包到下巴，露出下唇
+    c.fillStyle = p.hair; c.beginPath(); c.moveTo(-4.7, 3.2); c.bezierCurveTo(-4.9, -1.5, -2.8, -5.2, 0, -5.6); c.bezierCurveTo(2.8, -5.2, 4.9, -1.5, 4.7, 3.2);
+    c.lineTo(3.4, 1.6); c.quadraticCurveTo(2.6, 0.2, 2.1, 0.1); c.quadraticCurveTo(0, -1.5, -2.1, 0.1); c.quadraticCurveTo(-2.6, 0.2, -3.4, 1.6); c.closePath(); c.fill();
+    for (let i = 0; i < 90; i++) { const x = (rnd() - 0.5) * 8.6, y = 2.5 - rnd() * 7; curve([x, y, x * 0.96, y - 1.2], rgbaOf(mixHex(p.hair, '#000000', 0.25), 0.3), 0.08); }
+  });
+  // 頭髮：照髮際線一格一格填（往下的髮絲紋路），邊緣淡淡的
+  const fn = paxHairLine(p.style), img = c.getImageData(0, 0, S, S), dt = img.data, [hr, hg, hb] = hexRGB(p.hair);
+  for (let Y = 0; Y < S; Y++) {
+    const th = (Y + 0.5) / S * Math.PI;
+    for (let X = 0; X < S; X++) {
+      const dd = fn(((X + 0.5) / S - 0.5) * Math.PI, th);
+      if (dd <= -0.03) continue;
+      const k = sstep(-0.03, 0.03, dd), v = 0.8 + 0.32 * hash01(Math.floor(X * 1.7 + Y * 0.05)) + (hash01(X * 7.1 + Y * 13.3) - 0.5) * 0.12, i = (Y * S + X) * 4;
+      dt[i] += (Math.min(255, hr * v) - dt[i]) * k; dt[i + 1] += (Math.min(255, hg * v) - dt[i + 1]) * k; dt[i + 2] += (Math.min(255, hb * v) - dt[i + 2]) * k;
+    }
+  }
+  c.putImageData(img, 0, 0);
+  if (p.style === 'bald') at(0, 7.5, () => ell(0, 0, 3.4, 1.4, 'rgba(255,255,255,.12)'));   // 禿頭的反光
+  // 圓眼鏡：鏡框、鼻樑架、拉到耳朵的鏡腳，鏡片有一點反光
+  if (p.glasses) {
+    for (const s of [-1, 1]) at(s * ex, ey, () => { c.strokeStyle = '#2b2520'; c.lineWidth = 0.2; c.beginPath(); c.ellipse(0, 0, 1.75, 1.55, 0, 0, 7); c.stroke(); curve([-0.6, 0.9, 0.2, 1.2, 0.9, 0.6], 'rgba(255,255,255,.3)', 0.12); });
+    at(0, ey + 0.2, () => curve([-1.4, 0, 0, 0.35, 1.4, 0], '#2b2520', 0.2));
+    for (const s of [-1, 1]) { const [X0, Y0] = paxFaceMap(hd, s * (ex + 1.75), ey); c.strokeStyle = '#2b2520'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(X0, Y0); c.lineTo(s > 0 ? S - 3 : 3, Y0 + 3); c.stroke(); }
+  }
+}
+// 換臉：活著、死了、轉頭時睜眼的貼圖各畫一張（用到才畫）
+function paxFaceTex(px, st) {
+  if (!px.tex[st]) {
+    const t = canvasTex(PAX_TEX, PAX_TEX, c => paintPaxHead(c, px.p, st), true);
+    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+    px.tex[st] = t; px.headMat.userData.maps.push(t);
+  }
+  return px.tex[st];
+}
+// 帽子（在頭的中心的座標裡）
+function paxHat(hc, p) {
+  const hd = p.hd, col = pcol(p.hatCol), band = pcol(p.bandCol || mixHex(p.hatCol, '#000000', 0.4)), gold = pcol('#b8923a'), black = pcol('#0e0e10');
+  const H = new THREE.Group(); hc.add(H);
+  switch (p.hat) {
+    case 'bowler':   // 圓頂禮帽：圓圓的帽頂、窄窄的帽簷、緞帶
+      H.position.set(0, 0.035, -0.004); H.rotation.x = 0.06;
+      pmesh(H, P_DOME(), col, 0, 0, 0, hd.rx * 1.22, 0.095, hd.rz * 1.14);
+      pmesh(H, P_DISC(), col, 0, 0, 0, hd.rx * 1.75, 0.008, hd.rz * 1.6);
+      pmesh(H, P_RING(), band, 0, 0.012, 0, hd.rx * 1.23, 0.022, hd.rz * 1.15);
+      break;
+    case 'cloche':   // 鐘形帽：壓到眉毛、包住後腦勺，一圈緞帶和側邊的花飾
+      H.rotation.x = -0.33;
+      pmesh(H, geo('paxCloche', () => new THREE.SphereGeometry(1, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.505)), col, 0, 0, 0, hd.rx * 1.25, hd.ry * 1.2, hd.rz * 1.2);
+      pmesh(H, geo('paxClocheBrim', () => new THREE.CylinderGeometry(1, 1.12, 1, 20, 1, true)), col, 0, -0.012, 0, hd.rx * 1.25, 0.022, hd.rz * 1.2);
+      pmesh(H, P_RING(), band, 0, 0.012, 0, hd.rx * 1.26, 0.02, hd.rz * 1.21);
+      pel(H, hd.rx * 1.22, 0.014, 0.025, 0.012, 0.02, 0.02, band);
+      break;
+    case 'student': {   // 學生帽：直直的帽身、平平的帽頂、黑色的帽簷、帽徽
+      pmesh(H, geo('paxCapS', () => new THREE.CylinderGeometry(1.03, 1, 1, 22)), col, 0, 0.076, -0.004, hd.rx * 1.15, 0.068, hd.rz * 1.12);
+      pmesh(H, P_VISOR(), black, 0, 0.04, hd.rz * 1.02, hd.rx * 1.12, 0.006, 0.065, 0.3);
+      box(H, -0.012, 0.012, 0.07, 0.09, hd.rz * 1.12 - 0.004, hd.rz * 1.12 + 0.002, gold, false);
+      break;
+    }
+    case 'conductor': {   // 車掌的大盤帽：帽圈上一條金帶，上面是往外撐開的帽頂，帽徽、帽簷
+      pmesh(H, P_DISC(), col, 0, 0.055, -0.004, hd.rx * 1.15, 0.04, hd.rz * 1.12);
+      pmesh(H, geo('paxCapTop', () => new THREE.CylinderGeometry(1.35, 1, 1, 22)), col, 0, 0.094, -0.004, hd.rx * 1.15, 0.038, hd.rz * 1.12);
+      pmesh(H, P_RING(), gold, 0, 0.05, -0.004, hd.rx * 1.16, 0.012, hd.rz * 1.13);
+      pmesh(H, P_VISOR(), black, 0, 0.037, hd.rz * 1.02, hd.rx * 1.12, 0.006, 0.065, 0.3);
+      box(H, -0.014, 0.014, 0.068, 0.092, hd.rz * 1.15 - 0.002, hd.rz * 1.15 + 0.004, gold, false);
+      break;
+    }
+    case 'flat':   // 鴨舌帽：扁扁的帽頂往前壓、短短的帽簷
+      H.position.set(0, 0.07, 0.012); H.rotation.x = 0.18;
+      pmesh(H, P_DOME(), col, 0, 0, 0, hd.rx * 1.24, 0.055, hd.rz * 1.3);
+      pmesh(H, P_VISOR(), col, 0, -0.004, hd.rz * 1.15, hd.rx * 1.08, 0.008, 0.05, 0.22);
+      break;
+  }
+}
+// 脖子、頭、鼻子、耳朵、頭髮、帽子、鬍子（pose 是可以低頭、歪頭的那一層，原點在脖子底下）
+function paxHead(pose, p, px) {
+  const hd = p.hd, skin = pcol(p.deadSkin, 'skin'), hairM = pcol(p.hair, 'hair'), hc = new THREE.Group();
+  hc.position.set(0, p.sex === 'f' ? 0.124 : 0.13, 0.022); pose.add(hc);
+  const nr = p.build === 'h' ? 0.053 : p.sex === 'f' ? 0.04 : 0.045;
+  cyl(pose, nr, nr * 1.08, 0.13, 0, -0.03, -0.005, skin, 12);
+  const tex = canvasTex(PAX_TEX, PAX_TEX, c => paintPaxHead(c, p, 'dead'), true);
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  px.tex.dead = tex; px.headMat = paxTexMat([tex]);
+  pmesh(hc, paxHeadGeo(hd), px.headMat, 0, 0, 0);
+  pel(hc, 0, -0.022, hd.rz * 0.95, 0.0125, 0.021, 0.023, skin).rotation.x = -0.4;   // 鼻頭
+  for (const s of [-1, 1]) pel(hc, s * 0.009, -0.03, hd.rz * 0.93, 0.008, 0.008, 0.012, skin);   // 鼻翼
+  pel(hc, 0, 0.002, hd.rz * 0.975, 0.0075, 0.024, 0.012, skin);                      // 鼻樑
+  if (p.style !== 'bob' && p.style !== 'half') for (const s of [-1, 1]) pel(hc, s * hd.rx * 0.96, -0.008, -0.01, 0.009, 0.026, 0.017, skin).rotation.y = s * 0.35;
+  pmesh(hc, paxHairGeo(p.style, hd, !!p.hat), hairM, 0, 0, 0);
+  if (p.style === 'bun') pel(hc, 0, 0.045, -hd.rz * 1.02, 0.042, 0.036, 0.034, hairM);   // 後腦勺的髮髻
+  if (p.style === 'updo') {
+    // 日本髮髻：頭頂一大團、後面一個髻，插著髮簪
+    pel(hc, 0, 0.088, -0.018, 0.075, 0.05, 0.085, hairM);
+    pel(hc, 0, 0.03, -0.1, 0.055, 0.045, 0.045, hairM);
+    limb(hc, [0.02, 0.115, -0.05], [0.11, 0.15, -0.07], 0.004, pcol('#c9a24a'));
+    pel(hc, 0.112, 0.152, -0.07, 0.009, 0.009, 0.009, pcol(p.c4));
+  }
+  if (p.style === 'half') {
+    // 垂到背上的長髮，後面綁著一個大緞帶
+    pel(hc, 0, -0.13, -0.072, 0.085, 0.17, 0.045, hairM);
+    for (const s of [-1, 1]) pel(hc, s * 0.045, 0.045, -0.1, 0.045, 0.03, 0.015, pcol(p.ribbon)).rotation.z = s * 0.3;
+    pel(hc, 0, 0.045, -0.105, 0.016, 0.016, 0.014, pcol(p.ribbon));
+  }
+  if (p.beard) { pel(hc, 0, -0.078, 0.062, 0.052, 0.05, 0.035, hairM); pel(hc, 0, -0.044, 0.087, 0.03, 0.01, 0.014, hairM); }
+  if (p.mustache === 'walrus') pel(hc, 0, -0.045, hd.rz * 0.92, 0.032, 0.011, 0.015, hairM);
+  if (p.hat) paxHat(hc, p);
+}
+
+// ---------- 身體和衣服 ----------
+// 衣服花紋（和服的櫻花、麻葉，女學生的矢絣）
+function paxPattern(c, w, h, p) {
+  c.fillStyle = p.c1; c.fillRect(0, 0, w, h);
+  if (p.pat === 'yagasuri') {
+    // 矢絣：一直排一直排的箭羽，兩種顏色交錯
+    const cw = 16, ch = 14;
+    for (let col = 0; col * cw < w; col++) for (let row = -1; row * ch < h + ch; row++) {
+      if ((row + col) & 1) continue;
+      const x = col * cw, y = row * ch + (col & 1) * ch / 2;
+      c.fillStyle = p.c2; c.beginPath(); c.moveTo(x, y); c.lineTo(x + cw / 2, y + ch / 2); c.lineTo(x + cw, y); c.lineTo(x + cw, y + ch / 2); c.lineTo(x + cw / 2, y + ch); c.lineTo(x, y + ch / 2); c.closePath(); c.fill();
+    }
+  } else if (p.pat === 'asanoha') {
+    // 麻葉：六角星的格子
+    c.strokeStyle = rgbaOf(p.c2, 0.45); c.lineWidth = 1;
+    const s = 14;
+    for (let j = 0; j * s * 0.866 < h + s; j++) for (let x = (j & 1) * s / 2; x < w + s; x += s) for (let k = 0; k < 6; k++) {
+      const a = k * Math.PI / 3, y = j * s * 0.866;
+      c.beginPath(); c.moveTo(x, y); c.lineTo(x + Math.cos(a) * s / 2, y + Math.sin(a) * s / 2); c.stroke();
+    }
+  } else {
+    // 散落的櫻花
+    for (let i = 0; i < w * h / 450; i++) {
+      const x = rnd() * w, y = rnd() * h, r = 3 + rnd() * 3.5, rot = rnd() * 7;
+      c.fillStyle = rgbaOf(p.c2, 0.75);
+      for (let k = 0; k < 5; k++) { const a = rot + k * 1.2566; c.beginPath(); c.ellipse(x + Math.cos(a) * r * 0.55, y + Math.sin(a) * r * 0.55, r * 0.5, r * 0.32, a, 0, 7); c.fill(); }
+      c.fillStyle = rgbaOf(p.c4 || '#c9a24a', 0.8); c.beginPath(); c.arc(x, y, r * 0.18, 0, 7); c.fill();
+    }
+  }
+  for (let i = 0; i < w * h / 200; i++) { c.fillStyle = 'rgba(0,0,0,.06)'; c.fillRect(rnd() * w, rnd() * h, 2, 2); }
+}
+// 上半身的貼圖：圍著身體一圈（中間是正面，左右兩邊是背後），上面是脖子、下面是屁股；位置用公分（x 從正中間往右、y 從脖子往下）
+function paintPaxTorso(c, p) {
+  const W = 256, H = 192, TH = p.torsoH * 100;
+  const X = cm => W / 2 + Math.asin(clamp(cm / 16, -1, 1)) * W / (2 * Math.PI), Y = cm => cm / TH * H;
+  const path = pts => { c.beginPath(); pts.forEach(([x, y], i) => (i ? c.lineTo(X(x), Y(y)) : c.moveTo(X(x), Y(y)))); };
+  const poly = (pts, col) => { c.fillStyle = col; path(pts); c.closePath(); c.fill(); };
+  const line = (pts, col, w) => { c.strokeStyle = col; c.lineWidth = w; c.lineCap = 'round'; path(pts); c.stroke(); };
+  const button = (x, y, r, col) => { c.fillStyle = col; c.beginPath(); c.arc(X(x), Y(y), r, 0, 7); c.fill(); c.fillStyle = 'rgba(255,255,255,.25)'; c.beginPath(); c.arc(X(x) - r * 0.3, Y(y) - r * 0.3, r * 0.4, 0, 7); c.fill(); };
+  const band = (y0, y1, col) => { c.fillStyle = col; c.fillRect(0, Y(y0), W, Y(y1) - Y(y0)); };
+  const fabric = (col, n = 600, k = 0.06) => { c.fillStyle = col; c.fillRect(0, 0, W, H); for (let i = 0; i < n; i++) { c.fillStyle = rnd() < 0.5 ? `rgba(255,255,255,${k})` : `rgba(0,0,0,${k * 1.5})`; c.fillRect(rnd() * W, rnd() * H, 1 + rnd() * 2, 1 + rnd() * 2); } };
+  const dk = (col, k) => mixHex(col, '#000000', k), lt = (col, k) => mixHex(col, '#ffffff', k);
+  switch (p.top) {
+    case 'suit': {   // 西裝外套、背心、白襯衫和領帶、口袋巾
+      fabric(p.c1);
+      for (let x = 0; x < W; x += 7) { c.fillStyle = 'rgba(255,255,255,.05)'; c.fillRect(x, 0, 1, H); }
+      const vest = dk(p.c1, 0.18);
+      poly([[-7.5, 0], [7.5, 0], [0, 32]], vest);
+      poly([[-4.5, 0], [4.5, 0], [0, 17]], '#e6e2d8');
+      poly([[-1.1, 1], [1.1, 1], [1.6, 17], [-1.6, 17]], p.c2);
+      poly([[-1.4, 0], [1.4, 0], [0.9, 3], [-0.9, 3]], dk(p.c2, 0.25));
+      for (const y of [20, 25, 30]) button(0, y, 1.3, dk(vest, 0.45));
+      for (const s of [-1, 1]) { line([[s * 7.5, 0], [0, 34]], dk(p.c1, 0.5), 2); line([[s * 8.5, 0], [s * 12.5, 10], [s * 9.5, 9.5], [s * 2.5, 31]], dk(p.c1, 0.35), 1.2); }
+      line([[0, 34], [0, 50]], dk(p.c1, 0.45), 1.5);
+      button(0.5, 41, 2.2, dk(p.c1, 0.5));
+      poly([[0, 50], [-7, 61], [7, 61]], dk(p.legCol, 0.05));
+      line([[7, 17], [12, 17]], dk(p.c1, 0.4), 1.2); poly([[8.3, 17], [10.8, 17], [9.6, 14.2]], '#e8e4da');
+      for (const s of [-1, 1]) line([[s * 7, 48], [s * 13, 48]], dk(p.c1, 0.4), 1.2);
+      break;
+    }
+    case 'coat': {   // 大衣：V 領露出裡面的洋裝、垂到胸口的長珍珠項鍊、雙排釦、腰帶
+      fabric(p.c1, 900, 0.07);
+      poly([[-5.5, 0], [5.5, 0], [0, 15]], p.c2);
+      line([[3.5, 15], [3.5, 58]], dk(p.c1, 0.35), 1.5);
+      for (const y of [22, 32, 46]) for (const x of [-4, 7]) button(x, y, 2.6, dk(p.c1, 0.45));
+      band(36, 40, dk(p.c1, 0.18));
+      c.strokeStyle = '#a88a3a'; c.lineWidth = 1.2; c.strokeRect(X(-1.8), Y(35.6), X(1.8) - X(-1.8), Y(4.8));
+      for (let i = 0; i <= 26; i++) { const t = i / 26; button(-5 + 10 * t, 1 + 24 * Math.pow(Math.max(0, 1 - (2 * t - 1) ** 2), 0.7), 1.5, '#e8e2d4'); }
+      break;
+    }
+    case 'cardigan': {   // 開襟毛衣：毛線的直紋、小圓領的襯衫、胸針
+      fabric(p.c1, 300, 0.05);
+      for (let x = 0; x < W; x += 3) { c.fillStyle = (x / 3) % 2 ? 'rgba(0,0,0,.12)' : 'rgba(255,255,255,.06)'; c.fillRect(x, 0, 1.5, H); }
+      poly([[-7, 0], [7, 0], [1, 24]], p.c2);
+      for (const s of [-1, 1]) { c.fillStyle = '#ece6da'; c.beginPath(); c.ellipse(X(s * 3.2), Y(2), 9, 6, s * 0.4, 0, 7); c.fill(); }
+      button(0, 4.5, 2.2, '#b8963a'); button(0, 4.5, 1.1, '#4a1a2a');
+      line([[1, 24], [1, 58]], dk(p.c1, 0.4), 1.5);
+      for (let y = 28; y < 56; y += 8) button(2.2, y, 1.6, dk(p.c1, 0.5));
+      break;
+    }
+    case 'gakuran': {   // 學生服：黑色、一排五顆金扣子、胸前口袋
+      fabric(p.c1, 300, 0.04);
+      const sg = c.createLinearGradient(X(-14), 0, X(14), 0); sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(0.5, 'rgba(255,255,255,.06)'); sg.addColorStop(1, 'rgba(255,255,255,0)');
+      c.fillStyle = sg; c.fillRect(0, 0, W, H);
+      line([[0.4, 0], [0.4, 60]], 'rgba(0,0,0,.6)', 1.2);
+      for (let i = 0; i < 5; i++) { const y = 4 + i * 11; button(0, y, 2.5, '#a8862e'); c.strokeStyle = '#5a4416'; c.lineWidth = 0.8; c.beginPath(); c.arc(X(0), Y(y), 2.5, 0, 7); c.stroke(); }
+      line([[7, 12], [12, 12]], 'rgba(255,255,255,.12)', 1.2);
+      break;
+    }
+    case 'kimono': case 'hakama': {
+      paxPattern(c, W, H, p);
+      // 衣領：左前（從你這邊看，右肩那片疊在上面，斜斜往左下），露出白色的半襟
+      const eri = dk(p.c1, 0.35), han = '#ece6da';
+      poly([[-8, 0], [8, 0], [0.5, 13]], han);
+      line([[-8, 0], [0.5, 13]], eri, 5); line([[8, 0], [-7, 32]], eri, 5);
+      line([[-6.4, 0], [0.4, 10.5]], han, 1.6); line([[6.4, 0], [-0.4, 10.5]], han, 1.6);
+      if (p.top === 'kimono') {
+        // 寬腰帶、帶揚、帶締
+        band(25, 41, p.c3);
+        for (let x = 0; x < W; x += 10) { c.fillStyle = rgbaOf(lt(p.c3, 0.35), 0.3); c.fillRect(x, Y(25), 4, Y(16)); }
+        band(24, 25.6, lt(p.c4, 0.3)); band(32.6, 33.6, p.c4);
+        c.fillStyle = p.c4; c.beginPath(); c.ellipse(X(0), Y(33.1), 4, 2.5, 0, 0, 7); c.fill();
+      } else {
+        // 袴：從胸口下面開始，一條一條的褶子
+        band(24, 62, p.c3);
+        for (let x = 0; x < W; x += 9) { c.fillStyle = 'rgba(0,0,0,.18)'; c.fillRect(x, Y(27), 1.5, H); }
+        band(24, 26, dk(p.c3, 0.25));
+      }
+      break;
+    }
+    case 'vest': case 'vestW': {   // 背心：V 領露出襯衫；胖商人的背心有花紋、領帶和懷錶鏈
+      const w = p.top === 'vestW';
+      fabric(p.c1, 300, 0.05);
+      if (p.stripe) for (let x = 0; x < W; x += 5) { c.fillStyle = rgbaOf(dk(p.c1, 0.3), 0.4); c.fillRect(x, 0, 1, H); }
+      c.save(); c.beginPath(); c.rect(0, 0, W, H);
+      c.moveTo(X(-6.5), 0); c.lineTo(X(6.5), 0); c.lineTo(X(0), Y(w ? 20 : 22)); c.closePath();
+      for (const s of [-1, 1]) { const cx = W / 2 + s * W / 4; c.moveTo(cx + 13, Y(5)); c.ellipse(cx, Y(5), 13, Y(13), 0, 0, 7); }   // 袖口露出襯衫
+      c.clip('evenodd'); fabric(p.c2, 400, 0.05);
+      if (w) for (let y = 0; y < H; y += 8) for (let x = (y / 8 % 2) * 4; x < W; x += 8) { c.fillStyle = rgbaOf(lt(p.c2, 0.3), 0.18); c.fillRect(x, y, 2, 2); }
+      c.restore();
+      if (w) { poly([[-1, 1], [1, 1], [1.5, 20], [-1.5, 20]], p.c3); poly([[-1.3, 0], [1.3, 0], [0.9, 3], [-0.9, 3]], dk(p.c3, 0.25)); }
+      else { for (const s of [-1, 1]) poly([[s * 6.5, 0], [s * 1, 0], [s * 4, 6]], lt(p.c1, 0.12)); for (const y of [7, 13, 19]) button(0, y, 1, '#e8e4da'); }
+      for (let y = w ? 23 : 25; y < 56; y += 7) button(0.3, y, 1.5, dk(p.c2, 0.5));
+      for (const s of [-1, 1]) line([[s * 6, 36], [s * 11, 36]], dk(p.c2, 0.45), 1);
+      if (w) { c.strokeStyle = '#c9a24a'; c.lineWidth = 1.2; c.setLineDash([2, 1.5]); path([[-9, 36], [-5, 41], [0, 32]]); c.stroke(); c.setLineDash([]); }
+      break;
+    }
+    case 'tweed': {   // 粗呢大衣：人字紋、V 領露出襯衫、大大的扣子
+      fabric(p.c1, 300, 0.05);
+      for (let y = 0; y < H; y += 4) for (let x = 0; x < W; x += 6) { c.strokeStyle = (x / 6) % 2 ? 'rgba(255,255,255,.1)' : 'rgba(0,0,0,.14)'; c.lineWidth = 1; c.beginPath(); c.moveTo(x, y); c.lineTo(x + 3, y + ((x / 6) % 2 ? 4 : -4) + 4); c.stroke(); }
+      poly([[-8, 0], [8, 0], [0, 24]], '#d8d2c4');
+      poly([[-1, 1], [1, 1], [1.3, 22], [-1.3, 22]], dk(p.c1, 0.4));
+      for (const s of [-1, 1]) { line([[s * 8, 0], [0, 26]], dk(p.c1, 0.5), 2); line([[s * 9, 0], [s * 13, 11], [s * 3, 28]], dk(p.c1, 0.35), 1.2); }
+      for (const y of [32, 42, 52]) button(1.2, y, 2.6, '#3a2a1c');
+      break;
+    }
+    case 'uniform': {   // 車掌制服：兩排金扣子、胸前的徽章、口袋
+      fabric(p.c1, 300, 0.04);
+      line([[0, 0], [0, 60]], 'rgba(0,0,0,.5)', 1.2);
+      for (const y of [8, 20, 32, 44]) for (const x of [-5, 5]) button(x, y, 2.2, '#c9a24a');
+      c.fillStyle = '#c9a24a'; c.fillRect(X(9), Y(9), X(12.5) - X(9), Y(2.5));
+      for (const s of [-1, 1]) line([[s * 7.5, 14], [s * 13, 14]], 'rgba(255,255,255,.12)', 1.2);
+      break;
+    }
+  }
+}
+// 身體：屁股、大腿、小腿、鞋子、上半身（往前傾 lean）、肩膀、兩隻手臂和手、衣領、手上拿的東西；回傳脖子底下的位置（頭裝在那裡）
+function paxBody(B, p, S, o) {
+  const f = p.sex === 'f', heavy = p.build === 'h', TH = p.torsoH;
+  const lean = (p.hunch || 0) + (o.table ? 0.08 : 0.02);
+  const P0 = V3(0, S + 0.05, -0.09);
+  const L = (x, y, z) => V3(x, y * Math.cos(lean) - z * Math.sin(lean), y * Math.sin(lean) + z * Math.cos(lean)).add(P0);
+  const skin = pcol(p.deadSkin, 'skin');
+  if (!p.patMat && (p.top === 'kimono' || p.top === 'hakama')) {
+    const t = canvasTex(128, 128, c => paxPattern(c, 128, 128, p));
+    p.patMat = paxTexMat([t]);
+  }
+  const legM = p.legs === 'kimono' ? p.patMat : pcol(p.legCol), sleeveM = p.patMat || pcol(p.sleeve), shoeM = pcol(p.shoeCol);
+  // 上半身：繞著中心轉出來的形狀（壓扁成橢圓），衣服畫在貼圖上
+  const prof = heavy ? [0.19, 0.205, 0.215, 0.21, 0.2, 0.196, 0.195, 0.168, 0.072] : f ? [0.172, 0.16, 0.14, 0.14, 0.152, 0.16, 0.162, 0.14, 0.058] : [0.165, 0.16, 0.152, 0.155, 0.168, 0.182, 0.188, 0.165, 0.07];
+  const lg = new THREE.LatheGeometry(prof.map((r, j) => new THREE.Vector2(r, TH * j / 8)), 22, Math.PI, Math.PI * 2);
+  const torsoTex = canvasTex(256, 192, c => paintPaxTorso(c, p));
+  const torso = pmesh(B, lg, paxTexMat([torsoTex]), P0.x, P0.y, P0.z, 1, 1, heavy ? 0.82 : f ? 0.66 : 0.62, lean);
+  torso.userData.ownGeo = true;
+  // 屁股和腿
+  const skirt = p.legs !== 'trousers', long = p.legs === 'long' || p.legs === 'kimono' || p.legs === 'hakama';
+  const kx = heavy ? 0.13 : f ? 0.075 : 0.11, tr = heavy ? 0.08 : p.legs === 'hakama' ? 0.088 : skirt ? 0.078 : 0.068;
+  pel(B, 0, S + 0.1, -0.08, heavy ? 0.19 : f ? 0.178 : 0.165, 0.1, 0.15, legM);
+  const kneeY = S + 0.075, kz = 0.36, ankY = 0.085, shinL = 0.42;
+  const az = kz + Math.sqrt(Math.max(0, shinL * shinL - (kneeY - ankY) ** 2));
+  for (const s of [-1, 1]) {
+    const knee = V3(s * kx, kneeY, kz), ank = V3(s * (kx + 0.005), ankY, az);
+    pcap(B, V3(s * 0.09, S + 0.085, -0.04), knee, tr, legM);
+    const sockM = p.legs === 'skirt' ? pcol(mixHex(p.skin, '#2a2420', 0.4)) : legM;   // 女郎的絲襪
+    pcap(B, knee, ank, long ? 0.07 : p.legs === 'skirt' ? 0.042 : 0.048, sockM);
+    // 鞋子
+    if (p.shoe === 'zori') { pel(B, ank.x, 0.045, ank.z + 0.05, 0.04, 0.035, 0.1, pcol('#ece8e0')); box(B, ank.x - 0.045, ank.x + 0.045, 0, 0.016, ank.z - 0.06, ank.z + 0.17, pcol('#c8b48a')); }
+    else if (p.shoe === 'heel') { pel(B, ank.x, 0.05, ank.z + 0.05, 0.036, 0.032, 0.1, shoeM).rotation.x = -0.25; box(B, ank.x - 0.012, ank.x + 0.012, 0, 0.05, ank.z - 0.06, ank.z - 0.035, shoeM); }
+    else {
+      pel(B, ank.x, 0.04, ank.z + 0.06, 0.048, 0.04, 0.12, shoeM);
+      if (p.shoe === 'boot') cyl(B, 0.05, 0.052, 0.16, ank.x, 0.02, ank.z, shoeM, 12);
+    }
+  }
+  if (skirt) {
+    // 裙子：兩腿之間的大腿上蓋著布，從膝蓋垂下來
+    box(B, -kx, kx, S + 0.03, S + 0.15, -0.05, kz + 0.02, legM);
+    box(B, -kx - 0.07, kx + 0.07, long ? 0.06 : kneeY - 0.16, kneeY + 0.05, kz + 0.01, kz + 0.07, legM);
+    if (long) for (const s of [-1, 1]) box(B, s * (kx + 0.07) - 0.015, s * (kx + 0.07) + 0.015, 0.06, kneeY + 0.03, -0.02, kz + 0.07, legM);
+  }
+  // 肩膀、手臂、手
+  const shX = heavy ? 0.195 : f ? 0.155 : 0.18, ar = heavy ? 0.055 : f ? 0.042 : 0.047, fr = ar * 0.85;
+  const T = o.table || 0, hs = {
+    lap: [[-0.13, S + 0.15, 0.2], [0.13, S + 0.15, 0.2]],
+    folded: [[-0.035, S + 0.17, 0.15], [0.03, S + 0.185, 0.16]],
+    kerchief: [[-0.035, S + 0.17, 0.15], [0.03, S + 0.185, 0.16]],
+    bag: [[-0.07, S + 0.3, 0.17], [0.07, S + 0.3, 0.17]],
+    book: [[-0.09, S + 0.2, 0.2], [0.09, S + 0.2, 0.21]],
+    belly: [[-0.06, S + 0.29, 0.14], [0.06, S + 0.29, 0.14]],
+    cane: [[-0.02, S + 0.27, 0.38], [0.02, S + 0.31, 0.375]],
+    paper: [[-0.26, S + 0.32, 0.25], [0.26, S + 0.32, 0.25]],
+    table: [[-0.12, T + 0.03, 0.31], [0.12, T + 0.03, 0.32]],
+  }[p.hands];
+  const handM = p.glove ? pcol(p.glove) : skin;
+  for (const i of [0, 1]) {
+    const s = i ? 1 : -1, sh = L(s * shX, TH * 0.82, 0), hand = V3(...hs[i]);
+    pel(B, sh.x, sh.y + 0.005, sh.z, ar * 1.12, ar * 1.05, ar * 1.12, sleeveM);   // 肩膀
+    const el = paxElbow(sh, hand, 0.28, 0.27, V3(s * 0.55, -0.45, -0.7)), dir = hand.clone().sub(el).normalize(), wr = hand.clone().addScaledVector(dir, -0.06);
+    pcap(B, sh, el, ar, sleeveM);
+    if (p.rolled) { pcap(B, el, wr, fr * 0.9, skin); pcap(B, el.clone().addScaledVector(dir, -0.01), el.clone().addScaledVector(dir, 0.04), ar * 1.05, sleeveM); }
+    else pcap(B, el, wr, fr, sleeveM);
+    if (p.cuff) pcap(B, wr.clone().addScaledVector(dir, -0.035), wr.clone().addScaledVector(dir, -0.005), fr * 1.02, pcol(p.cuff));
+    if (p.patMat) {
+      // 和服的袖子：從手臂垂下來的一大片
+      const mid = el.clone().add(wr).multiplyScalar(0.5), hd2 = V3(dir.x, 0, dir.z).normalize(), len = el.distanceTo(wr);
+      const m = pmesh(B, BOX, p.patMat, mid.x, mid.y - 0.1, mid.z, len * 0.95, 0.22, 0.03);
+      m.rotation.y = Math.atan2(hd2.x, hd2.z) + Math.PI / 2;
+    }
+    // 手：手掌平平的
+    const hdir = V3(dir.x, p.hands === 'paper' ? dir.y : dir.y * 0.35, dir.z).normalize();
+    const hm = pel(B, hand.x, hand.y, hand.z, f ? 0.036 : 0.04, 0.02, f ? 0.075 : 0.085, handM, 10);
+    hm.quaternion.setFromUnitVectors(Z_AXIS, hdir);
+    if (p.hands === 'paper') hm.rotateZ(s * 1.3);
+  }
+  // 衣領、圍巾、披肩、毛領
+  const N = L(0, TH - 0.035, 0.005);
+  switch (p.collar) {
+    case 'shirt': pmesh(B, P_RING(), pcol('#e8e4da'), N.x, N.y - 0.005, N.z + 0.005, 0.056, 0.042, 0.054, lean); break;
+    case 'stand':
+      pmesh(B, P_RING(), pcol(p.collarCol), N.x, N.y + 0.005, N.z, 0.058, 0.05, 0.056, lean);
+      pmesh(B, P_RING(), pcol(p.collarTrim), N.x, N.y + 0.031, N.z, 0.0585, 0.006, 0.0565, lean);
+      break;
+    case 'fur': {
+      const fm = pcol(p.collarCol);
+      pmesh(B, geo('paxTorus', () => new THREE.TorusGeometry(1, 0.38, 8, 20)), fm, N.x, N.y - 0.02, N.z + 0.01, 0.095, 0.095, 0.08, Math.PI / 2 + lean);
+      for (let k = 0; k < 10; k++) { const a = k / 10 * Math.PI * 2; pel(B, N.x + Math.sin(a) * 0.1, N.y - 0.015 + rnd() * 0.02, N.z + 0.01 + Math.cos(a) * 0.085, 0.035, 0.03, 0.035, fm, 8); }
+      break;
+    }
+    case 'scarf': {
+      const sm = pcol(p.collarCol);
+      pmesh(B, geo('paxTorus', () => new THREE.TorusGeometry(1, 0.38, 8, 20)), sm, N.x, N.y - 0.005, N.z + 0.005, 0.075, 0.075, 0.068, Math.PI / 2 + lean);
+      for (const s of [-1, 1]) pmesh(B, BOX, sm, N.x + s * 0.035, N.y - 0.13, N.z + 0.1 + lean * 0.3, 0.07, 0.22, 0.02, -0.12 + lean, 0, s * 0.08);
+      break;
+    }
+    case 'shawl': {
+      // 披肩：從脖子罩到手臂上
+      const sg = new THREE.LatheGeometry([[0.2, 0.36], [0.205, 0.43], [0.2, 0.49], [0.17, 0.545], [0.11, 0.58], [0.065, 0.6]].map(([r, y]) => new THREE.Vector2(r, y * TH / 0.6)), 22, Math.PI, Math.PI * 2);
+      const m = pmesh(B, sg, pcol(p.collarCol), P0.x, P0.y, P0.z, 1, 1, 0.7, lean); m.userData.ownGeo = true;
+      break;
+    }
+  }
+  // 手上拿的東西
+  switch (p.hands) {
+    case 'bag': box(B, -0.11, 0.11, S + 0.14, S + 0.28, 0.12, 0.2, pcol(p.bagCol)); box(B, -0.03, 0.03, S + 0.28, S + 0.295, 0.15, 0.17, pcol('#b8923a')); break;
+    case 'book': box(B, -0.1, 0.1, S + 0.15, S + 0.18, 0.07, 0.32, pcol(p.bookCol)); box(B, -0.095, 0.095, S + 0.155, S + 0.175, 0.075, 0.322, pcol('#d8cfb8')); break;
+    case 'kerchief': box(B, -0.03, 0.03, S + 0.165, S + 0.19, 0.12, 0.2, pcol('#ece6da')); break;
+    case 'cane': limb(B, [0, 0, 0.5], [0, S + 0.26, 0.385], 0.012, pcol('#2a1a10')); pel(B, 0, S + 0.27, 0.395, 0.022, 0.016, 0.03, pcol('#3a2414')); break;
+    case 'paper': {
+      // 攤開的報紙：兩頁往你這邊折成 V 字，兩手捏著下面的角
+      const pm = paxPaperMat(), fold = new THREE.Group(); fold.position.set(0, S + 0.44, 0.35); B.add(fold);
+      for (const s of [-1, 1]) {
+        const pg = new THREE.Group(); pg.rotation.y = s * 0.4; fold.add(pg);
+        pmesh(pg, geo('paxPage' + s, () => { const g = new THREE.PlaneGeometry(0.3, 0.42), U = g.attributes.uv; for (let i = 0; i < U.count; i++) U.setX(i, U.getX(i) * 0.5 + (s > 0 ? 0.5 : 0)); return g; }), pm, s * 0.15, 0, 0);
+      }
+      break;
+    }
+  }
+  return { N, lean };
+}
+// 坐著的乘客：x, z 是背靠椅背往前 0.2 的地方，face 是面向的角度，seat 是座面高度；o.table 是桌面高度（手放在桌上）、o.prefer 是比較適合的種類
+function addPassenger(g, r, x, z, face, seat, o = {}) {
+  const p = paxSpec(paxNextKind(o.prefer));
+  if (o.table && p.hands !== 'paper' && (rnd() < 0.6 || ['cane', 'bag', 'book'].includes(p.hands))) p.hands = 'table';
+  const pg = new THREE.Group(); pg.position.set(x, 0, z); pg.rotation.y = face; pg.scale.setScalar(p.sc); g.add(pg);
+  const px = { kind: p.kind, p, g: pg, skins: [], tex: {}, state: 'dead', deadPose: p.deadPose, alivePose: p.alivePose };
+  const B = new THREE.Group(); pg.add(B);
+  const { N, lean } = paxBody(B, p, seat / p.sc, o);
+  // 頭：脖子底下 → 轉頭（yaw）→ 低頭、歪頭（pose）
+  px.piv = new THREE.Group(); px.piv.position.copy(N); px.piv.rotation.x = lean; pg.add(px.piv);
+  px.yaw = new THREE.Group(); px.piv.add(px.yaw);
+  px.pose = new THREE.Group(); px.yaw.add(px.pose);
+  paxHead(px.pose, p, px);
+  px.pose.rotation.set(p.deadPose.x, p.deadPose.y, p.deadPose.z);
+  paxMerge(B, px.skins); paxMerge(px.pose, px.skins);
+  (r.pax = r.pax || []).push(px);
+}
+// 躺著的乘客（臥鋪的下鋪）：頭枕在枕頭上、毯子蓋到胸口、兩手交疊放在毯子上；u 是枕頭中間的位置，身體往 u 變大的方向躺
+function addLyingPassenger(g, r, f, side, u, y) {
+  const p = paxSpec(paxNextKind()); p.hat = null;
+  const [hx, hz] = fpos(f, side, u, f.h / 2), [tx, tz] = fpos(f, side, u + 1, f.h / 2);
+  const pg = new THREE.Group(); pg.position.set(hx, y, hz); pg.rotation.y = Math.atan2(tx - hx, tz - hz); g.add(pg);
+  const px = { kind: p.kind, p, g: pg, skins: [], tex: {}, state: 'dead', deadPose: { x: 0, y: (rnd() < 0.5 ? -1 : 1) * 0.35, z: 0 }, alivePose: { x: 0, y: 0, z: 0 } };
+  const B = new THREE.Group(); pg.add(B);
+  const blanket = pcol(pickR(['#8a7a62', '#6a7282', '#7a6a72'])), night = pcol(pickR(['#d8d0c0', '#c0c8d0', '#d0c0c0'])), skin = pcol(p.deadSkin, 'skin');
+  pel(B, 0, 0.05, 0.34, 0.2, 0.07, 0.12, night);              // 肩膀（睡衣）
+  pel(B, 0, 0.05, 0.98, 0.24, 0.12, 0.72, blanket);           // 蓋著毯子的身體
+  pel(B, 0, 0.1, 0.62, 0.22, 0.08, 0.2, blanket);             // 胸口
+  for (const s of [-1, 1]) pel(B, s * 0.08, 0.1, 1.58, 0.06, 0.07, 0.07, blanket);   // 腳尖頂起來的地方
+  limb(B, [-0.24, 0.1, 0.42], [0.24, 0.1, 0.42], 0.03, pcol('#d6cdb9'));          // 反折的被單
+  for (const s of [-1, 1]) {
+    const el = V3(s * 0.2, 0.12, 0.72), hand = V3(s * 0.035, 0.2, 0.52), dir = hand.clone().sub(el).normalize();
+    pcap(B, el, hand.clone().addScaledVector(dir, -0.06), 0.04, night);
+    pel(B, hand.x, hand.y, hand.z, 0.04, 0.02, 0.085, skin, 10).quaternion.setFromUnitVectors(Z_AXIS, V3(dir.x, 0, dir.z).normalize());
+  }
+  // 頭：臉朝上（轉頭的時候繞著頭頂到下巴那條軸，往你這邊轉過來）
+  px.piv = new THREE.Group(); px.piv.position.set(0, 0.15, 0.165); px.piv.rotation.x = -Math.PI / 2; pg.add(px.piv);
+  px.yaw = new THREE.Group(); px.piv.add(px.yaw);
+  px.pose = new THREE.Group(); px.yaw.add(px.pose);
+  paxHead(px.pose, p, px);
+  px.pose.rotation.set(px.deadPose.x, px.deadPose.y, px.deadPose.z);
+  paxMerge(B, px.skins); paxMerge(px.pose, px.skins);
+  (r.pax = r.pax || []).push(px);
+}
+// 換成活著／死了／睜眼：臉的貼圖和皮膚的顏色
+function paxState(px, st) {
+  px.state = st;
+  px.headMat.map = paxFaceTex(px, st);
+  _pc.set(st === 'alive' ? px.p.skin : px.p.deadSkin);
+  for (const s of px.skins) {
+    const a = s.attr.array;
+    for (let k = 0; k < s.r.length; k += 2) for (let i = s.r[k]; i < s.r[k] + s.r[k + 1]; i++) { a[i * 3] = _pc.r; a[i * 3 + 1] = _pc.g; a[i * 3 + 2] = _pc.b; }
+    s.attr.needsUpdate = true;
+  }
+}
+// 每一幀：過場動畫時活著；「乘客轉頭」事件讓某個乘客的頭慢慢抬起來轉向你、睜開眼睛
+function updatePassengers() {
+  const alive = !!(mode === 'cutscene' && CUT && CUT.kind === 2 && CUT.alive);
+  const pt = G.ev && G.ev.paxTurn;
+  for (const f of FURN) {
+    const r = furn3d[f.id];
+    if (!r || !r.pax) continue;
+    for (const px of r.pax) {
+      const turn = !alive && pt && pt.id === f.id && px === r.pax[0] ? clamp(Math.min(pt.t / 3, (16 - pt.t) / 2), 0, 1) : 0;
+      const st = alive ? 'alive' : turn > 0.3 ? 'stare' : 'dead';
+      if (st !== px.state) paxState(px, st);
+      if (turn > 0) {
+        camera.getWorldPosition(_pw); px.piv.worldToLocal(_pw);
+        px.yaw.rotation.y = clamp(Math.atan2(_pw.x, _pw.z), -1.4, 1.4) * turn;
+      } else px.yaw.rotation.y = 0;
+      const ps = alive ? px.alivePose : px.deadPose, k = 1 - turn;
+      px.pose.rotation.set(ps.x * k, ps.y * k, ps.z * k);
+    }
+  }
+}
+// 試玩測試用：有幾個乘客、幾種、各自坐在哪裡（家具、位置、面向）
+function paxStats() {
+  const list = [];
+  for (const k in furn3d) for (const px of furn3d[k].pax || []) { px.g.getWorldPosition(_pw); list.push({ kind: px.kind, id: k, x: _pw.x, y: _pw.z, face: px.g.rotation.y + (px.g.parent ? px.g.parent.rotation.y : 0), state: px.state }); }
+  return { n: list.length, kinds: [...new Set(list.map(p => p.kind))], list };
 }
 // 留聲機的黃銅喇叭
 function gramHorn(g, x, y, z, brass) {
@@ -4089,7 +4912,8 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
   if (!isW3()) return false;
   const walnut = lm('#3b2416'), walnut2 = lm('#5a3a24'), brass = lm('#8a6a2a'), brass2 = lm('#5e4a1e'), iron = lm('#3a3a3e'), ivory = lm('#d8cfbd');
   const leather = lm('#5a3a22'), leather2 = lm('#2a2a2e'), glassM = ownLM('#cfe0e8', { transparent: true, opacity: 0.35, depthWrite: false });
-  const paxOn = (u, v, y) => { const [x, z] = fpos(f, side, u, v); addPassenger(g, r, x, z, faceOf(side), y); };
+  // 在正面座標 (u, v) 放一個坐著的乘客（v 是背靠椅背往前 0.2 的地方），seat 是座面高度
+  const paxOn = (u, v, seat, o) => { const [x, z] = fpos(f, side, u, v); addPassenger(g, r, x, z, faceOf(side), seat, o); };
   switch (f.type) {
     case 'rug': {
       if (!f.deco) return false;
@@ -4130,13 +4954,13 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
       gramHorn(g, 0.5, 0.45, 0.5, brass);
       r.top = 0.95;
       return true;
-    case 'seat3': // 絨布長椅：胡桃木框、磨破的暗紅絨布，上面坐著蓋白布的乘客
+    case 'seat3': // 絨布長椅：胡桃木框、磨破的暗紅絨布，上面坐著死去的乘客
       box(g, 0.05, W - 0.05, 0, 0.18, 0.05, D - 0.05, walnut);
       fb(g, f, side, 0.08, len - 0.08, 0.18, 0.48, 0.08, D - 0.08, velvet());
       fb(g, f, side, 0.08, len - 0.08, 0.48, 1.0, D - 0.3, D - 0.08, velvet());
       fb(g, f, side, 0.04, len - 0.04, 1.0, 1.06, D - 0.32, D - 0.06, walnut2, false);
       for (const u of [0.12, len - 0.12]) fb(g, f, side, u - 0.08, u + 0.08, 0.48, 0.72, 0.1, D - 0.1, walnut2);
-      if (f.pax) { paxOn(len * 0.3, 0.5, 0.05); if (len >= 4) paxOn(len * 0.72, 0.5, 0.05); }
+      if (f.pax) { const o = { prefer: ['gent', 'lady', 'merchant', 'kimono', 'oldman', 'girl'] }; paxOn(len * 0.3, 0.5, 0.48, o); if (len >= 4) paxOn(len * 0.72, 0.5, 0.48, o); }
       r.top = 1.06;
       return true;
     case 'table3': { // 小圓桌：胡桃木桌面、黃銅底座，桌上有菸灰缸和倒了的酒杯
@@ -4164,10 +4988,10 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
       else { const s = Math.min(W, D); trunk(0.1, 0.15, s - 0.2, s - 0.3, 0, 0.45, leather); if (Math.max(W, D) >= 2) trunk(W >= 2 ? 1.1 : 0.2, W >= 2 ? 0.2 : 1.1, 0.7, 0.6, 0, 0.36, leather2); r.top = 0.5; }
       return true;
     }
-    case 'passenger': // 扶手椅上坐著一個蓋白布的乘客
+    case 'passenger': // 扶手椅上坐著一個死去的乘客
       box(g, 0.1, 0.9, 0, 0.42, 0.1, 0.9, velvet()); fb(g, f, side, 0.1, 0.9, 0.42, 1.0, 0.7, 0.9, velvet());
       for (const u of [0.1, 0.9]) fb(g, f, side, u - 0.08, u + 0.08, 0.42, 0.66, 0.1, 0.9, walnut2);
-      paxOn(0.5, 0.45, 0.05);
+      paxOn(0.5, 0.5, 0.42, { prefer: ['gent', 'lady', 'merchant', 'oldman', 'kimono'] });
       r.top = 1.0;
       return true;
     case 'icebox': // 冰櫃：胡桃木箱子、黃銅鉸鏈
@@ -4177,15 +5001,28 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
       for (const y of [0.2, 1.1]) fb(g, f, side, 0.15, len - 0.15, y, y + 0.05, -0.01, 0.01, brass2, false);
       r.top = 1.3;
       return true;
-    case 'dining': // 餐桌：白桌布、銀器、燭台，兩端坐著蓋白布的乘客
-      box(g, 0.1, W - 0.1, 0.72, 0.76, 0.15, D - 0.15, walnut2);
-      box(g, 0.08, W - 0.08, 0.76, 0.775, 0.12, D - 0.12, ivory, false);
-      for (const [x, z] of [[0.3, 0.3], [W - 0.3, 0.3], [0.3, D - 0.3], [W - 0.3, D - 0.3]]) box(g, x - 0.03, x + 0.03, 0, 0.72, z - 0.03, z + 0.03, walnut2);
-      cyl(g, 0.03, 0.05, 0.22, W / 2, 0.775, D / 2, brass, 8); cyl(g, 0.015, 0.015, 0.12, W / 2, 0.99, D / 2, ivory, 6);
-      for (let i = 0; i < 4; i++) cyl(g, 0.1, 0.1, 0.01, 0.6 + i * (W - 1.2) / 3, 0.775, i % 2 ? 0.45 : D - 0.45, lm('#c9ced4'), 12);
-      addPassenger(g, r, 0.4, D / 2, Math.PI / 2, -0.22); addPassenger(g, r, W - 0.4, D / 2, -Math.PI / 2, -0.22);
-      r.top = 1.0;
+    case 'dining': { // 餐桌：白桌布、銀器、燭台；兩端各一張絨布椅，坐著面對面死去的乘客（腿伸到桌子底下，手放在桌上）
+      const t0 = 0.55, t1 = W - 0.55, cz = D / 2;
+      box(g, t0, t1, 0.72, 0.76, 0.15, D - 0.15, walnut2);
+      box(g, t0 - 0.02, t1 + 0.02, 0.76, 0.775, 0.12, D - 0.12, ivory, false);
+      for (const z of [0.115, D - 0.125]) box(g, t0 - 0.02, t1 + 0.02, 0.6, 0.775, z, z + 0.01, ivory, false);   // 垂下來的桌布
+      for (const [x, z] of [[t0 + 0.08, 0.25], [t1 - 0.08, 0.25], [t0 + 0.08, D - 0.25], [t1 - 0.08, D - 0.25]]) box(g, x - 0.03, x + 0.03, 0, 0.72, z - 0.03, z + 0.03, walnut2);
+      cyl(g, 0.03, 0.05, 0.22, W / 2, 0.775, cz, brass, 8); cyl(g, 0.015, 0.015, 0.12, W / 2, 0.99, cz, ivory, 6);
+      for (const x of [t0 + 0.17, t1 - 0.17]) { cyl(g, 0.1, 0.1, 0.01, x, 0.775, cz, lm('#c9ced4'), 12); for (const s of [-1, 1]) box(g, x - 0.008, x + 0.008, 0.775, 0.782, cz + s * 0.14 - 0.06, cz + s * 0.14 + 0.06, lm('#c9ced4'), false); }
+      for (const s of [-1, 1]) {   // 椅子：絨布座面、胡桃木椅背
+        const xb = s < 0 ? 0.04 : W - 0.04, xf = s < 0 ? 0.5 : W - 0.5, x0 = Math.min(xb, xf), x1 = Math.max(xb, xf);
+        box(g, x0, x1, 0.38, 0.45, cz - 0.23, cz + 0.23, velvet());
+        for (const x of [x0 + 0.03, x1 - 0.03]) for (const z of [cz - 0.2, cz + 0.2]) box(g, x - 0.02, x + 0.02, 0, 0.38, z - 0.02, z + 0.02, walnut);
+        box(g, xb - 0.03, xb + 0.03, 0.38, 1.05, cz - 0.23, cz + 0.23, walnut2);
+        const pv = xb - s * 0.04; box(g, pv - 0.005, pv + 0.005, 0.5, 0.98, cz - 0.19, cz + 0.19, velvet());
+      }
+      if (f.pax) {
+        const o = { table: 0.775, prefer: ['gent', 'lady', 'merchant', 'kimono', 'conductor', 'oldman'] };
+        addPassenger(g, r, 0.3, cz, Math.PI / 2, 0.45, o); addPassenger(g, r, W - 0.3, cz, -Math.PI / 2, 0.45, o);
+      }
+      r.top = 1.05;
       return true;
+    }
     case 'crates3': { // 木箱：裡面放著木柴
       const cw = lm('#6a4a2e'), slat = lm('#3a2616'), log = lm('#8a6a44');
       const crate = (x0, z0, s, y0) => {
@@ -4266,12 +5103,12 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
       r.top = 0.75;
       return true;
     }
-    case 'bench3': case 'benches': { // 長椅：鑄鐵腳、木條座面；候車室那一排坐著蓋白布的乘客
+    case 'bench3': case 'benches': { // 長椅：鑄鐵腳、木條座面；候車室那一排坐著死去的乘客
       const slat = lm('#6a4a2e');
       for (const v0 of [0.15, 0.3, 0.45]) fb(g, f, side, 0.1, len - 0.1, 0.42, 0.46, v0, v0 + 0.11, slat);
       for (const y0 of [0.6, 0.75]) fb(g, f, side, 0.1, len - 0.1, y0, y0 + 0.1, 0.62, 0.68, slat);
       for (const u of (len >= 4 ? [0.3, len / 2, len - 0.3] : [0.3, len - 0.3])) { fb(g, f, side, u - 0.04, u + 0.04, 0, 0.42, 0.14, 0.56, iron); fb(g, f, side, u - 0.04, u + 0.04, 0, 0.9, 0.64, 0.7, iron); }
-      if (f.pax) { paxOn(len * 0.25, 0.45, 0.02); paxOn(len * 0.78, 0.45, 0.02); }
+      if (f.pax) { const o = { prefer: ['worker', 'granny', 'student', 'girl', 'oldman', 'conductor'] }; paxOn(len * 0.25, 0.42, 0.46, o); paxOn(len * 0.78, 0.42, 0.46, o); }
       r.top = 0.9;
       return true;
     }
@@ -4350,11 +5187,11 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
       fb(g, f, side, 0.05, len - 0.05, 1.95, 1.98, D - 0.6, D - 0.55, brass2, false);
       fb(g, f, side, 0.05, len - 0.05, 1.93, 1.96, D - 0.3, D - 0.25, brass2, false);
       for (let u = 0.25; u < len; u += 0.75) { fb(g, f, side, u, u + 0.03, 1.9, 1.98, D - 0.6, D - 0.08, brass2, false); fb(g, f, side, u, u + 0.03, 1.55, 1.9, D - 0.1, D - 0.07, brass2, false); }
-      if (f.pax) addPassenger(g, r, 0.5, D / 2, -Math.PI / 2, 0.08);
+      if (f.pax) addPassenger(g, r, 0.56, D / 2, -Math.PI / 2, 0.5, { prefer: ['student', 'worker', 'granny', 'girl', 'oldman', 'conductor', 'gent'] });
       r.top = 1.14;
       return true;
     }
-    case 'bunk': { // 臥鋪的上下鋪：胡桃木床架、兩層泛黃的床墊和暗紅的毯子、小鐵梯；下鋪躺著一個蓋白布的乘客
+    case 'bunk': { // 臥鋪的上下鋪：胡桃木床架、兩層泛黃的床墊和暗紅的毯子、小鐵梯；下鋪躺著一個死去的乘客（頭枕在枕頭上）
       const mat = lm('#d6cdb9');
       for (const [y0, y1] of [[0.35, 0.47], [1.35, 1.47]]) {
         box(g, 0.03, W - 0.03, y0 - 0.08, y0, 0.03, D - 0.03, walnut);
@@ -4365,7 +5202,7 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
       for (const [x, z] of [[0.05, 0.05], [W - 0.05, 0.05], [0.05, D - 0.05], [W - 0.05, D - 0.05]]) box(g, x - 0.03, x + 0.03, 0, 1.6, z - 0.03, z + 0.03, walnut);
       fb(g, f, side, len - 0.3, len - 0.27, 0, 1.4, 0.02, 0.05, iron, false); fb(g, f, side, len - 0.08, len - 0.05, 0, 1.4, 0.02, 0.05, iron, false);
       for (let y = 0.3; y < 1.4; y += 0.28) fb(g, f, side, len - 0.3, len - 0.05, y, y + 0.03, 0.02, 0.05, iron, false);
-      if (f.pax) addLyingPassenger(g, r, W / 2, D / 2, faceOf(side), 0.47);
+      if (f.pax) addLyingPassenger(g, r, f, side, 0.3, 0.47);
       r.top = 1.6;
       return true;
     }
@@ -4555,23 +5392,7 @@ function updateTrainFurniture(t) {
     c.fillStyle = '#e8e0c8'; c.font = 'bold 44px "PingFang TC","Noto Sans TC",sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(sg.signName, 128, 50);
     sg.signTex.needsUpdate = true;
   }
-  const alive = !!(mode === 'cutscene' && CUT && CUT.kind === 2 && CUT.alive);
-  const pt = G.ev && G.ev.paxTurn;
-  for (const f of FURN) {
-    const r = furn3d[f.id];
-    if (!r || !r.pax) continue;
-    for (const px of r.pax) {
-      px.alive.visible = alive; px.dead.visible = !alive;
-      px.turn = pt && pt.id === f.id && px === r.pax[0] ? clamp(Math.min(pt.t / 3, (16 - pt.t) / 2), 0, 1) : 0;
-      if (px.turn > 0) {
-        px.g.getWorldPosition(_v);
-        let want = Math.atan2(G.p.x - _v.x, G.p.y - _v.z) - px.base;
-        while (want > Math.PI) want -= Math.PI * 2;
-        while (want < -Math.PI) want += Math.PI * 2;
-        px.head.rotation.y = clamp(want, -1.4, 1.4) * px.turn;
-      } else px.head.rotation.y = 0;
-    }
-  }
+  updatePassengers();
 }
 
 // ====================================================================
@@ -4837,7 +5658,7 @@ function init() {
   buildExtras();
   glowPts = makePoints(0.07, THREE.AdditiveBlending);
   smokePts = makePoints(0.3, THREE.NormalBlending);
-  window.Renderer = { render, resize, setWorld, book: { ok: bookOk, show: bookShow, stats: book.stats } };
+  window.Renderer = { render, resize, setWorld, book: { ok: bookOk, show: bookShow, stats: book.stats }, pax: paxStats };
   resize();
 }
 init();

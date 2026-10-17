@@ -224,7 +224,7 @@ await scenario('w2', '第二世界第 6 夜＋全套裝備（?world=2&night=6&ki
   await shot('2-night');
 });
 
-await scenario('w3', '第三世界第 1 天（下車到月台、天黑前車站鎖門、留在車站會被拉回車上）', {}, async ({ page, shot, check }) => {
+await scenario('w3', '第三世界第 1 天（各式各樣死去的乘客、乘客轉頭、下車到月台、天黑前車站鎖門、留在車站會被拉回車上）', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=3&diff=normal', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
   await sleep(2500);
@@ -242,6 +242,19 @@ await scenario('w3', '第三世界第 1 天（下車到月台、天黑前車站�
   });
   check(wh.label === '拉汽笛' && wh.cd > 0, `駕駛台要能拉汽笛（互動「${wh.label}」）`);
   await shot('1-start');
+  // 乘客：座位上是寫實、各式各樣的死去乘客（紳士、和服婦人、學生……），都閉著眼；「乘客轉頭」事件時頭轉過來、睜開眼睛
+  const pax = await page.evaluate(() => Renderer.pax());
+  check(pax.n >= 20 && pax.kinds.length >= 8 && pax.list.every(p => p.state === 'dead'), `車上要有 20 個以上、8 種以上死去的乘客（現在 ${pax.n} 個、${pax.kinds.length} 種：${pax.kinds.join('、')}）`);
+  await page.evaluate(() => {
+    const sp = Renderer.pax().list.find(p => p.id === 'seatN4');
+    Object.assign(G.p, { x: sp.x - 1.26, y: sp.y + 1.1, face: Math.atan2(-1.1, 1.26), pitch: -0.3 });
+    G.ev.paxTurn = { id: 'seatN4', t: 5 };
+  });
+  const stare = await page.waitForFunction(() => Renderer.pax().list.find(p => p.id === 'seatN4').state === 'stare', null, { timeout: 15000 }).then(() => true).catch(() => false);
+  check(stare, '「乘客轉頭」事件時，那個乘客要睜開眼睛看你');
+  await sleep(600);
+  await shot('1b-passenger-turn');
+  await page.evaluate(() => { G.ev.paxTurn = null; });
   // 下車：站在景觀車廂的車門北邊往南走，白天要走得下月台
   await page.evaluate(() => { Object.assign(G.p, { x: 50.5, y: 9.3, face: Math.PI / 2, pitch: 0.05 }); });
   await page.keyboard.down('w');
@@ -638,7 +651,7 @@ await scenario('cut', '破關開門動畫（?cut=1）', {}, async ({ page, shot,
   await shot('1-cutscene');
 });
 
-await scenario('cut2', '第二到第三世界的過場動畫（?cut=2）：月台上車、睡著、醒來乘客都死了、進第三世界第 1 天', {}, async ({ page, shot, check }) => {
+await scenario('cut2', '第二到第三世界的過場動畫（?cut=2）：月台上車（乘客活著）、睡著、醒來乘客都死了、進第三世界第 1 天', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?cut=2', { waitUntil: 'load' });
   await sleep(2000);
   let s = await state(page);
@@ -648,11 +661,15 @@ await scenario('cut2', '第二到第三世界的過場動畫（?cut=2）：月�
   await sleep(1500);
   const c1 = await page.evaluate(() => ({ world: curWorld, alive: CUT.alive, text: document.getElementById('cutText').textContent, x: Math.round(CUT.cam.x), y: Math.round(CUT.cam.y) }));
   check(c1.world === 3 && c1.alive && c1.text.includes('旅行'), `月台那一段要在第三世界、乘客還活著（世界 ${c1.world}、字幕「${c1.text}」）`);
+  const alive1 = await page.waitForFunction(() => Renderer.pax().list.every(p => p.state === 'alive'), null, { timeout: 15000 }).then(() => true).catch(() => false);
+  check(alive1, '月台那一段車上的乘客要是活的（睜著眼、膚色正常）');
   await shot('1-platform');
   await page.evaluate(() => { CUT.t = CUT2.wake + 1.5; });
   await sleep(1500);
   const c2 = await page.evaluate(() => ({ alive: CUT.alive, moving: CUT.moving, k: G.train.k, text: document.getElementById('cutText').textContent }));
-  check(!c2.alive && c2.moving && c2.k > 0 && c2.text.includes('死了'), `醒來那一段乘客要蓋著白布、列車在開（字幕「${c2.text}」）`);
+  check(!c2.alive && c2.moving && c2.k > 0 && c2.text.includes('死了'), `醒來那一段乘客要死了、列車在開（字幕「${c2.text}」）`);
+  const dead2 = await page.waitForFunction(() => Renderer.pax().list.every(p => p.state === 'dead'), null, { timeout: 15000 }).then(() => true).catch(() => false);
+  check(dead2, '醒來那一段車上的乘客要都死了（閉著眼、臉色灰白）');
   await shot('2-wake');
   await page.evaluate(() => { CUT.t = CUT2.end - 0.2; });
   await page.waitForFunction(() => mode === 'play', null, { timeout: 30000 });
