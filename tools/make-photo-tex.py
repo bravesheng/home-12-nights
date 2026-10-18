@@ -37,18 +37,18 @@ SOURCES = {
     'door': 'Gemini_Generated_Image_7x128b7x128b7x12.jpeg',      # 1536×2752（直的）
     'rug': 'Gemini_Generated_Image_xx8me7xx8me7xx8m.jpeg',       # 2752×1536（橫的）
     # 第三批（2026/10/18）：車窗外的風景（遠景、五種中景畫在洋紅色背景上，再去背）、白天的站場、時刻表、三張海報
-    # 站場、時刻表、海報：Gemini 的「下載原尺寸」沒反應，還沒有原圖（只用原尺寸的圖，不用網頁上的預覽圖）；下載好之後把檔名填進來
+    # 站場、時刻表、海報：第一次那段對話後半的「下載原尺寸」壞掉了，開新對話重新生成（只用原尺寸的圖，不用網頁上的預覽圖）
     'far': 'Gemini_Generated_Image_uz7g94uz7g94uz7g.jpeg',
     'mid-plain': 'Gemini_Generated_Image_rdqtq8rdqtq8rdqt.jpeg',
     'mid-trees': 'Gemini_Generated_Image_mw0ex7mw0ex7mw0e.jpeg',
     'mid-bridge': 'Gemini_Generated_Image_syuqa8syuqa8syuq.jpeg',
     'mid-snow': 'Gemini_Generated_Image_v3359lv3359lv335.jpeg',
     'mid-city': 'Gemini_Generated_Image_g1h12og1h12og1h1.jpeg',
-    'yard': None,
-    'timetable': None,
-    'poster-bridge': None,
-    'poster-snow': None,
-    'poster-meadow': None,
+    'yard': 'Gemini_Generated_Image_c946wsc946wsc946.jpeg',          # 正側面、沒有透視的站場（2752×1536）
+    'timetable': 'Gemini_Generated_Image_wiiy64wiiy64wiiy.jpeg',     # 1792×2400
+    'poster-bridge': 'Gemini_Generated_Image_xc91nxxc91nxxc91.jpeg',
+    'poster-snow': 'Gemini_Generated_Image_gw9x93gw9x93gw9x.jpeg',
+    'poster-meadow': 'Gemini_Generated_Image_kd6guokd6guokd6g.jpeg',
 }
 FONT = '/System/Library/Fonts/Supplemental/Songti.ttc'   # 宋體（繁體 Bold 是第 2 個、Regular 是第 7 個）
 
@@ -315,17 +315,17 @@ def far():
 
 
 def yard():
-    """白天的站場（2048×512，內容佔下面八成）：站房、鐘塔、水塔只出現一次，兩邊用同一段月台接下去，才不會看到一整排一樣的站房"""
-    a = np.asarray(Image.open(os.path.join(SRC, SOURCES['yard'])).convert('RGB'), np.float32)
+    """白天的站場（2048×512，內容佔下面八成）：站房、鐘塔、水塔只出現一次，兩邊用鐘塔和煤氣燈之間那一段（只有矮牆、花台、月台和鐵軌）接下去，才不會看到一整排一樣的站房"""
+    a = load('yard')
     k = key_magenta(a[int(a.shape[0] * 0.3):])
     W, H, ch = 2048, 512, 410
     cw = int(round(k.shape[1] * ch / k.shape[0]))
     content = Image.fromarray(np.clip(k, 0, 255).astype(np.uint8), 'RGBA').resize((cw, ch), Image.LANCZOS)
     img = Image.new('RGBA', (W, H), (0, 0, 0, 0))
-    band = content.crop((0, int(ch * 0.74), int(cw * 0.12), ch))   # 左邊一小段沒有東西的月台和鐵軌
-    band = Image.fromarray(np.asarray(tileable(np.asarray(band, np.float32), 0.3, axes=(1,))).astype(np.uint8), 'RGBA')
+    b = np.asarray(content, np.float32)[:, int(cw * 0.76):int(cw * 0.84)]
+    band = Image.fromarray(np.clip(tileable(b, 0.3, axes=(1,)), 0, 255).astype(np.uint8), 'RGBA')
     for x in range(0, W, band.size[0]):
-        img.paste(band, (x, H - band.size[1]))
+        img.alpha_composite(band, (x, H - ch))
     x0 = (W - cw) // 2
     img.alpha_composite(content, (x0, H - ch))
     return img
@@ -339,48 +339,68 @@ def ink(img, draw_fn):
 
 
 def timetable():
-    """時刻表（512×684）：Gemini 畫的空白表格，寫上十二個站名和到站、開車的時間（站名照 js/data.js 的 STATIONS_W3）"""
+    """時刻表（512×686）：Gemini 畫的空白表格，寫上十二個站名、到站和開車的時間、月台、備註（站名照 js/data.js 的 STATIONS_W3）"""
     import re
     src = open(os.path.join(ROOT, 'js', 'data.js'), encoding='utf-8').read()
     names = re.findall(r"'([^']+)'", re.search(r'const STATIONS_W3 = \[([^\]]+)\]', src).group(1))
-    img = Image.open(os.path.join(SRC, SOURCES['timetable'])).convert('RGB')       # 765×1024
-    rows = [262, 307, 352, 398, 443, 489, 534, 580, 625, 671, 716, 762, 807, 852]   # 表格的橫線（看圖量的）
-    cols = [127, 165, 298, 338, 475, 515, 650]
+    img = Image.open(os.path.join(SRC, SOURCES['timetable'])).convert('RGB')       # 1792×2400
+    rows = [526, 607, 715, 823, 930, 1037, 1144, 1251, 1359, 1466, 1573, 1680, 1787, 1894]   # 表格的橫線（看圖量的）：標題列＋十二站，下面兩列空著
+    cols = [232, 450, 674, 896, 1120, 1342, 1560]                                         # 六欄：序、站名、到站、開車、月台、備註
     t, times = 19 * 60, []
     steps = [0, 42, 38, 51, 36, 47, 55, 40, 63, 44, 49, 58]
     for k in range(12):
         t += steps[k]; times.append(t)
     hm = lambda m: f'{m // 60 % 24:02d}:{m % 60:02d}'
+    notes = {7: '停　駛', 8: '請勿下車', 11: '終　點'}   # 備註：廢棄驛站停駛、長隧道口請勿下車
     def draw(d):
-        f_title = ImageFont.truetype(FONT, 44, index=2)
-        f_head = ImageFont.truetype(FONT, 25, index=2)
-        f = ImageFont.truetype(FONT, 25, index=7)
-        f_num = ImageFont.truetype(FONT, 20, index=7)
+        f_title = ImageFont.truetype(FONT, 96, index=2)
+        f_head = ImageFont.truetype(FONT, 50, index=2)
+        f = ImageFont.truetype(FONT, 50, index=7)
+        f_small = ImageFont.truetype(FONT, 42, index=7)
         ink_c = (58, 44, 34)
         def center(txt, font, x0, x1, y0, y1):
             w = d.textlength(txt, font=font); bb = font.getbbox(txt)
             d.text(((x0 + x1 - w) / 2, (y0 + y1) / 2 - (bb[1] + bb[3]) / 2), txt, font=font, fill=ink_c)
-        center('末 班 列 車　時 刻 表', f_title, 160, 610, 150, 215)
-        for txt, c in (('站　名', 2), ('到　站', 4), ('開　車', 6)):
-            center(txt, f_head, cols[c - 1], cols[c], rows[0], rows[1])
+        center('末 班 列 車　時 刻 表', f_title, 330, 1460, 304, 425)
+        for txt, c in (('序', 0), ('站　名', 1), ('到　站', 2), ('開　車', 3), ('月　台', 4), ('備　註', 5)):
+            center(txt, f_head, cols[c], cols[c + 1], rows[0], rows[1])
         for i, n in enumerate(names):
             y0, y1 = rows[i + 1], rows[i + 2]
-            center(str(i + 1), f_num, cols[0], cols[1], y0, y1)
+            center(str(i + 1), f, cols[0], cols[1], y0, y1)
             center(n, f, cols[1], cols[2], y0, y1)
-            center('──' if i == 0 else hm(times[i]), f, cols[3], cols[4], y0, y1)
-            center('──' if i == len(names) - 1 else hm(times[i] + 4), f, cols[5], cols[6], y0, y1)
-    return ink(img, draw).resize((512, 684), Image.LANCZOS)
+            center('──' if i == 0 else hm(times[i]), f, cols[2], cols[3], y0, y1)
+            center('──' if i == len(names) - 1 else hm(times[i] + 4), f, cols[3], cols[4], y0, y1)
+            center('一' if i % 3 else '二', f, cols[4], cols[5], y0, y1)
+            if i in notes: center(notes[i], f_small, cols[5], cols[6], y0, y1)
+    return ink(img, draw).resize((512, 686), Image.LANCZOS)
+
+
+def blank_band(a, y0, y1):
+    """在 y0～y1 之間找最長的一段「顏色很平」的橫條（海報上留白寫標題的地方），回傳中心和高度"""
+    g = a[y0:y1, int(a.shape[1] * 0.2):int(a.shape[1] * 0.8)].mean(axis=2)
+    flat = (g.std(axis=1) < 9) & (g.mean(axis=1) > 170)
+    best, cur, start = (0, y0), 0, 0
+    for i, f in enumerate(flat):
+        if f:
+            if cur == 0: start = i
+            cur += 1
+            if cur > best[0]: best = (cur, y0 + start)
+        else: cur = 0
+    return best[1] + best[0] // 2, best[0]
 
 
 def poster(name, title, sub, color):
-    """海報（512×684）：上下留白的地方寫上站名和標語"""
-    img = Image.open(os.path.join(SRC, SOURCES[name])).convert('RGB')                # 765×1024
+    """海報（512×686）：上下留白的標題列寫上站名和標語"""
+    img = Image.open(os.path.join(SRC, SOURCES[name])).convert('RGB')                # 1792×2400
+    a = np.asarray(img, np.float32)
+    (ty, th), (by, bh) = blank_band(a, 0, 600), blank_band(a, 1900, 2400)
     def draw(d):
-        f1 = ImageFont.truetype(FONT, 78, index=2); f2 = ImageFont.truetype(FONT, 34, index=2)
-        for txt, font, y in ((title, f1, 70), (sub, f2, 950)):
+        f1 = ImageFont.truetype(FONT, int(th * 0.62), index=2); f2 = ImageFont.truetype(FONT, int(bh * 0.42), index=2)
+        for txt, font, y in ((title, f1, ty), (sub, f2, by)):
             w = d.textlength(txt, font=font); bb = font.getbbox(txt)
-            d.text(((765 - w) / 2, y - (bb[1] + bb[3]) / 2), txt, font=font, fill=color)
-    return ink(img, draw).resize((512, 684), Image.LANCZOS)
+            d.text(((img.width - w) / 2, y - (bb[1] + bb[3]) / 2), txt, font=font, fill=color)
+    print(f'  {name}：標題列 y={ty}（高 {th}）、標語列 y={by}（高 {bh}）')
+    return ink(img, draw).resize((512, 686), Image.LANCZOS)
 
 
 def main():

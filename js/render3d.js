@@ -141,8 +141,7 @@ const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
 // 遊戲開始前先載入；載入失敗或太慢（例如舊的離線快取裡沒有）就用程式畫的
 const PHOTO_TEX = ['w3-wall', 'w3-ironwall', 'w3-velvet', 'w3-runner', 'w3-carpet', 'w3-tile', 'w3-ceiling', 'w3-iron', 'w3-herringbone', 'w3-concrete',
   'w3-wood', 'w3-leather', 'w3-brass', 'w3-linen', 'w3-station', 'w3-carriage', 'w3-cardoor', 'w3-door', 'w3-roof', 'w3-rug',
-  'w3-far', 'w3-mid-plain', 'w3-mid-trees', 'w3-mid-bridge', 'w3-mid-snow', 'w3-mid-city'];
-// 還沒做好的照片貼圖（白天的站場 w3-yard、時刻表 w3-timetable、海報 w3-poster-*）：程式已經會用，原尺寸的圖下載好、做好貼圖再加進上面和 sw.js
+  'w3-far', 'w3-mid-plain', 'w3-mid-trees', 'w3-mid-bridge', 'w3-mid-snow', 'w3-mid-city', 'w3-yard', 'w3-timetable', 'w3-poster-bridge', 'w3-poster-snow', 'w3-poster-meadow'];
 const photos = {};
 function loadPhotos() {
   const all = Promise.all(PHOTO_TEX.map(n => new Promise(res => {

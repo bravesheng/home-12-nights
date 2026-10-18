@@ -13,6 +13,7 @@ const ASSETS = [
   './tex/w3-wood.webp', './tex/w3-leather.webp', './tex/w3-brass.webp', './tex/w3-linen.webp', './tex/w3-station.webp',
   './tex/w3-carriage.webp', './tex/w3-cardoor.webp', './tex/w3-door.webp', './tex/w3-roof.webp', './tex/w3-rug.webp',
   './tex/w3-far.webp', './tex/w3-mid-plain.webp', './tex/w3-mid-trees.webp', './tex/w3-mid-bridge.webp', './tex/w3-mid-snow.webp', './tex/w3-mid-city.webp',
+  './tex/w3-yard.webp', './tex/w3-timetable.webp', './tex/w3-poster-bridge.webp', './tex/w3-poster-snow.webp', './tex/w3-poster-meadow.webp',
 ];
 
 self.addEventListener('install', e => {
