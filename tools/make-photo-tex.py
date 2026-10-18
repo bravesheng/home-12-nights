@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # 把 Gemini 生成的原圖（generated-images/，2048×2048 的 JPEG，不放進 git）做成遊戲用的貼圖（tex/*.webp）
 # 用法：python3 tools/make-photo-tex.py            → 全部重做
+#       python3 tools/make-photo-tex.py --monsters → 只做怪物的材質（d-* 細節貼圖、m-* 照片）
 #       python3 tools/make-photo-tex.py --preview  → 另外在 playtest-out/photo-tex-preview.jpg 拼一張 2×2 重複排的預覽（看接縫）
 # 每張貼圖都要能重複排不露出接縫：
 # - 規則花紋（壁紙、地毯、地磚、人字拼）：先找出花紋重複的間距，剛好裁幾個整數間距，左右上下才接得起來
@@ -49,6 +50,29 @@ SOURCES = {
     'poster-bridge': 'Gemini_Generated_Image_xc91nxxc91nxxc91.jpeg',
     'poster-snow': 'Gemini_Generated_Image_gw9x93gw9x93gw9x.jpeg',
     'poster-meadow': 'Gemini_Generated_Image_kd6guokd6guokd6g.jpeg',
+    # 第四批（2026/10/18）：怪物的材質（皮膚、鳥腳的鱗片、布、骨頭、鐵、樹皮、苔蘚、頭髮、草、獸毛、眼白、蛞蝓的皮、屍皮、
+    # 兩種菇傘、菌褶、菇柄、葵花籽、花瓣、熔岩）。針織毛衣的布連續三次生成失敗，眼花女孩的毛衣用棉布
+    'm-skin': 'Gemini_Generated_Image_bvetgrbvetgrbvet.jpeg',
+    'm-birdleg': 'Gemini_Generated_Image_x46o8x46o8x46o8x.jpeg',
+    'm-cotton': 'Gemini_Generated_Image_8ktbo8ktbo8ktbo8.jpeg',
+    'm-bone': 'Gemini_Generated_Image_4cdve94cdve94cdv.jpeg',
+    'm-steel': 'Gemini_Generated_Image_436nf6436nf6436n.jpeg',
+    'm-rag': 'Gemini_Generated_Image_49ow6r49ow6r49ow.jpeg',
+    'm-bark': 'Gemini_Generated_Image_3fm4jv3fm4jv3fm4.jpeg',
+    'm-moss': 'Gemini_Generated_Image_o6tnsoo6tnsoo6tn.jpeg',
+    'm-hair': 'Gemini_Generated_Image_2qenhk2qenhk2qen.jpeg',
+    'm-grass': 'Gemini_Generated_Image_mq00vpmq00vpmq00.jpeg',
+    'm-fur': 'Gemini_Generated_Image_8pxc7a8pxc7a8pxc.jpeg',
+    'm-sclera': 'Gemini_Generated_Image_3a8yky3a8yky3a8y.jpeg',
+    'm-slug': 'Gemini_Generated_Image_68c3fc68c3fc68c3.jpeg',
+    'm-corpse': 'Gemini_Generated_Image_f9jzvef9jzvef9jz.jpeg',
+    'm-capred': 'Gemini_Generated_Image_tcquz7tcquz7tcqu.jpeg',
+    'm-cappurple': 'Gemini_Generated_Image_j1jrw3j1jrw3j1jr.jpeg',
+    'm-gills': 'Gemini_Generated_Image_ojb2znojb2znojb2.jpeg',
+    'm-stem': 'Gemini_Generated_Image_n2mf9in2mf9in2mf.jpeg',
+    'm-seeds': 'Gemini_Generated_Image_cg85kicg85kicg85.jpeg',
+    'm-petal': 'Gemini_Generated_Image_fw841zfw841zfw84.jpeg',
+    'm-lava': 'Gemini_Generated_Image_unqve6unqve6unqv.jpeg',
 }
 FONT = '/System/Library/Fonts/Supplemental/Songti.ttc'   # 宋體（繁體 Bold 是第 2 個、Regular 是第 7 個）
 
@@ -403,8 +427,107 @@ def poster(name, title, sub, color):
     return ink(img, draw).resize((512, 686), Image.LANCZOS)
 
 
+# ---------- 怪物 ----------
+def wrap_blur(img, r):
+    """可以重複排的模糊：先排成 3×3 再模糊、取中間那張，邊緣才不會糊進黑邊"""
+    w, h = img.size
+    big = Image.new(img.mode, (w * 3, h * 3))
+    for i in range(3):
+        for j in range(3):
+            big.paste(img, (i * w, j * h))
+    return big.filter(ImageFilter.GaussianBlur(r)).crop((w, h, 2 * w, 2 * h))
+
+
+def detail(name, size=512, frac=0.2, gain=1.0, mono=False):
+    """細節貼圖（d-*）：照片除以模糊過的自己，只留下細部的紋路（毛孔、裂紋、纖維、髮絲），平均是 128。
+    遊戲裡乘兩倍再乘在原本的顏色上，怪物的顏色和花紋不變，只是表面變得像真的。
+    mono：只留明暗（苔蘚裡的小紫花、草葉的顏色不要染到怪物身上）"""
+    img = to_img(tileable(load(name), frac), (size, size))
+    a = np.asarray(img, np.float32)
+    b = np.asarray(wrap_blur(img, size / 24), np.float32)
+    if mono:
+        a, b = a.mean(axis=2, keepdims=True), b.mean(axis=2, keepdims=True)
+    d = 128 * (1 + (a / np.maximum(b, 6) - 1) * gain) * np.ones((1, 1, 3), np.float32)
+    d = np.clip(d, 0, 255)
+    d *= 128 / d.reshape(-1, 3).mean(axis=0)        # 夾掉太亮的之後平均會偏，再拉回 128
+    return Image.fromarray(np.clip(d, 0, 255).astype(np.uint8))
+
+
+def sample(a, px, py, wrap_x=False):
+    """雙線性內插取樣；wrap_x：左右接起來（繞一圈的角度），不然超出範圍就夾在邊上"""
+    h, w = a.shape[:2]
+    py = np.clip(py, 0, h - 1.001)
+    if wrap_x:
+        px = np.mod(px, w)
+    else:
+        px = np.clip(px, 0, w - 1.001)
+    x0, y0 = np.floor(px).astype(int), np.floor(py).astype(int)
+    x1 = (x0 + 1) % w if wrap_x else x0 + 1
+    fx, fy = (px - x0)[..., None], (py - y0)[..., None]
+    return (a[y0, x0] * (1 - fx) * (1 - fy) + a[y0, x1] * fx * (1 - fy) + a[y0 + 1, x0] * (1 - fx) * fy + a[y0 + 1, x1] * fx * fy)
+
+
+def cap(name, W=1024, H=512, R=0.97, ss=2):
+    """菇傘（球的上半部的貼圖：橫的是繞一圈的角度、直的是從頂上到邊緣）：從正上方拍的菇傘照片換成極座標展開，
+    貼回半球上從上面看差不多就是照片。先算兩倍大再縮小，才不會鋸齒"""
+    a = load(name)
+    h, w = a.shape[:2]
+    th = (np.arange(H * ss) + 0.5) / (H * ss) * np.pi / 2
+    ph = np.arange(W * ss) / (W * ss) * np.pi * 2
+    r = (th / (np.pi / 2))[:, None] * R * min(w, h) / 2    # 照弧長排（不照從上面看的距離），側面才不會被拉成一條條
+    out = sample(a, w / 2 + r * np.cos(ph)[None], h / 2 + r * np.sin(ph)[None])
+    return to_img(out, (W, H))
+
+
+def gills(name, S=512, n=2, ss=2):
+    """菇傘下面的菌褶（圓形，平面貼圖）：直條紋的照片繞成一圈（排 n 份），變成從中間往外放射的菌褶"""
+    a = tileable(load(name), 0.1, axes=(1,))
+    h, w = a.shape[:2]
+    N = S * ss
+    yy, xx = np.mgrid[0:N, 0:N].astype(np.float32)
+    dx, dy = (xx + 0.5) / N * 2 - 1, (yy + 0.5) / N * 2 - 1
+    ang = np.mod(np.arctan2(dy, dx), np.pi * 2)
+    out = sample(a, ang / (np.pi * 2) * w * n, np.clip(np.hypot(dx, dy), 0, 1) * (h - 1), wrap_x=True)
+    return to_img(out, (S, S))
+
+
+def lava():
+    """熔岩暴君：照片裡發光的裂縫抓出來當自己發光的貼圖（m-lava），岩石那張（m-rock）把裂縫塗暗，
+    這樣裂縫的亮度才能在遊戲裡呼吸、被聖水冷卻時變黑"""
+    a = tileable(load('m-lava'), 0.15)
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    hot = np.clip((r - 80) / 120, 0, 1) * np.clip((r - b - 40) / 90, 0, 1)
+    hot = np.asarray(Image.fromarray((hot * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(2)), np.float32)[..., None] / 255
+    k = np.clip(hot * 2.5, 0, 1)                    # 裂縫邊緣的紅色也塗暗，岩石只剩黑色（光都在發光的那張）
+    rock = a * (1 - k) + np.array([14, 10, 8], np.float32) * k
+    glow = a * np.clip(hot * 1.4, 0, 1)
+    return to_img(rock, (512, 512)), to_img(glow, (512, 512))
+
+
+def monsters(out):
+    # 細節貼圖：(名字, 增益, 只留明暗)；毛和頭髮的紋路本來就很強，皮膚、棉布和骨頭很淡要加強
+    for n, gain, mono in (('skin', 3.2, False), ('birdleg', 1.0, True), ('cotton', 3.0, True), ('bone', 2.2, False), ('steel', 1.0, False), ('rag', 1.0, False),
+                          ('bark', 0.9, True), ('moss', 0.9, True), ('hair', 1.0, True), ('grass', 0.9, True), ('fur', 1.0, True), ('sclera', 1.0, False),
+                          ('slug', 1.0, False), ('corpse', 1.0, True)):
+        out['d-' + n] = save(detail('m-' + n, gain=gain, mono=mono), 'd-' + n, q=72)
+    out['m-capred'] = save(cap('m-capred'), 'm-capred', q=76)
+    out['m-capk'] = save(cap('m-cappurple'), 'm-capk', q=76)
+    out['m-gills'] = save(gills('m-gills'), 'm-gills', q=76)
+    out['m-stem'] = save(to_img(tileable(load('m-stem'), 0.15), (512, 512)), 'm-stem', q=76)
+    out['m-seeds'] = save(to_img(load('m-seeds'), (512, 512)), 'm-seeds', q=76)
+    pt = load('m-petal')
+    out['m-petal'] = save(to_img(pt[:, 512:1536], (256, 512)), 'm-petal', q=76)   # 花瓣是直的，取中間一條
+    rock, glow = lava()
+    out['m-rock'] = save(rock, 'm-rock', q=76)
+    out['m-lava'] = save(glow, 'm-lava', q=76)
+
+
 def main():
     out = {}
+    if '--monsters' in sys.argv:          # 只做怪物的（比較快）
+        monsters(out)
+        return
+    monsters(out)
     out['w3-wall'] = save(wall(), 'w3-wall')
     out['w3-velvet'] = save(to_img(tileable(load('velvet'), 0.1), (512, 512)), 'w3-velvet')   # 座椅每一面貼一整張，不太會重複排
     out['w3-runner'] = save(periodic('runner'), 'w3-runner')
@@ -440,7 +563,7 @@ def main():
     for n, title, sub, col in (('bridge', '鐵 橋 頭', '末班特快　夜夜發車', (40, 60, 64)), ('snow', '雪 嶺', '冬日溫泉　山城之旅', (52, 66, 84)), ('meadow', '霧 濱', '花開的原野　等你回家', (60, 84, 60))):
         if SOURCES['poster-' + n]: out['w3-poster-' + n] = save(poster('poster-' + n, title, sub, col), 'w3-poster-' + n)
     if '--preview' in sys.argv:
-        tiles = [v for k, v in out.items() if v.size[0] == v.size[1] and v.mode == 'RGB']
+        tiles = [v for k, v in out.items() if k.startswith('w3-') and v.size[0] == v.size[1] and v.mode == 'RGB']
         P = Image.new('RGB', (4 * 512, 5 * 512), (20, 20, 20))
         for i, t in enumerate(tiles):
             s = t.resize((256, 256))

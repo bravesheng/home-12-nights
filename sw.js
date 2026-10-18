@@ -7,13 +7,17 @@ const ASSETS = [
   './js/version.js', './js/data.js', './js/audio.js', './js/world2.js', './js/world3.js', './js/game.js', './js/render3d.js',
   './lib/three.module.js', './lib/three.core.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png',
-  // 第三世界的照片貼圖（render3d.js 的 PHOTO_TEX）
+  // 照片貼圖（render3d.js 的 PHOTO_TEX）：第三世界的場景
   './tex/w3-wall.webp', './tex/w3-ironwall.webp', './tex/w3-velvet.webp', './tex/w3-runner.webp', './tex/w3-carpet.webp',
   './tex/w3-tile.webp', './tex/w3-ceiling.webp', './tex/w3-iron.webp', './tex/w3-herringbone.webp', './tex/w3-concrete.webp',
   './tex/w3-wood.webp', './tex/w3-leather.webp', './tex/w3-brass.webp', './tex/w3-linen.webp', './tex/w3-station.webp',
   './tex/w3-carriage.webp', './tex/w3-cardoor.webp', './tex/w3-door.webp', './tex/w3-roof.webp', './tex/w3-rug.webp',
   './tex/w3-far.webp', './tex/w3-mid-plain.webp', './tex/w3-mid-trees.webp', './tex/w3-mid-bridge.webp', './tex/w3-mid-snow.webp', './tex/w3-mid-city.webp',
   './tex/w3-yard.webp', './tex/w3-timetable.webp', './tex/w3-poster-bridge.webp', './tex/w3-poster-snow.webp', './tex/w3-poster-meadow.webp',
+  // 怪物的照片材質（細節紋路 d-*、直接用的照片 m-*）
+  './tex/d-skin.webp', './tex/d-birdleg.webp', './tex/d-cotton.webp', './tex/d-bone.webp', './tex/d-steel.webp', './tex/d-rag.webp', './tex/d-bark.webp',
+  './tex/d-moss.webp', './tex/d-hair.webp', './tex/d-grass.webp', './tex/d-fur.webp', './tex/d-sclera.webp', './tex/d-slug.webp', './tex/d-corpse.webp',
+  './tex/m-capred.webp', './tex/m-capk.webp', './tex/m-gills.webp', './tex/m-stem.webp', './tex/m-seeds.webp', './tex/m-petal.webp', './tex/m-rock.webp', './tex/m-lava.webp',
 ];
 
 self.addEventListener('install', e => {

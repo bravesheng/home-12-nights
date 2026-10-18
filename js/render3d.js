@@ -141,7 +141,10 @@ const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
 // 遊戲開始前先載入；載入失敗或太慢（例如舊的離線快取裡沒有）就用程式畫的
 const PHOTO_TEX = ['w3-wall', 'w3-ironwall', 'w3-velvet', 'w3-runner', 'w3-carpet', 'w3-tile', 'w3-ceiling', 'w3-iron', 'w3-herringbone', 'w3-concrete',
   'w3-wood', 'w3-leather', 'w3-brass', 'w3-linen', 'w3-station', 'w3-carriage', 'w3-cardoor', 'w3-door', 'w3-roof', 'w3-rug',
-  'w3-far', 'w3-mid-plain', 'w3-mid-trees', 'w3-mid-bridge', 'w3-mid-snow', 'w3-mid-city', 'w3-yard', 'w3-timetable', 'w3-poster-bridge', 'w3-poster-snow', 'w3-poster-meadow'];
+  'w3-far', 'w3-mid-plain', 'w3-mid-trees', 'w3-mid-bridge', 'w3-mid-snow', 'w3-mid-city', 'w3-yard', 'w3-timetable', 'w3-poster-bridge', 'w3-poster-snow', 'w3-poster-meadow',
+  // 怪物：d-* 是細節紋路（見 withDetail），m-* 是直接拿來用的照片（菇傘、菌褶、菇柄、葵花籽、花瓣、熔岩）
+  'd-skin', 'd-birdleg', 'd-cotton', 'd-bone', 'd-steel', 'd-rag', 'd-bark', 'd-moss', 'd-hair', 'd-grass', 'd-fur', 'd-sclera', 'd-slug', 'd-corpse',
+  'm-capred', 'm-capk', 'm-gills', 'm-stem', 'm-seeds', 'm-petal', 'm-rock', 'm-lava'];
 const photos = {};
 function loadPhotos() {
   const all = Promise.all(PHOTO_TEX.map(n => new Promise(res => {
@@ -184,6 +187,70 @@ function photoMat(name, color) {
     photoMats.set(key, m);
   }
   return m;
+}
+// ---------- 怪物的照片材質：形狀、顏色、臉和設計圖上的花紋都不變，只把表面換成真的皮膚、骨頭、布、鐵、毛 ----------
+// 細節貼圖（d-*）：照片只留下細部的紋路（平均是灰色），乘兩倍再乘在原本的顏色上。
+// 不用 UV，用模型自己的座標從三個方向投影（三向投影）：細長的手腳、壓扁的球都不會把紋路拉長，怪物走路、轉身時紋路也不會滑動。
+// scale 是一公尺排幾張，k 是強度（0 不變、1 照片的紋路全部疊上去，大於 1 是再加強對比：皮膚的紋路很淡）
+const detailTexs = {};
+function withDetail(m, name, scale = 4, k = 1) {
+  const im = photos['d-' + name];
+  if (!im) return m;
+  let t = detailTexs[name];
+  if (!t) {
+    t = detailTexs[name] = new THREE.Texture(im);
+    t.colorSpace = THREE.NoColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; t.needsUpdate = true;
+  }
+  const prev = m.onBeforeCompile, key = m.customProgramCacheKey();
+  m.onBeforeCompile = (sh, rd) => {
+    prev.call(m, sh, rd);
+    Object.assign(sh.uniforms, { uDt: { value: t }, uDtS: { value: scale }, uDtK: { value: k } });
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vDtP;\nvarying vec3 vDtN;')
+      .replace('#include <project_vertex>', `#include <project_vertex>
+        vec3 dtS = vec3(length(modelMatrix[0].xyz), length(modelMatrix[1].xyz), length(modelMatrix[2].xyz));
+        vDtP = position * dtS; vDtN = normal / dtS;`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vDtP;\nvarying vec3 vDtN;\nuniform sampler2D uDt;\nuniform float uDtS, uDtK;')
+      .replace('#include <map_fragment>', `#include <map_fragment>
+        vec3 dtW = pow(abs(normalize(vDtN)), vec3(4.0)); dtW /= dtW.x + dtW.y + dtW.z + 1e-5;
+        vec3 dtP = vDtP * uDtS;
+        vec3 dtC = texture2D(uDt, dtP.zy).rgb * dtW.x + texture2D(uDt, dtP.xz).rgb * dtW.y + texture2D(uDt, dtP.xy).rgb * dtW.z;
+        diffuseColor.rgb *= mix(vec3(1.0), dtC * 2.0, uDtK);`);
+  };
+  m.customProgramCacheKey = () => key + '-dt';
+  return m;
+}
+// 畫布的平均顏色（0～255，照不透明度加權；每 4 個像素取一個就夠準）
+function canvasMean(c, w, h) {
+  const d = c.getImageData(0, 0, w, h).data, m = [0, 0, 0];
+  let a = 0;
+  for (let i = 0; i < d.length; i += 16) { const al = d[i + 3]; m[0] += d[i] * al; m[1] += d[i + 1] * al; m[2] += d[i + 2] * al; a += al; }
+  return m.map(v => v / Math.max(1, a));
+}
+// 把畫布的顏色拉回某個平均色（每個顏色各自乘一個倍數，不透明度不變）
+function matchMean(c, w, h, m0) {
+  const img = c.getImageData(0, 0, w, h), d = img.data, m1 = canvasMean(c, w, h), k = m0.map((v, i) => v / Math.max(1, m1[i]));
+  for (let i = 0; i < d.length; i += 4) { d[i] = Math.min(255, d[i] * k[0]); d[i + 1] = Math.min(255, d[i + 1] * k[1]); d[i + 2] = Math.min(255, d[i + 2] * k[2]); }
+  c.putImageData(img, 0, 0);
+}
+// 把照片畫進程式畫的貼圖（取代原本畫的紋路），再拉回原本的平均色：怪物的顏色跟設計圖一樣，紋路變成照片
+function photoInto(tex, name, draw = (c, im, w, h) => c.drawImage(im, 0, 0, w, h)) {
+  const im = photos[name];
+  if (!im) return;
+  const cv = tex.image, c = cv.getContext('2d'), w = cv.width, h = cv.height, m0 = canvasMean(c, w, h);
+  c.save(); c.setTransform(1, 0, 0, 1, 0, 0); draw(c, im, w, h); c.restore();
+  matchMean(c, w, h, m0);
+  tex.needsUpdate = true;
+}
+// 在不透明的畫布上疊一層細節紋路（「覆蓋」混合：灰色的地方不變），原本畫的花紋和顏色都留著；n 是橫的排幾張
+function overlayDetail(c, name, w, h, n = 1, alpha = 1) {
+  const im = photos['d-' + name];
+  if (!im) return;
+  const s = w / n;
+  c.save(); c.globalCompositeOperation = 'overlay'; c.globalAlpha = alpha;
+  for (let y = 0; y < h; y += s) for (let x = 0; x < w; x += s) c.drawImage(im, x, y, s, s);
+  c.restore();
 }
 // 第三世界的地板換成照片：走道的地毯、景觀車廂的綠地毯、餐車的黑白磁磚、機車室的鐵板、候車室的人字拼、月台的水泥
 // 第二個數字是一公尺貼幾張（花紋細的放大成兩公尺一張，遠看才不會糊成雜訊）
@@ -430,7 +497,7 @@ function makeGardenTextures() {
     c.fillStyle = 'rgba(255,255,255,.85)'; c.beginPath(); c.arc(57, 57, 4.5, 0, 7); c.fill();
   }, true);
   // 千眼菇的菇傘：暗紅色、中間深邊緣淡，有一塊一塊的斑和白色的疣（像毒蠅傘），從頂上往下的紋路；眼睛是 3D 的另外放
-  capTex = canvasTex(512, 256, (c) => {
+  capTex = photoTex('m-capred', () => canvasTex(512, 256, (c) => {
     const g = c.createLinearGradient(0, 0, 0, 256); g.addColorStop(0, '#6e1018'); g.addColorStop(0.55, '#b4222e'); g.addColorStop(1, '#cf4848');
     c.fillStyle = g; c.fillRect(0, 0, 512, 256);
     for (let i = 0; i < 400; i++) { c.fillStyle = `rgba(${40 + rnd() * 40 | 0},0,${rnd() * 20 | 0},${0.08 + rnd() * 0.14})`; c.beginPath(); c.ellipse(rnd() * 512, rnd() * 256, 6 + rnd() * 22, 3 + rnd() * 10, rnd() * 3, 0, 7); c.fill(); }
@@ -442,18 +509,22 @@ function makeGardenTextures() {
       c.fillStyle = `rgb(${225 + rnd() * 25 | 0},${210 + rnd() * 30 | 0},${190 + rnd() * 30 | 0})`; c.beginPath(); c.ellipse(x, y, rr * 1.2, rr * 0.8, 0, 0, 7); c.fill();
       c.fillStyle = 'rgba(255,255,255,.5)'; c.beginPath(); c.ellipse(x - rr * 0.3, y - rr * 0.3, rr * 0.5, rr * 0.3, 0, 0, 7); c.fill();
     }
-  });
+  }));
+  capTex.wrapT = THREE.ClampToEdgeWrapping;
   // 菇傘下面的菌褶、菇柄（奶油色、有纖維；向日葵和草叢人的莖也拿它染色用）
-  gillTex = canvasTex(256, 256, (c) => {
+  gillTex = canvasTex(512, 512, (c) => {
+    c.scale(2, 2);
     c.fillStyle = '#6a2a2e'; c.fillRect(0, 0, 256, 256);
     for (let i = 0; i < 90; i++) { const a = i / 90 * Math.PI * 2; c.strokeStyle = i % 2 ? 'rgba(240,200,190,.55)' : 'rgba(30,5,8,.6)'; c.lineWidth = i % 2 ? 2 : 1.4; c.beginPath(); c.moveTo(128 + Math.cos(a) * 26, 128 + Math.sin(a) * 26); c.lineTo(128 + Math.cos(a) * 130, 128 + Math.sin(a) * 130); c.stroke(); }
   });
-  stemTex = canvasTex(128, 128, (c) => {
+  stemTex = canvasTex(512, 512, (c) => {
+    c.scale(4, 4);
     const g = c.createLinearGradient(0, 0, 0, 128); g.addColorStop(0, '#f1e9cf'); g.addColorStop(1, '#cdbf96');
     c.fillStyle = g; c.fillRect(0, 0, 128, 128);
     for (let i = 0; i < 60; i++) { c.strokeStyle = `rgba(${120 + rnd() * 60 | 0},${100 + rnd() * 50 | 0},60,${0.15 + rnd() * 0.25})`; c.lineWidth = 1 + rnd() * 2; const x = rnd() * 128; c.beginPath(); c.moveTo(x, 0); c.quadraticCurveTo(x + (rnd() - 0.5) * 10, 64, x + (rnd() - 0.5) * 8, 128); c.stroke(); }
     for (let i = 0; i < 25; i++) { c.fillStyle = `rgba(90,60,40,${0.1 + rnd() * 0.2})`; c.beginPath(); c.ellipse(rnd() * 128, rnd() * 128, 2 + rnd() * 6, 1 + rnd() * 3, 0, 0, 7); c.fill(); }
   });
+  photoInto(gillTex, 'm-gills'); photoInto(stemTex, 'm-stem');
   // 草叢人的草葉：像頭髮那樣一束一束（根在上面、葉尖在下面），根部深、葉尖淡，有幾片枯黃的
   grassStrandTex = canvasTex(64, 256, (c) => {
     for (let i = 0; i < 22; i++) {
@@ -481,7 +552,8 @@ function makeGardenTextures() {
     for (let i = 0; i < 40; i++) { c.fillStyle = `rgba(255,240,245,${0.1 + rnd() * 0.2})`; c.beginPath(); c.ellipse(rnd() * 256, rnd() * 256, 2 + rnd() * 5, 1 + rnd() * 2, rnd() * 3, 0, 7); c.fill(); }
   });
   // 向日葵眼的花盤：鋪滿葵花籽（一顆顆有亮面和暗面），中間是暗紅色的眼窩，血絲往外爬
-  sunDiscTex = canvasTex(256, 256, (c) => {
+  sunDiscTex = canvasTex(512, 512, (c) => {
+    c.scale(2, 2);
     c.fillStyle = '#3a2412'; c.fillRect(0, 0, 256, 256);
     for (let i = 0; i < 900; i++) {
       const a = i * 2.39996, d = 8 + Math.sqrt(i) * 4.2; if (d > 128) break;
@@ -490,6 +562,7 @@ function makeGardenTextures() {
       c.fillStyle = `rgb(${52 + rnd() * 30 | 0},${34 + rnd() * 20 | 0},${16 + rnd() * 10 | 0})`; c.beginPath(); c.ellipse(x, y, sz * 1.1, sz * 0.7, a, 0, 7); c.fill();
       c.fillStyle = 'rgba(255,220,150,.3)'; c.beginPath(); c.ellipse(x - 0.8, y - 0.8, sz * 0.6, sz * 0.32, a, 0, 7); c.fill();
     }
+    if (photos['m-seeds']) { const m0 = canvasMean(c, 512, 512); c.drawImage(photos['m-seeds'], 0, 0, 256, 256); matchMean(c, 512, 512, m0); }
     const g = c.createRadialGradient(128, 128, 22, 128, 128, 84); g.addColorStop(0, '#4a0c10'); g.addColorStop(0.6, 'rgba(90,20,24,.85)'); g.addColorStop(1, 'rgba(90,20,24,0)');
     c.fillStyle = g; c.beginPath(); c.arc(128, 128, 84, 0, 7); c.fill();
     drawVeins(c, 128, 128, 34, 112, 14, 4242, 0.6, 0);
@@ -550,13 +623,15 @@ function makeGardenTextures() {
   });
   clothTex = canvasTex(64, 64, (c) => { for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) { c.fillStyle = (x + y) % 2 ? '#e2394a' : '#fff4f0'; c.fillRect(x * 8, y * 8, 8, 8); } });
   // 向日葵眼的花瓣（根在下面、尖在上面）：根部橘褐色、往上變黃，有葉脈；尖端和邊緣枯掉變咖啡色，有幾個破洞
-  sunPetalTex = canvasTex(64, 128, (c) => {
+  sunPetalTex = canvasTex(128, 256, (c) => {
+    c.scale(2, 2);
     const g = c.createLinearGradient(0, 128, 0, 0); g.addColorStop(0, '#8a4a10'); g.addColorStop(0.25, '#d9901e'); g.addColorStop(0.6, '#f3c22e'); g.addColorStop(1, '#e8b43a');
     c.fillStyle = g; c.beginPath(); c.moveTo(32, 126); c.bezierCurveTo(2, 100, 2, 50, 32, 4); c.bezierCurveTo(62, 50, 62, 100, 32, 126); c.fill();
     c.strokeStyle = 'rgba(140,70,10,.55)'; c.lineWidth = 1.2;
     c.beginPath(); c.moveTo(32, 126); c.lineTo(32, 8); c.stroke();
     for (let i = 0; i < 6; i++) { const y = 110 - i * 16; c.beginPath(); c.moveTo(32, y); c.quadraticCurveTo(20, y - 12, 10 + i * 2, y - 24); c.moveTo(32, y); c.quadraticCurveTo(44, y - 12, 54 - i * 2, y - 24); c.stroke(); }
     c.globalCompositeOperation = 'source-atop';
+    if (photos['m-petal']) { const m0 = canvasMean(c, 128, 256); c.globalAlpha = 0.8; c.drawImage(photos['m-petal'], 0, 0, 64, 128); c.globalAlpha = 1; matchMean(c, 128, 256, m0); }
     const d = c.createLinearGradient(0, 0, 0, 44); d.addColorStop(0, 'rgba(70,30,10,.85)'); d.addColorStop(1, 'rgba(70,30,10,0)'); c.fillStyle = d; c.fillRect(0, 0, 64, 44);
     for (let i = 0; i < 6; i++) { c.fillStyle = `rgba(90,40,15,${0.3 + rnd() * 0.4})`; c.beginPath(); c.ellipse(10 + rnd() * 44, 20 + rnd() * 90, 2 + rnd() * 4, 1.5 + rnd() * 3, rnd() * 3, 0, 7); c.fill(); }
     c.globalCompositeOperation = 'destination-out';
@@ -1829,6 +1904,7 @@ function paintEyeball(c, W, H) {
   const g = c.createRadialGradient(cx, cy, 30 * sc, cx, cy, 52 * sc);
   g.addColorStop(0, 'rgba(90,70,60,.35)'); g.addColorStop(1, 'rgba(90,70,60,0)');
   c.fillStyle = g; c.fillRect(cx - 52 * sc, cy - 52 * sc, 104 * sc, 104 * sc);
+  overlayDetail(c, 'sclera', W, H, 2, 0.75);   // 照片的眼白：濕濕的表面、細細的微血管
   drawVeins(c, cx, cy, 36 * sc, 132 * sc, 28, 2468, sc, W);
   drawVeins(c, cx + W / 2, cy, 10 * sc, 140 * sc, 10, 1357, 1.6 * sc, W);
 }
@@ -2004,7 +2080,8 @@ function momoHair() {
   return S;
 }
 function buildMomo(r, g) {
-  const skin = ownLM('#d8cfc4', { transparent: true }), leg = ownLM('#b8a37e', { transparent: true }), claw = ownLM('#3a3230', { transparent: true });
+  // 照片的細節：皮膚、鳥腳的鱗片、爪子（骨頭）、頭髮
+  const skin = withDetail(ownLM('#d8cfc4', { transparent: true }), 'skin', 5, 1.5), leg = withDetail(ownLM('#b8a37e', { transparent: true }), 'birdleg', 14, 1.4), claw = withDetail(ownLM('#3a3230', { transparent: true }), 'bone', 10, 0.7);
   for (const s of [-1, 1]) {
     limb(g, [s * 0.1, 0.8, 0], [s * 0.12, 0.56, 0.1], 0.05, skin);
     limb(g, [s * 0.12, 0.56, 0.1], [s * 0.12, 0.3, -0.1], 0.028, leg);
@@ -2015,9 +2092,9 @@ function buildMomo(r, g) {
   }
   sph(g, 0.27, 0, 1.02, 0, skin, 1, 1.15, 0.9, 14);
   limb(g, [0, 1.28, 0], [0, 1.42, 0], 0.045, skin);
-  const scalp = ownLM('#141216', { transparent: true });
+  const scalp = withDetail(ownLM('#141216', { transparent: true }), 'hair', 4);
   sph(g, 0.16, 0, 1.68, -0.1, scalp, 1, 1.1, 0.75, 12);
-  const hairM = hairMat();
+  const hairM = withDetail(hairMat(), 'hair', 3, 0.9);
   g.add(new THREE.Mesh(hairGeo('momohair2', momoHair()), hairM));
   r.hairU = hairM.userData.hair;
   const faceMat = ownBasic({ map: momoFaceTex, transparent: true, alphaTest: 0.35, color: 0xc9c3bd });
@@ -2051,7 +2128,8 @@ function crawlerHair() {
   return S;
 }
 function buildCrawler(r, g) {
-  const skin = ownLM('#7d8a94', { transparent: true }), dress = ownLM('#cfcfc6', { transparent: true });
+  // 照片的細節：皮膚、髒髒的布（白色連身裙）、頭髮
+  const skin = withDetail(ownLM('#7d8a94', { transparent: true }), 'skin', 5, 1.4), dress = withDetail(ownLM('#cfcfc6', { transparent: true }), 'rag', 4);
   r.body = new THREE.Group(); g.add(r.body);
   sph(r.body, 0.2, 0, 0.36, -0.08, dress, 0.95, 0.7, 2.0, 14);
   for (const s of [-1, 1]) {
@@ -2067,13 +2145,13 @@ function buildCrawler(r, g) {
     r.arms.push(sh);
   }
   r.head = new THREE.Group(); r.head.position.set(...CRAWL_HEAD); r.head.rotation.x = -CRAWL_TILT; r.body.add(r.head);
-  const scalp = ownLM('#221f25', { transparent: true });
+  const scalp = withDetail(ownLM('#221f25', { transparent: true }), 'hair', 4);
   sph(r.head, 0.13, 0, 0.064, -0.128, scalp, 1, 1.15, 1, 12);
   sph(r.body, 0.2, 0, 0.5, -0.02, scalp, 0.95, 0.32, 1.5, 12); // 披在肩膀和背上的頭髮底下那一層
   const faceMat = ownLM('#ffffff', { map: crawlerFaceTex, transparent: true, alphaTest: 0.35 });
   r.face = new THREE.Mesh(faceGeo('crawlface2', 0.46, 0.13, 0.16, -0.0126, 0.05), faceMat);
   r.head.add(r.face);
-  const hairM = hairMat();
+  const hairM = withDetail(hairMat(), 'hair', 3, 0.9);
   r.head.add(new THREE.Mesh(hairGeo('crawlhair2', crawlerHair()), hairM));
   r.hairU = hairM.userData.hair;
   r.glint = ownSprite(glowTex, 0xffffff);
@@ -2096,8 +2174,8 @@ function buildBalloon(r, g) {
 }
 // 小丑：條紋衣褲、皺摺領、小禮帽、一手拿刀一手拉著紅氣球
 function buildClown(r, g) {
-  const stripe = ownLM('#ffffff', { map: stripeTex, transparent: true }), white = ownLM('#ece8e0', { transparent: true });
-  const black = ownLM('#1b1a1d', { transparent: true }), steel = ownLM('#c9ced4', { transparent: true });
+  const stripe = withDetail(ownLM('#ffffff', { map: stripeTex, transparent: true }), 'cotton', 6), white = withDetail(ownLM('#ece8e0', { transparent: true }), 'cotton', 6);
+  const black = withDetail(ownLM('#1b1a1d', { transparent: true }), 'cotton', 6), steel = withDetail(ownLM('#c9ced4', { transparent: true }), 'steel', 6);
   for (const s of [-1, 1]) {
     cyl(g, 0.085, 0.09, 0.8, s * 0.1, 0, 0, stripe, 10);
     box(g, s * 0.1 - 0.06, s * 0.1 + 0.06, 0, 0.07, -0.05, 0.12, black, false);
@@ -2122,13 +2200,14 @@ function buildClown(r, g) {
 // 草叢人：平常只看得到一叢會動的長草（幾十片草葉各自搖）；站起來時，像樹幹一樣纏著藤蔓和鬚根的長身體和臉從草裡升上來
 // 臉是往前凸的曲面，被燈光照到才有明暗；頭頂的草也會搖
 function buildGrass(r, g) {
-  const gm = hairMat(grassStrandTex, 0.6);
+  const gm = withDetail(hairMat(grassStrandTex, 0.6), 'grass', 2.5, 0.8);
   r.tuft = new THREE.Group(); g.add(r.tuft);
   r.tuft.add(new THREE.Mesh(hairGeo('gtuft2', [...grassStrands(44, 0.34, 0.55, 1.05, 0.22, 4401), ...grassStrands(22, 0.2, 0.3, 0.55, 0.1, 4402)]), gm));
   r.grassU = gm.userData.hair;
   r.body = new THREE.Group(); g.add(r.body);
-  const skin = ownLM('#a09a72', { map: stemTex, shade: 0.85, transparent: true }), streak = ownLM('#a4323a', { shade: 0.5, transparent: true });
-  const vine = ownLM('#3f6a2c', { shade: 0.7, transparent: true }), root = ownLM('#5a4a30', { shade: 0.7, transparent: true });
+  // 像樹幹的身體（樹皮）、纏著的藤蔓（苔蘚）、鬚根（樹皮）
+  const skin = withDetail(ownLM('#a09a72', { map: stemTex, shade: 0.85, transparent: true }), 'bark', 3, 0.9), streak = ownLM('#a4323a', { shade: 0.5, transparent: true });
+  const vine = withDetail(ownLM('#3f6a2c', { shade: 0.7, transparent: true }), 'moss', 6, 0.8), root = withDetail(ownLM('#5a4a30', { shade: 0.7, transparent: true }), 'bark', 8);
   taper(r.body, [0, 0, 0], [0, 1.28, 0], 0.17, 0.11, skin, 10);
   limb(r.body, [0.06, 0.4, 0.13], [0.04, 1.1, 0.14], 0.02, streak);
   limb(r.body, [-0.07, 0.3, 0.12], [-0.05, 0.9, 0.13], 0.014, streak);
@@ -2142,7 +2221,7 @@ function buildGrass(r, g) {
   const faceMat = ownLM('#ffffff', { map: grassFaceTex, transparent: true, alphaTest: 0.3, shade: 0.6 });
   r.face = new THREE.Mesh(faceGeo('grassface2', 0.62, 0.145, 0.24, -0.04, 0.07), faceMat);
   r.face.position.set(0, 1.5, 0.08); r.body.add(r.face);
-  const hm = hairMat(grassStrandTex, 0.6);
+  const hm = withDetail(hairMat(grassStrandTex, 0.6), 'grass', 2.5, 0.8);
   r.body.add(new THREE.Mesh(hairGeo('ghead', grassStrands(26, 0.1, 0.25, 0.45, 0.12, 4403, 1.63, 0.06, 0.6)), hm));
   r.headU = hm.userData.hair;
   r.mats.push(gm, skin, streak, vine, root, faceMat, hm);
@@ -2150,9 +2229,10 @@ function buildGrass(r, g) {
 // 大嘴觸角蟲：粉紅色的大肉團（蛞蝓形、濕濕的皮有皺紋和疙瘩，被手電筒照到會反光）、4 根長著眼睛的觸角、
 // 一圈肉唇和上下兩排尖牙的大嘴（3D 的，咬完會一張一合地嚼）、嘴邊兩顆嵌在肉裡的大眼睛、身體下面一排小芽
 function buildSnail(r, g) {
-  const skin = ownPhong('#ffffff', { map: snailSkinTex, specular: 0x664455, shininess: 22, shade: 0.8, transparent: true });
-  const skin2 = ownPhong('#ffd9e2', { map: snailSkinTex, specular: 0x664455, shininess: 22, shade: 0.8, transparent: true });
-  const lip = ownLM('#b84a62', { shade: 0.8, transparent: true }), inner = ownLM('#2a0408', { transparent: true }), tooth = ownLM('#efe4cf', { shade: 0.7, transparent: true });
+  // 照片的細節：濕濕的蛞蝓皮（皺紋和疙瘩照原本畫的）、牙齒（骨頭）
+  const skin = withDetail(ownPhong('#ffffff', { map: snailSkinTex, specular: 0x664455, shininess: 22, shade: 0.8, transparent: true }), 'slug', 3, 0.8);
+  const skin2 = withDetail(ownPhong('#ffd9e2', { map: snailSkinTex, specular: 0x664455, shininess: 22, shade: 0.8, transparent: true }), 'slug', 3, 0.8);
+  const lip = withDetail(ownLM('#b84a62', { shade: 0.8, transparent: true }), 'slug', 5), inner = ownLM('#2a0408', { transparent: true }), tooth = withDetail(ownLM('#efe4cf', { shade: 0.7, transparent: true }), 'bone', 12, 0.7);
   const eye = wetEyeMat(bigEyeTex, 0x2a1a1a, 0x444444, { transparent: true });
   const drool = ownPhong('#eef3d2', { transparent: true, opacity: 0.6, specular: 0xffffff, shininess: 50, depthWrite: false });
   r.body = new THREE.Group(); g.add(r.body);
@@ -2183,7 +2263,7 @@ function buildSnail(r, g) {
     const ring = new THREE.Mesh(geo('snlid2', () => new THREE.TorusGeometry(0.05, 0.016, 8, 14)), skin2); ring.position.set(x, 0.47, z); r.stalks.add(ring);
     const e = new THREE.Mesh(geo('stalkeye', () => new THREE.SphereGeometry(0.065, 12, 10)), eye); e.position.set(x, 0.47, z); r.stalks.add(e);
   }
-  const sprout = ownLM('#efe6d6', { shade: 0.6, transparent: true }), stem = ownLM('#7a8a6a', { transparent: true });
+  const sprout = ownLM('#efe6d6', { shade: 0.6, transparent: true }), stem = withDetail(ownLM('#7a8a6a', { transparent: true }), 'moss', 8, 0.6);
   for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2; limb(r.body, [Math.cos(a) * 0.55, 0, Math.sin(a) * 0.62 - 0.1], [Math.cos(a) * 0.58, 0.12, Math.sin(a) * 0.66 - 0.1], 0.01, stem); sph(r.body, 0.035, Math.cos(a) * 0.58, 0.14, Math.sin(a) * 0.66 - 0.1, sprout, 1, 1, 1, 6); }
   r.mats.push(skin, skin2, lip, inner, tooth, eye, drool, sprout, stem);
 }
@@ -2200,10 +2280,12 @@ function girlHair() {
   return S;
 }
 function buildGirl(r, g) {
-  const top = ownLM('#5f7fae', { shade: 0.75, transparent: true }), skirt = ownLM('#ffffff', { map: pleatTex, shade: 0.7, transparent: true }), skin = ownLM('#d8cfc4', { shade: 0.75, transparent: true });
-  const blood = ownLM('#a3121c', { shade: 0.6, transparent: true }), branch = ownLM('#5c3a22', { shade: 0.7, transparent: true }), petal = ownLM('#e88aa8', { shade: 0.7, transparent: true });
-  const eye = wetEyeMat(flowerEyeTex, 0x2a1a1a, 0x444444, { transparent: true }), white = ownLM('#f2efe8', { shade: 0.6, transparent: true });
-  const sock = ownLM('#eeeeee', { shade: 0.7, transparent: true }), shoe = ownLM('#222226', { shade: 0.7, transparent: true }), hemM = ownLM('#2f3f5c', { shade: 0.7, transparent: true });
+  // 照片的細節：衣服、裙子、領子、襪子是棉布，皮膚、樹枝（樹皮）、頭髮
+  const cloth = (c, o) => withDetail(ownLM(c, { shade: 0.7, transparent: true, ...o }), 'cotton', 7);
+  const top = cloth('#5f7fae', { shade: 0.75 }), skirt = cloth('#ffffff', { map: pleatTex }), skin = withDetail(ownLM('#d8cfc4', { shade: 0.75, transparent: true }), 'skin', 5, 1.3);
+  const blood = ownLM('#a3121c', { shade: 0.6, transparent: true }), branch = withDetail(ownLM('#5c3a22', { shade: 0.7, transparent: true }), 'bark', 8), petal = ownLM('#e88aa8', { shade: 0.7, transparent: true });
+  const eye = wetEyeMat(flowerEyeTex, 0x2a1a1a, 0x444444, { transparent: true }), white = cloth('#f2efe8', { shade: 0.6 });
+  const sock = cloth('#eeeeee'), shoe = ownLM('#222226', { shade: 0.7, transparent: true }), hemM = cloth('#2f3f5c');
   for (const s of [-1, 1]) { limb(g, [s * 0.08, 0.1, 0], [s * 0.08, 0.62, 0], 0.035, skin); limb(g, [s * 0.08, 0.02, 0], [s * 0.08, 0.14, 0], 0.038, sock); sph(g, 0.05, s * 0.08, 0.03, 0.03, shoe, 1, 0.6, 1.5, 8); }
   const sk = new THREE.Mesh(geo('gskirt2', () => new THREE.ConeGeometry(0.3, 0.45, 28, 1, true)), skirt); sk.position.y = 0.72; g.add(sk);
   const hem = new THREE.Mesh(geo('ghem', () => new THREE.TorusGeometry(0.3, 0.012, 6, 28)), hemM); hem.rotation.x = Math.PI / 2; hem.position.y = 0.5; g.add(hem);
@@ -2217,13 +2299,13 @@ function buildGirl(r, g) {
     for (let k = -1; k <= 1; k++) limb(g, [s * 0.27, 0.62, 0.11], [s * 0.27 + k * 0.025, 0.54, 0.13], 0.008, blood);
   }
   // 頭：一顆黑色的頭皮（髮束之間不會露出皮膚，露出來的地方就是頭頂的頭髮），臉貼在頭的前面
-  const scalp = ownLM('#141216', { shade: 0.5, transparent: true });
+  const scalp = withDetail(ownLM('#141216', { shade: 0.5, transparent: true }), 'hair', 4);
   sph(g, 0.175, 0, 1.65, -0.03, scalp, 1, 1.05, 1, 14);
   const faceMat = ownLM('#ffffff', { map: girlFaceTex, transparent: true, alphaTest: 0.3, shade: 0.55 });
   r.face = new THREE.Mesh(faceGeo('girlface2', 0.5, 0.13, 0.165, -0.012, 0.07), faceMat);
   r.face.position.set(0, 1.62, 0.1); g.add(r.face);
   r.eye = new THREE.Mesh(geo('geye', () => new THREE.SphereGeometry(0.04, 14, 10)), eye); r.eye.position.set(-0.055, 1.624, 0.146); g.add(r.eye);
-  const hairM = hairMat(strandTex, 0.5);
+  const hairM = withDetail(hairMat(strandTex, 0.5), 'hair', 3, 0.9);
   g.add(new THREE.Mesh(hairGeo('girlhair3', girlHair()), hairM));
   r.hairU = hairM.userData.hair;
   // 從右眼長出來的樹枝和兩顆眼球花（被手電筒照到會閉起來）
@@ -2437,7 +2519,7 @@ function buildSunflower(f, g) {
   }
   const eyeG = new THREE.Group(); eyeG.position.y = 1.32; eyeG.rotation.order = 'YXZ'; g.add(eyeG);
   eyeG.add(new THREE.Mesh(domeGeo('sundome', 0.27, 0.05), ownLM('#ffffff', { map: sunDiscTex, shade: 0.7 })));
-  const back = new THREE.Mesh(geo('sunback', () => new THREE.CylinderGeometry(0.27, 0.2, 0.08, 20)), ownLM('#3f6a2c', { shade: 0.7 }));
+  const back = new THREE.Mesh(geo('sunback', () => new THREE.CylinderGeometry(0.27, 0.2, 0.08, 20)), withDetail(ownLM('#3f6a2c', { shade: 0.7 }), 'moss', 6, 0.8));
   back.rotation.x = Math.PI / 2; back.position.z = -0.045; eyeG.add(back);
   const pm = ownLM('#ffffff', { map: sunPetalTex, alphaTest: 0.4, side: THREE.DoubleSide, shade: 0.7 });
   for (const [n, rad, len, w, z, curl, off, tilt] of [[18, 0.24, 0.3, 0.11, -0.012, -0.08, 0, -0.2], [13, 0.22, 0.22, 0.09, 0.005, 0.05, 0.5, 0.15]]) {
@@ -2451,7 +2533,7 @@ function buildSunflower(f, g) {
       eyeG.add(p);
     }
   }
-  const flesh = ownLM('#5a2a26', { shade: 0.85 });
+  const flesh = withDetail(ownLM('#5a2a26', { shade: 0.85 }), 'slug', 8);
   const rim = new THREE.Mesh(geo('sunrim', () => new THREE.TorusGeometry(0.165, 0.04, 10, 24)), flesh); rim.position.z = 0.04; eyeG.add(rim);
   const eyeMat = wetEyeMat(eyeballTex, 0x1a1414);
   const ball = new THREE.Mesh(geo('suneye', () => new THREE.SphereGeometry(0.19, 24, 16)), eyeMat);
@@ -2459,7 +2541,7 @@ function buildSunflower(f, g) {
   const irisMat = wetEyeMat(irisTex, 0x141010, 0x777777);
   const iris = new THREE.Mesh(irisGeo('suniris', 0.19, 0.085, 0.02), irisMat);
   eyeG.add(iris);
-  const lidMat = ownLM('#6a3a30', { shade: 0.9 }), lids = [];
+  const lidMat = withDetail(ownLM('#6a3a30', { shade: 0.9 }), 'slug', 8), lids = [];
   for (const s of [1, -1]) { const l = new THREE.Mesh(lidGeo('sunlid', 0.2, 0, 1.05), lidMat); l.position.z = 0.02; l.scale.y = s; eyeG.add(l); lids.push(l); }
   const vein = ownLM('#8a1e26', { shade: 0.6 });
   for (let i = 0; i < 5; i++) { const a = -0.3 - i * 0.6 - r() * 0.3, x0 = Math.cos(a) * 0.15, y0 = Math.sin(a) * 0.15; limb(eyeG, [x0, y0, 0.12], [x0 * 1.7, y0 * 1.7, 0.05], 0.006, vein); }
@@ -2488,7 +2570,7 @@ function buildShroom(f, g) {
     eyes.push({ th, ph, p, n, s: 0.75 + r() * 0.5, ph2: r() * 6 });
   }
   const balls = new THREE.InstancedMesh(geo('sheye', () => new THREE.SphereGeometry(0.065, 14, 10)), wetEyeMat(bigEyeTex, 0x1a1414), N);
-  const lids = new THREE.InstancedMesh(geo('shlid', () => new THREE.TorusGeometry(0.065, 0.022, 8, 14)), ownLM('#7a2028', { shade: 0.8 }), N);
+  const lids = new THREE.InstancedMesh(geo('shlid', () => new THREE.TorusGeometry(0.065, 0.022, 8, 14)), withDetail(ownLM('#7a2028', { shade: 0.8 }), 'slug', 10), N);
   for (let i = 0; i < N; i++) {
     const e = eyes[i];
     _q.setFromUnitVectors(Z_AXIS, e.n);
@@ -2748,25 +2830,30 @@ function makeMonster3Textures() {
     for (let i = 0; i < 60; i++) { let x = rnd() * w, y = rnd() * h; c.beginPath(); c.moveTo(x, y); for (let k = 0; k < 4; k++) { x += (rnd() - 0.5) * 30; y += (rnd() - 0.5) * 30; c.lineTo(x, y); } c.stroke(); }
     for (let i = 0; i < 30; i++) { c.fillStyle = `rgba(40,30,30,${0.15 + rnd() * 0.3})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 3 + rnd() * 10, 2 + rnd() * 6, rnd() * 3, 0, 7); c.fill(); }
   });
-  // 蘑菇傘（半球貼圖）：紫藍色、白斑、從頂上裂開的縫透出紫光
-  kronosCapTex = canvasTex(512, 256, (c, w, h) => {
+  // 蘑菇傘（半球貼圖）：紫藍色、白斑、從頂上裂開的縫透出紫光；有照片的話紫色菇傘和白斑用照片（兩倍大），裂縫照原本的畫在上面
+  const capK = photos['m-capk'];
+  kronosCapTex = canvasTex(capK ? 1024 : 512, capK ? 512 : 256, (c, w, h) => {
+    if (capK) { c.drawImage(capK, 0, 0, w, h); c.scale(w / 512, h / 256); w = 512; h = 256; }
     const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#5a3a8c'); g.addColorStop(0.6, '#3e2868'); g.addColorStop(1, '#6a5aa0');
-    c.fillStyle = g; c.fillRect(0, 0, w, h);
-    for (let i = 0; i < 40; i++) { const x = rnd() * w, y = rnd() * h * 0.8, rr = 6 + rnd() * 16; c.fillStyle = 'rgba(40,20,70,.5)'; c.beginPath(); c.ellipse(x + 2, y + 3, rr * 1.2, rr * 0.8, 0, 0, 7); c.fill(); c.fillStyle = `rgba(${225 + rnd() * 25 | 0},${220 + rnd() * 25 | 0},${235 + rnd() * 20 | 0},.9)`; c.beginPath(); c.ellipse(x, y, rr * 1.2, rr * 0.8, 0, 0, 7); c.fill(); }
+    if (!capK) { c.fillStyle = g; c.fillRect(0, 0, w, h); }
+    if (!capK) for (let i = 0; i < 40; i++) { const x = rnd() * w, y = rnd() * h * 0.8, rr = 6 + rnd() * 16; c.fillStyle = 'rgba(40,20,70,.5)'; c.beginPath(); c.ellipse(x + 2, y + 3, rr * 1.2, rr * 0.8, 0, 0, 7); c.fill(); c.fillStyle = `rgba(${225 + rnd() * 25 | 0},${220 + rnd() * 25 | 0},${235 + rnd() * 20 | 0},.9)`; c.beginPath(); c.ellipse(x, y, rr * 1.2, rr * 0.8, 0, 0, 7); c.fill(); }
     c.lineCap = 'round';
     for (let i = 0; i < 5; i++) { const x0 = i / 5 * w + rnd() * 60; c.strokeStyle = 'rgba(200,150,255,.45)'; c.lineWidth = 12; c.beginPath(); c.moveTo(x0, 0); c.lineTo(x0 + (rnd() - 0.5) * 40, 60); c.lineTo(x0 + (rnd() - 0.5) * 60, 150); c.lineTo(x0 + (rnd() - 0.5) * 50, 230); c.stroke(); c.strokeStyle = '#e8c8ff'; c.lineWidth = 4; c.stroke(); }
-    for (let i = 0; i < 30; i++) { c.fillStyle = `rgba(20,10,30,${0.1 + rnd() * 0.25})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 6 + rnd() * 20, 3 + rnd() * 10, rnd() * 3, 0, 7); c.fill(); }
+    if (!capK) for (let i = 0; i < 30; i++) { c.fillStyle = `rgba(20,10,30,${0.1 + rnd() * 0.25})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 6 + rnd() * 20, 3 + rnd() * 10, rnd() * 3, 0, 7); c.fill(); }
   });
-  // 熔岩暴君：黑色岩塊（diffuse）和縫隙裡的熔岩光（emissiveMap，亮度會呼吸）
+  kronosCapTex.wrapT = THREE.ClampToEdgeWrapping;
+  // 熔岩暴君：黑色岩塊（diffuse）和縫隙裡的熔岩光（emissiveMap，亮度會呼吸）；有照片就用照片（裂縫抓出來當發光的那張）
   const cracks = [];
   for (let i = 0; i < 26; i++) { let x = rnd() * 512, y = rnd() * 512; const pts = [[x, y]]; for (let k = 0; k < 6; k++) { x += (rnd() - 0.5) * 90; y += (rnd() - 0.5) * 90; pts.push([x, y]); } cracks.push(pts); }
   const strokeCracks = (c, col, lw) => { c.strokeStyle = col; c.lineWidth = lw; c.lineCap = 'round'; for (const pts of cracks) { c.beginPath(); pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.stroke(); } };
-  rockTex = canvasTex(512, 512, (c, w, h) => {
+  rockTex = photoTex('m-rock', () => canvasTex(512, 512, (c, w, h) => {
     c.fillStyle = '#17150f'; c.fillRect(0, 0, w, h);
     for (let i = 0; i < 160; i++) { const x = rnd() * w, y = rnd() * h, bw = 20 + rnd() * 60, bh = 16 + rnd() * 50; c.fillStyle = `rgb(${22 + rnd() * 26 | 0},${20 + rnd() * 20 | 0},${18 + rnd() * 16 | 0})`; c.beginPath(); c.moveTo(x, y); c.lineTo(x + bw, y + (rnd() - 0.5) * 12); c.lineTo(x + bw + (rnd() - 0.5) * 12, y + bh); c.lineTo(x + (rnd() - 0.5) * 12, y + bh); c.closePath(); c.fill(); c.strokeStyle = 'rgba(80,70,60,.35)'; c.lineWidth = 1; c.stroke(); }
     strokeCracks(c, '#000', 6);
-  });
-  lavaCrackTex = canvasTex(512, 512, (c, w, h) => { c.fillStyle = '#000'; c.fillRect(0, 0, w, h); strokeCracks(c, 'rgba(255,80,10,.5)', 12); strokeCracks(c, '#ff6a10', 5); strokeCracks(c, '#ffd060', 2); });
+  }));
+  lavaCrackTex = photoTex('m-lava', () => canvasTex(512, 512, (c, w, h) => { c.fillStyle = '#000'; c.fillRect(0, 0, w, h); strokeCracks(c, 'rgba(255,80,10,.5)', 12); strokeCracks(c, '#ff6a10', 5); strokeCracks(c, '#ffd060', 2); }));
+  // 照片的岩塊比較細：繞一圈排兩張，上下一張（球的貼圖是寬的兩倍長），岩塊才不會被拉成長條
+  if (photos['m-rock'] && photos['m-lava']) for (const t of [rockTex, lavaCrackTex]) t.repeat.set(2, 1);
   // 墮落戰神的斗篷（一片一片的布，用頭髮的做法）：泛黃的白布、鏽褐色的污漬、下擺破破爛爛；腳上的髒布條
   cloakTex = canvasTex(64, 256, (c, w, h) => {
     c.fillStyle = '#ddd6c6'; c.fillRect(6, 0, w - 12, h);
@@ -2803,10 +2890,12 @@ function makeMonster3Textures() {
 // 克羅諾斯・蕈裂：1.5 公尺、駝背的矮人，灰綠色乾裂的屍皮，頭上一頂裂開的紫色蘑菇傘（裂縫透出紫光），
 // 肩膀和腰上長著小蘑菇，右手拿骨矛、左手拿一朵小蘑菇，身上是綠色的破布衣。走路一跛一跛
 function buildKronos(r, g) {
-  const skin = ownLM('#ffffff', { map: kronosSkinTex, shade: 0.8, transparent: true });
-  const cloth = ownLM('#3f5a2e', { shade: 0.7, transparent: true }), bone = ownLM('#d8d0b8', { shade: 0.7, transparent: true });
+  // 照片的細節：乾裂的屍皮（原本畫的斑和裂紋留著）、破布、骨頭；小蘑菇用紫色菇傘的照片
+  const skin = withDetail(ownLM('#ffffff', { map: kronosSkinTex, shade: 0.8, transparent: true }), 'corpse', 3, 1.2);
+  const cloth = withDetail(ownLM('#3f5a2e', { shade: 0.7, transparent: true }), 'rag', 4), bone = withDetail(ownLM('#d8d0b8', { shade: 0.7, transparent: true }), 'bone', 6);
   const cap = ownLM('#ffffff', { map: kronosCapTex, emissive: 0x2a1040, shade: 0.75, transparent: true });
-  const small = ownLM('#8a5aa8', { shade: 0.7, transparent: true });
+  const small = photos['m-capk'] ? ownLM('#ffffff', { map: photoShared['m-capk'] || (photoShared['m-capk'] = photoTex('m-capk')), shade: 0.7, transparent: true })
+    : ownLM('#8a5aa8', { shade: 0.7, transparent: true });
   r.body = new THREE.Group(); g.add(r.body);
   for (const s of [-1, 1]) { taper(r.body, [s * 0.12, 0.55, 0], [s * 0.16, 0.28, 0.06], 0.06, 0.05, skin); taper(r.body, [s * 0.16, 0.28, 0.06], [s * 0.15, 0.03, -0.04], 0.05, 0.04, skin); sph(r.body, 0.07, s * 0.15, 0.03, 0.04, skin, 1.1, 0.5, 1.6, 8); }
   r.torso = new THREE.Group(); r.torso.position.set(0, 0.55, 0); r.torso.rotation.x = 0.55; r.body.add(r.torso);
@@ -2857,8 +2946,9 @@ function buildTyrant(r, g) {
 // 墮落戰神：2.4 公尺，披著破爛的白斗篷（會飄的布片），頭盔上兩根彎角，面罩下是骷髏的臉，胸口的鎧甲破了露出肋骨和
 // 空空的胸腔；拖著一把比人還長的大劍（劍尖在地上磨出火花），腳上綁著髒布條。走路很慢、很重
 function buildWarlord(r, g) {
-  const bone = ownLM('#d8d0bc', { shade: 0.75, transparent: true }), steel = ownPhong('#8a8f96', { specular: 0x666666, shininess: 30, shade: 0.8, transparent: true });
-  const dark = ownLM('#0e0c0a', { transparent: true }), bandage = ownLM('#ffffff', { map: bandageTex, shade: 0.7, transparent: true }), horn = ownLM('#aab4bc', { shade: 0.8, transparent: true });
+  // 照片的細節：骨頭、生鏽刮傷的鐵、髒布條、斗篷的破布
+  const bone = withDetail(ownLM('#d8d0bc', { shade: 0.75, transparent: true }), 'bone', 5, 1.4), steel = withDetail(ownPhong('#8a8f96', { specular: 0x666666, shininess: 30, shade: 0.8, transparent: true }), 'steel', 3);
+  const dark = ownLM('#0e0c0a', { transparent: true }), bandage = withDetail(ownLM('#ffffff', { map: bandageTex, shade: 0.7, transparent: true }), 'rag', 6), horn = withDetail(ownLM('#aab4bc', { shade: 0.8, transparent: true }), 'bone', 6);
   r.body = new THREE.Group(); g.add(r.body);
   r.legs = [];
   for (const s of [-1, 1]) { const leg = new THREE.Group(); leg.position.set(s * 0.2, 1.15, 0); r.body.add(leg); cyl(leg, 0.09, 0.11, 0.6, 0, -0.6, 0, bandage, 10); cyl(leg, 0.08, 0.1, 0.55, 0, -1.15, 0.02, bandage, 10); box(leg, -0.1, 0.1, -1.15, -1.05, -0.08, 0.2, dark); r.legs.push(leg); }
@@ -2873,7 +2963,7 @@ function buildWarlord(r, g) {
   for (const s of [-1, 1]) { taper(r.head, [s * 0.12, 0.1, -0.02], [s * 0.28, 0.32, -0.08], 0.035, 0.02, horn); taper(r.head, [s * 0.28, 0.32, -0.08], [s * 0.3, 0.5, 0.04], 0.02, 0.008, horn); }
   const faceMat = ownLM('#ffffff', { map: skullTex, transparent: true, alphaTest: 0.3, shade: 0.6 });
   r.face = new THREE.Mesh(faceGeo('skullface', 0.36, 0.12, 0.14, -0.02, 0.05), faceMat); r.face.position.set(0, -0.04, 0.13); r.head.add(r.face);
-  const cm = hairMat(cloakTex, 0.6), S = [];
+  const cm = withDetail(hairMat(cloakTex, 0.6), 'rag', 3), S = [];
   for (let x = -0.34; x <= 0.341; x += 0.06) { const j = Math.sin(x * 50) * 0.5 + 0.5; S.push({ a: [x, 2.1, -0.18], b: [x * 1.2, 1.4, -0.3], c: [x * 1.3, 0.35 + j * 0.3, -0.34], w: 0.1, f: Math.PI, ph: x * 9, tp: 0.2 }); }
   for (const s of [-1, 1]) for (let k = 0; k < 3; k++) S.push({ a: [s * 0.36, 2.05, -0.1 + k * 0.08], b: [s * 0.46, 1.4, -0.12 + k * 0.08], c: [s * 0.44, 0.5 + k * 0.15, -0.15 + k * 0.08], w: 0.11, f: s * 1.4, ph: s * 2 + k, tp: 0.25 });
   r.body.add(new THREE.Mesh(hairGeo('cloak', S), cm)); r.hairU = cm.userData.hair;
@@ -2892,7 +2982,9 @@ function buildWarlord(r, g) {
 // 檮杌・九瞳：四腳的巨獸（肩高 2.2 公尺），紫黑色的粗毛、背上一排骨刺、帶刺的尾巴、長爪子；
 // 臉上沒有鼻子和嘴，只有一團九顆大小不一的眼睛（紫色瞳孔，各自會轉、會閉），脖子一圈鬃毛
 function buildTaowu(r, g) {
-  const fur = ownLM('#ffffff', { map: taowuFurTex, shade: 0.8, transparent: true }), spine = ownLM('#4a2a6e', { shade: 0.7, transparent: true }), claw = ownLM('#2a1a30', { shade: 0.6, transparent: true });
+  // 照片的細節：粗獸毛（原本畫的紫黑色毛流留著）、骨刺和爪子是骨頭
+  const fur = withDetail(ownLM('#ffffff', { map: taowuFurTex, shade: 0.8, transparent: true }), 'fur', 3, 1.1);
+  const spine = withDetail(ownLM('#4a2a6e', { shade: 0.7, transparent: true }), 'bone', 6, 0.8), claw = withDetail(ownLM('#2a1a30', { shade: 0.6, transparent: true }), 'bone', 10, 0.7);
   r.body = new THREE.Group(); g.add(r.body);
   sph(r.body, 0.5, 0, 1.3, -0.2, fur, 0.9, 0.85, 1.9, 16);
   sph(r.body, 0.42, 0, 1.4, 0.75, fur, 1.1, 0.95, 0.9, 14);
@@ -2910,7 +3002,7 @@ function buildTaowu(r, g) {
   for (let i = 0; i < 4; i++) { const s = new THREE.Mesh(geo('tspine2', () => new THREE.ConeGeometry(0.035, 0.18, 6)), spine); s.position.set(0, 0.2 - i * 0.05, -0.3 - i * 0.22); s.rotation.x = -0.6; r.tail.add(s); }
   r.head = new THREE.Group(); r.head.position.set(0, 1.55, 1.15); r.body.add(r.head);
   sph(r.head, 0.34, 0, 0, 0, fur, 1, 0.9, 1.1, 14);
-  const mm = hairMat(taowuStrandTex, 0.6);
+  const mm = withDetail(hairMat(taowuStrandTex, 0.6), 'fur', 3);
   r.head.add(new THREE.Mesh(hairGeo('tmane', grassStrands(48, 0.3, 0.3, 0.55, 0.3, 7701, -0.1, -0.25, 0.9)), mm)); r.maneU = mm.userData.hair;
   r.body.add(new THREE.Mesh(hairGeo('tmane2', grassStrands(60, 0.45, 0.25, 0.5, 0.2, 7702, 1.55, 0.3, 0.9)), mm));
   r.eyeMat = wetEyeMat(taowuEyeTex, 0x201030, 0x555555, { transparent: true });
@@ -2983,6 +3075,7 @@ function syncMonster3(e, r, t, p, d, dt) {
       r.litGlow.visible = !!litEye;
       if (litEye) { r.litGlow.position.copy(litEye.position); r.litGlow.position.z += 0.05; r.litGlow.material.opacity = 0.5 + 0.4 * Math.sin(t * 20); }
       r.eyeMat.emissive.setRGB(e.blind > 0 ? 0.05 : 0.15 + 0.1 * Math.sin(t * 3), 0.05, e.blind > 0 ? 0.05 : 0.2);
+      r.eyeMat.opacity = enemyAlpha(e);   // syncEnemy 會讓 r.eyes 一閃一閃（那是給發光的眼睛用的），九顆眼球要一直看得清楚
       break;
     }
   }
@@ -3279,12 +3372,12 @@ function buildEnemy(e, parent = scene) {
     // 深色長裙、蒼白細長的手、垂到背後的長髮、永遠面向你的臉
     const dress = new THREE.Mesh(geo('dress', () => new THREE.ConeGeometry(0.34, 1.32, 16, 1, true)), mat);
     dress.position.y = 0.72; g.add(dress);
-    const skin = ownBasic({ color: 0x6f6a66, transparent: true });
+    const skin = withDetail(ownBasic({ color: 0x6f6a66, transparent: true }), 'skin', 6, 1.3);
     for (const sd of [-1, 1]) {
       const arm = cyl(g, 0.02, 0.015, 0.82, sd * 0.2, 0.5, 0.06, skin, 6); arm.rotation.z = sd * 0.08;
       for (let k = -1; k <= 1; k++) cyl(g, 0.006, 0.004, 0.16, sd * 0.2 + k * 0.013, 0.35, 0.07, skin, 4);
     }
-    const hairMat = ownBasic({ map: hairTex, transparent: true, alphaTest: 0.35 });
+    const hairMat = withDetail(ownBasic({ map: hairTex, transparent: true, alphaTest: 0.35 }), 'hair', 2.5, 0.9);
     const hair = new THREE.Mesh(geo('hairplane', () => new THREE.PlaneGeometry(0.9, 1.45)), hairMat);
     hair.position.set(0, 1.12, -0.07); g.add(hair);
     const faceMat = ownBasic({ map: faceTex, transparent: true, alphaTest: 0.35, color: 0xc9c3bd });
