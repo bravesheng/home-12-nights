@@ -224,7 +224,7 @@ await scenario('w2', '第二世界第 6 夜＋全套裝備（?world=2&night=6&ki
   await shot('2-night');
 });
 
-await scenario('w3', '第三世界第 1 天（各式各樣死去的乘客、乘客轉頭、下車到月台、天黑前車站鎖門、留在車站會被拉回車上）', {}, async ({ page, shot, check }) => {
+await scenario('w3', '第三世界第 1 天（照片貼圖、各式各樣死去的乘客、乘客轉頭、下車到月台、天黑前車站鎖門、留在車站會被拉回車上）', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=3&diff=normal', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
   await sleep(2500);
@@ -242,6 +242,9 @@ await scenario('w3', '第三世界第 1 天（各式各樣死去的乘客、乘�
   });
   check(wh.label === '拉汽笛' && wh.cd > 0, `駕駛台要能拉汽笛（互動「${wh.label}」）`);
   await shot('1-start');
+  // 照片貼圖（Gemini 生成的牆壁、絨布、地毯、地磚、天花板、鐵板……）都要載入
+  const photoN = await page.evaluate(() => Renderer.photos().length);
+  check(photoN === 10, `第三世界的 10 張照片貼圖都要載入（tex/*.webp；現在 ${photoN} 張）`);
   // 乘客：座位上是寫實、各式各樣的死去乘客（紳士、和服婦人、學生……），都閉著眼；「乘客轉頭」事件時頭轉過來、睜開眼睛
   const pax = await page.evaluate(() => Renderer.pax());
   check(pax.n >= 20 && pax.kinds.length >= 8 && pax.list.every(p => p.state === 'dead'), `車上要有 20 個以上、8 種以上死去的乘客（現在 ${pax.n} 個、${pax.kinds.length} 種：${pax.kinds.join('、')}）`);
@@ -740,6 +743,8 @@ await scenario('offline', '離線（快取後斷網，重新打開並開新遊�
   await page.waitForFunction(() => mode === 'play');
   await sleep(2000);
   check((await state(page)).hud, '斷網後也要能開始遊戲');
+  const ph = await page.evaluate(() => Renderer.photos());
+  check(ph.length === 10, `斷網後照片貼圖也要載得到（tex/*.webp 要在 sw.js 的快取清單裡；現在 ${ph.length} 張）`);
   await shot('1-start');
 });
 

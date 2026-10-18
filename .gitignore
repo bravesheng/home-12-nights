@@ -1,3 +1,5 @@
 .DS_Store
 .claude/settings.local.json
 playtest-out/
+# Gemini 生成的原圖（2048×2048，很大），做好的貼圖在 tex/（tools/make-photo-tex.py）
+generated-images/

@@ -50,7 +50,7 @@ node tools/playtest.mjs
 - `js/game.js`：遊戲邏輯和介面：世界、存檔、燈光、怪物、武器、商人和扭蛋、日夜事件、輸入、主迴圈。`isW3()` 的分支會呼叫 `world3.js` 的函式。
 - `js/world2.js`：第二世界的 5 隻怪物。
 - `js/world3.js`：第三世界：車站門的鎖、火爐和燃料、列車停下來、寶箱、車頂（爬梯和艙口用換位置的方式上下，車頂的風）、體溫和寒寂之境、大白燈的擁抱、4 隻新怪物（墮落戰神只在 `aisle` 房間裡走、檮杌會跟著上車頂）、過場動畫和結局、圖鑑的「見過」紀錄。
-- `js/render3d.js`：Three.js 3D 畫面，貼圖和模型都是程式產生的。光照貼圖的大小跟著地圖走（`allocLM`）。第三世界的場景（車廂、車站、真的窗戶和會捲動的車外風景、滑門、家具、寶箱、大白、新怪物、車頂和車頭的鍋爐煙囪）在「第三世界」那幾段；座位上寫實、形形色色的乘客在「第三世界的乘客」那一段（臉和衣服用畫布畫，零件合併成幾個網格）；車頂比車廂地板高 `ROOF_H`，放東西和擺鏡頭都要加 `floorH(x, y)`。
+- `js/render3d.js`：Three.js 3D 畫面，模型都是程式產生的；貼圖大部分是程式畫的，第三世界的牆壁、絨布、地板、天花板、鐵板是照片貼圖（`PHOTO_TEX`，載入好才開始畫，載不到就用程式畫的）。光照貼圖的大小跟著地圖走（`allocLM`）。第三世界的場景（車廂、車站、真的窗戶和會捲動的車外風景、滑門、家具、寶箱、大白、新怪物、車頂和車頭的鍋爐煙囪）在「第三世界」那幾段；座位上寫實、形形色色的乘客在「第三世界的乘客」那一段（臉和衣服用畫布畫，零件合併成幾個網格）；車頂比車廂地板高 `ROOF_H`，放東西和擺鏡頭都要加 `floorH(x, y)`。
 - `js/audio.js`：音效和音樂都用 WebAudio 即時合成，沒有音檔。
 - `js/version.js`：發布時間，由 `stamp.sh` 寫入，不要手改。
 - `sw.js`：離線快取，只在 https 啟用，本機開發時不會快取。
@@ -59,3 +59,4 @@ node tools/playtest.mjs
 - `docs/world2-plan.md`：第二世界的設計計劃書。
 - `docs/world3-plan.md`：第三世界（末班列車）的設計計劃書（已經做完）。
 - `tools/playtest.mjs`：自動試玩測試。
+- `tex/*.webp`：照片貼圖（都在 `sw.js` 的 `ASSETS` 裡）。原圖是用 Chrome 在 Gemini 網頁生成的 2048×2048 JPEG，下載在 `generated-images/`（很大，不放進 git）；`python3 tools/make-photo-tex.py` 把原圖修成可以無縫重複的貼圖、壓成 WebP（`--preview` 會在 `playtest-out/` 拼一張重複排的預覽）。要加新的照片貼圖：在 Gemini 生成、下載，把檔名加進 `make-photo-tex.py` 的 `SOURCES` 和輸出，再加進 `render3d.js` 的 `PHOTO_TEX` 和 `sw.js` 的 `ASSETS`。不要用 Gemini 的 MCP（要另外付費），用 Chrome 操作網頁生成。

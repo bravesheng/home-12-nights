@@ -7,6 +7,9 @@ const ASSETS = [
   './js/version.js', './js/data.js', './js/audio.js', './js/world2.js', './js/world3.js', './js/game.js', './js/render3d.js',
   './lib/three.module.js', './lib/three.core.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png',
+  // 第三世界的照片貼圖（render3d.js 的 PHOTO_TEX）
+  './tex/w3-wall.webp', './tex/w3-ironwall.webp', './tex/w3-velvet.webp', './tex/w3-runner.webp', './tex/w3-carpet.webp',
+  './tex/w3-tile.webp', './tex/w3-ceiling.webp', './tex/w3-iron.webp', './tex/w3-herringbone.webp', './tex/w3-concrete.webp',
 ];
 
 self.addEventListener('install', e => {

@@ -137,6 +137,30 @@ function canvasTex(w, h, draw, cpu = false) {
 }
 let seed = 98765;
 const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+// ---------- 照片貼圖：用 Gemini 生成的寫實材質（原圖在 generated-images/，用 tools/make-photo-tex.py 做成 tex/*.webp） ----------
+// 遊戲開始前先載入；載入失敗或太慢（例如舊的離線快取裡沒有）就用程式畫的
+const PHOTO_TEX = ['w3-wall', 'w3-ironwall', 'w3-velvet', 'w3-runner', 'w3-carpet', 'w3-tile', 'w3-ceiling', 'w3-iron', 'w3-herringbone', 'w3-concrete'];
+const photos = {};
+function loadPhotos() {
+  const all = Promise.all(PHOTO_TEX.map(n => new Promise(res => {
+    const im = new Image();
+    im.onload = () => { photos[n] = im; res(); };
+    im.onerror = () => res();
+    im.src = `tex/${n}.webp`;
+  })));
+  return Promise.race([all, new Promise(res => setTimeout(res, 5000))]);
+}
+// 有照片就用照片做貼圖，沒有就用程式畫的（fallback）
+function photoTex(name, fallback) {
+  const im = photos[name];
+  if (!im) return fallback();
+  const t = new THREE.Texture(im);
+  t.colorSpace = SRGB; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; t.needsUpdate = true;
+  return t;
+}
+// 第三世界的地板換成照片：走道的地毯、景觀車廂的綠地毯、餐車的黑白磁磚、機車室的鐵板、候車室的人字拼、月台的水泥
+// 第二個數字是一公尺貼幾張（花紋細的放大成兩公尺一張，遠看才不會糊成雜訊）
+const FLOOR_PHOTO = { runner: ['w3-runner', 0.5], carpet3: ['w3-carpet', 1], tile3: ['w3-tile', 0.5], iron: ['w3-iron', 1], wood3: ['w3-herringbone', 0.5], platform: ['w3-concrete', 1] };
 function shade(hex, v) {
   const n = parseInt(hex.slice(1), 16);
   const c = x => Math.max(0, Math.min(255, x + v)) | 0;
@@ -145,6 +169,8 @@ function shade(hex, v) {
 const floorTexCache = {};
 function floorTex(type) {
   if (floorTexCache[type]) return floorTexCache[type];
+  const ph = FLOOR_PHOTO[type];
+  if (ph && photos[ph[0]]) { const t = photoTex(ph[0]); t.repeat.set(ph[1], ph[1]); return (floorTexCache[type] = t); }
   const t = canvasTex(64, 64, (c, w, h) => {
     const planks = (base, seam, ph) => {
       for (let y = 0; y < h; y += ph) {
@@ -3658,7 +3684,7 @@ const doorPanels = new Map();
 function makeTrainTextures() {
   const grime = (c, w, h, n, a = 0.18) => { for (let i = 0; i < n; i++) { c.fillStyle = `rgba(20,12,6,${rnd() * a})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 4 + rnd() * 20, 2 + rnd() * 10, rnd() * 3, 0, 7); c.fill(); } };
   // 車廂內牆：上面是泛黃的象牙白壁紙（扇形的裝飾藝術花紋）和線板，中間一條發黑長銅綠的黃銅線，下面是深胡桃木的鑲板（木紋、刮痕、踢腳板）
-  walnutTex = canvasTex(256, 512, (c, w, h) => {
+  walnutTex = photoTex('w3-wall', () => canvasTex(256, 512, (c, w, h) => {
     const g = c.createLinearGradient(0, 0, 0, 300); g.addColorStop(0, '#cfc2a4'); g.addColorStop(1, '#ddd1b6');
     c.fillStyle = g; c.fillRect(0, 0, w, 300);
     c.strokeStyle = 'rgba(150,120,70,.35)'; c.lineWidth = 1.5;
@@ -3674,7 +3700,7 @@ function makeTrainTextures() {
     c.strokeStyle = 'rgba(200,170,130,.35)'; c.lineWidth = 1;
     for (let i = 0; i < 8; i++) { const x = rnd() * w, y = 330 + rnd() * 170; c.beginPath(); c.moveTo(x, y); c.lineTo(x + (rnd() - 0.5) * 50, y + (rnd() - 0.5) * 12); c.stroke(); }
     grime(c, w, 300, 14, 0.14); grime(c, w, h, 10, 0.22);
-  });
+  }));
   // 車站的牆：上面是有裂痕和煤灰的灰泥，下面是泛黃的釉面磚
   stationWallTex = canvasTex(256, 512, (c, w, h) => {
     c.fillStyle = '#b3a890'; c.fillRect(0, 0, w, 290);
@@ -3701,12 +3727,12 @@ function makeTrainTextures() {
     grime(c, w, h, 16, 0.3);
   });
   // 天花板：象牙白，一格一格的線板，泛黃、有水漬
-  ceil3Tex = canvasTex(128, 128, (c, w, h) => {
+  ceil3Tex = photoTex('w3-ceiling', () => canvasTex(128, 128, (c, w, h) => {
     c.fillStyle = '#e2d7bd'; c.fillRect(0, 0, w, h);
     c.strokeStyle = 'rgba(120,100,60,.45)'; c.lineWidth = 3; c.strokeRect(10, 10, w - 20, h - 20);
     c.strokeStyle = 'rgba(255,255,255,.35)'; c.lineWidth = 1.5; c.strokeRect(14, 14, w - 28, h - 28);
     for (let i = 0; i < 6; i++) { c.fillStyle = `rgba(150,120,70,${0.08 + rnd() * 0.18})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 8 + rnd() * 20, 6 + rnd() * 14, rnd() * 3, 0, 7); c.fill(); }
-  });
+  }));
   // 包廂的門：胡桃木滑門，上面是蝕刻玻璃（霧面、扇形花紋），黃銅把手；車站側的車門是墨綠色的車身
   doorPanelTex = canvasTex(128, 256, (c, w, h) => {
     c.fillStyle = '#3a2316'; c.fillRect(0, 0, w, h);
@@ -3734,13 +3760,13 @@ function makeTrainTextures() {
   });
   glassTex.wrapS = glassTex.wrapT = THREE.ClampToEdgeWrapping;
   // 磨破的暗紅絨布
-  velvetTex = canvasTex(64, 64, (c, w, h) => {
+  velvetTex = photoTex('w3-velvet', () => canvasTex(64, 64, (c, w, h) => {
     c.fillStyle = '#5a1f26'; c.fillRect(0, 0, w, h);
     for (let i = 0; i < 300; i++) { c.fillStyle = `rgba(${120 + rnd() * 60 | 0},${30 + rnd() * 20 | 0},${40 + rnd() * 20 | 0},.35)`; c.fillRect(rnd() * w, rnd() * h, 1.5, 1.5); }
     for (let i = 0; i < 5; i++) { c.fillStyle = `rgba(0,0,0,${0.15 + rnd() * 0.2})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 5 + rnd() * 12, 3 + rnd() * 8, rnd() * 3, 0, 7); c.fill(); }
-  });
+  }));
   // 機車室的牆：鉚釘鐵板，有鏽水和煤灰
-  ironWallTex = canvasTex(256, 512, (c, w, h) => {
+  ironWallTex = photoTex('w3-ironwall', () => canvasTex(256, 512, (c, w, h) => {
     c.fillStyle = '#3a3b3f'; c.fillRect(0, 0, w, h);
     c.strokeStyle = 'rgba(0,0,0,.5)'; c.lineWidth = 3;
     for (let y = 0; y <= h; y += 128) { c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke(); }
@@ -3748,7 +3774,7 @@ function makeTrainTextures() {
     for (let y = 16; y < h; y += 32) for (const x of [12, 116, 140, 244]) { c.fillStyle = '#55575c'; c.beginPath(); c.arc(x, y, 4, 0, 7); c.fill(); c.fillStyle = 'rgba(0,0,0,.5)'; c.beginPath(); c.arc(x + 1.5, y + 1.5, 2.2, 0, 7); c.fill(); }
     for (let i = 0; i < 10; i++) { c.fillStyle = `rgba(120,70,30,${0.12 + rnd() * 0.25})`; const x = rnd() * w; c.fillRect(x, rnd() * h * 0.6, 2 + rnd() * 4, 60 + rnd() * 160); }
     grime(c, w, h, 24, 0.35);
-  });
+  }));
   // 車站的柏油屋頂（從車頂往下看得到）
   tarTex = canvasTex(128, 128, (c, w, h) => { c.fillStyle = '#1e1d1f'; c.fillRect(0, 0, w, h); for (let i = 0; i < 300; i++) { c.fillStyle = `rgba(255,255,255,${rnd() * 0.08})`; c.fillRect(rnd() * w, rnd() * h, 2, 2); } grime(c, w, h, 10, 0.3); });
   // 地面：碎石路基、枕木和一條平行的鐵軌（一張貼圖是 4×4 格）
@@ -3852,6 +3878,22 @@ function makeTrainTextures() {
     grime(c, w, h, 20, 0.2);
   });
 }
+// 牆的一小塊（窗戶上下左右）：貼圖照它在整面牆上的位置取，壁紙、黃銅線、鑲板才跟旁邊整面的牆對得上
+function wallPiece(g, x0, x1, y0, y1, z0, z1, mat) {
+  const gm = geo(`wallpc${x0},${x1},${y0},${y1},${z0},${z1}`, () => {
+    const b = new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), P = b.attributes.position, N = b.attributes.normal, U = b.attributes.uv;
+    for (let i = 0; i < P.count; i++) {
+      if (Math.abs(N.getY(i)) > 0.5) continue;
+      const x = P.getX(i) + (x0 + x1) / 2, y = P.getY(i) + (y0 + y1) / 2, z = P.getZ(i) + (z0 + z1) / 2, nx = N.getX(i), nz = N.getZ(i);
+      U.setXY(i, Math.abs(nz) > 0.5 ? (nz > 0 ? x : 1 - x) : (nx > 0 ? 1 - z : z), y / WALL_H);
+    }
+    return b;
+  });
+  const m = new THREE.Mesh(gm, mat);
+  m.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); m.castShadow = true; m.receiveShadow = true;
+  g.add(m);
+  return m;
+}
 // ---------- 牆：車廂是胡桃木壁板（機車室是鉚釘鐵板）、車站是磚牆；列車面向月台的那一面是墨綠色的車身；牆上開真的窗戶 ----------
 function buildTrainWalls(list) {
   walnutMat = patchLM(new THREE.MeshLambertMaterial({ map: walnutTex })); walnutMat.userData.own = true;
@@ -3898,8 +3940,8 @@ function buildTrainWalls(list) {
   for (const w of W3_WINDOWS) {
     const { x, y } = w, g = new THREE.Group(); g.position.set(x, 0, y); houseGroup.add(g);
     const m = matOf(kindOf(x, y));
-    box(g, 0, 1, 0, 0.95, 0, 1, m); box(g, 0, 1, 2.0, WALL_H, 0, 1, m);
-    box(g, 0, 0.15, 0.95, 2.0, 0, 1, m); box(g, 0.85, 1, 0.95, 2.0, 0, 1, m);
+    wallPiece(g, 0, 1, 0, 0.95, 0, 1, m); wallPiece(g, 0, 1, 2.0, WALL_H, 0, 1, m);
+    wallPiece(g, 0, 0.15, 0.95, 2.0, 0, 1, m); wallPiece(g, 0.85, 1, 0.95, 2.0, 0, 1, m);
     const fr = (a0, a1, b0, b1) => box(g, a0, a1, b0, b1, 0.47, 0.53, brass, false);
     fr(0.12, 0.88, 0.93, 0.98); fr(0.12, 0.88, 1.98, 2.03); fr(0.12, 0.17, 0.95, 2.0); fr(0.83, 0.88, 0.95, 2.0); fr(0.485, 0.515, 0.95, 2.0);
     const pm = ownBasic({ map: glassTex, transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide, fog: false, color: 0xffffff });
@@ -5658,7 +5700,7 @@ function init() {
   buildExtras();
   glowPts = makePoints(0.07, THREE.AdditiveBlending);
   smokePts = makePoints(0.3, THREE.NormalBlending);
-  window.Renderer = { render, resize, setWorld, book: { ok: bookOk, show: bookShow, stats: book.stats }, pax: paxStats };
+  window.Renderer = { render, resize, setWorld, book: { ok: bookOk, show: bookShow, stats: book.stats }, pax: paxStats, photos: () => Object.keys(photos) };
   resize();
 }
-init();
+loadPhotos().then(init);   // 照片貼圖載入好才開始（最多等 5 秒）
