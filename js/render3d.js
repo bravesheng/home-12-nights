@@ -139,7 +139,10 @@ let seed = 98765;
 const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
 // ---------- 照片貼圖：用 Gemini 生成的寫實材質（原圖在 generated-images/，用 tools/make-photo-tex.py 做成 tex/*.webp） ----------
 // 遊戲開始前先載入；載入失敗或太慢（例如舊的離線快取裡沒有）就用程式畫的
-const PHOTO_TEX = ['w3-wall', 'w3-ironwall', 'w3-velvet', 'w3-runner', 'w3-carpet', 'w3-tile', 'w3-ceiling', 'w3-iron', 'w3-herringbone', 'w3-concrete'];
+const PHOTO_TEX = ['w3-wall', 'w3-ironwall', 'w3-velvet', 'w3-runner', 'w3-carpet', 'w3-tile', 'w3-ceiling', 'w3-iron', 'w3-herringbone', 'w3-concrete',
+  'w3-wood', 'w3-leather', 'w3-brass', 'w3-linen', 'w3-station', 'w3-carriage', 'w3-cardoor', 'w3-door', 'w3-roof', 'w3-rug',
+  'w3-far', 'w3-mid-plain', 'w3-mid-trees', 'w3-mid-bridge', 'w3-mid-snow', 'w3-mid-city'];
+// 還沒做好的照片貼圖（白天的站場 w3-yard、時刻表 w3-timetable、海報 w3-poster-*）：程式已經會用，原尺寸的圖下載好、做好貼圖再加進上面和 sw.js
 const photos = {};
 function loadPhotos() {
   const all = Promise.all(PHOTO_TEX.map(n => new Promise(res => {
@@ -158,9 +161,34 @@ function photoTex(name, fallback) {
   t.colorSpace = SRGB; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; t.needsUpdate = true;
   return t;
 }
+// 家具用的照片材質（胡桃木、皮箱、黃銅、桌布床單）：同一張照片乘上不同的顏色，深淺跟原本的純色一樣；沒有照片就用純色
+const photoShared = {}, photoMats = new Map();
+function photoMean(name) {
+  const im = photos[name];
+  if (!im.mean) {
+    const c = document.createElement('canvas'); c.width = c.height = 8;
+    const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(im, 0, 0, 8, 8);
+    const d = x.getImageData(0, 0, 8, 8).data, m = [0, 0, 0];
+    for (let i = 0; i < d.length; i += 4) for (let k = 0; k < 3; k++) m[k] += d[i + k] / 64 / 255;
+    im.mean = new THREE.Color().setRGB(m[0], m[1], m[2], SRGB);
+  }
+  return im.mean;
+}
+function photoMat(name, color) {
+  if (!photos[name]) return lm(color);
+  const key = name + color;
+  let m = photoMats.get(key);
+  if (!m) {
+    const want = new THREE.Color(color), mean = photoMean(name);
+    const tint = new THREE.Color(want.r / Math.max(0.02, mean.r), want.g / Math.max(0.02, mean.g), want.b / Math.max(0.02, mean.b));
+    m = patchLM(new THREE.MeshLambertMaterial({ map: photoShared[name] || (photoShared[name] = photoTex(name)), color: tint }));
+    photoMats.set(key, m);
+  }
+  return m;
+}
 // 第三世界的地板換成照片：走道的地毯、景觀車廂的綠地毯、餐車的黑白磁磚、機車室的鐵板、候車室的人字拼、月台的水泥
 // 第二個數字是一公尺貼幾張（花紋細的放大成兩公尺一張，遠看才不會糊成雜訊）
-const FLOOR_PHOTO = { runner: ['w3-runner', 0.5], carpet3: ['w3-carpet', 1], tile3: ['w3-tile', 0.5], iron: ['w3-iron', 1], wood3: ['w3-herringbone', 0.5], platform: ['w3-concrete', 1] };
+const FLOOR_PHOTO = { runner: ['w3-runner', 0.5], carpet3: ['w3-carpet', 1], tile3: ['w3-tile', 0.5], iron: ['w3-iron', 1], wood3: ['w3-herringbone', 0.5], platform: ['w3-concrete', 1], roof: ['w3-roof', 1] };
 function shade(hex, v) {
   const n = parseInt(hex.slice(1), 16);
   const c = x => Math.max(0, Math.min(255, x + v)) | 0;
@@ -699,7 +727,7 @@ function buildHouse() {
   }
   const wallMat = patchLM(new THREE.MeshLambertMaterial({ map: w2 ? treeWallTex : wallTex }));
   wallMat.userData.own = true;
-  if (w3) buildTrainWalls(list);   // 第三世界：車廂的壁板、車站的磚牆、車身、真的窗戶
+  if (w3) { buildTrainWalls(list); buildPosters3(); }   // 第三世界：車廂的壁板、車站的磚牆、車身、真的窗戶、牆上的海報
   else {
     const H = ceilH();   // 第二世界的樹牆跟著天花板一起變高
     const walls = new THREE.InstancedMesh(new THREE.BoxGeometry(1, H, 1), wallMat, list.length);
@@ -898,13 +926,14 @@ function buildFurniture() {
     furn3d[f.id] = r;
     const W = f.w, D = f.h, side = frontSide(f), len = frontLen(f, side);
     const wood = lm('#8a6a4e'), dark = lm('#2a2226'), knob = lm('#e0c080');
+    const w3 = isW3(), cm = c => (w3 ? photoMat('w3-wood', c) : lm(c));   // 第三世界的櫃子是胡桃木照片、黃銅把手
     const cabinet = (h, col) => {
-      box(g, 0.04, W - 0.04, 0, h, 0.04, D - 0.04, lm(col));
+      box(g, 0.04, W - 0.04, 0, h, 0.04, D - 0.04, cm(col));
       const n = Math.max(1, Math.round(len));
       for (let i = 0; i < n; i++) {
         const u = (i + 0.5) * len / n;
-        fb(g, f, side, (i * len / n) + 0.06, ((i + 1) * len / n) - 0.06, 0.08, h - 0.08, 0.02, 0.05, lm(shade(col, -12)), false);
-        fb(g, f, side, u - 0.04, u + 0.04, h * 0.55, h * 0.55 + 0.05, 0, 0.03, knob, false);
+        fb(g, f, side, (i * len / n) + 0.06, ((i + 1) * len / n) - 0.06, 0.08, h - 0.08, 0.02, 0.05, cm(shade(col, -12)), false);
+        fb(g, f, side, u - 0.04, u + 0.04, h * 0.55, h * 0.55 + 0.05, 0, 0.03, w3 ? photoMat('w3-brass', '#b8923a') : knob, false);
       }
       r.top = h;
     };
@@ -3702,7 +3731,7 @@ function makeTrainTextures() {
     grime(c, w, 300, 14, 0.14); grime(c, w, h, 10, 0.22);
   }));
   // 車站的牆：上面是有裂痕和煤灰的灰泥，下面是泛黃的釉面磚
-  stationWallTex = canvasTex(256, 512, (c, w, h) => {
+  stationWallTex = photoTex('w3-station', () => canvasTex(256, 512, (c, w, h) => {
     c.fillStyle = '#b3a890'; c.fillRect(0, 0, w, 290);
     c.strokeStyle = 'rgba(0,0,0,.3)'; c.lineWidth = 1.2;
     for (let i = 0; i < 6; i++) { let x = rnd() * w, y = rnd() * 290; c.beginPath(); c.moveTo(x, y); for (let k = 0; k < 5; k++) { x += (rnd() - 0.5) * 30; y += 10 + rnd() * 25; c.lineTo(x, y); } c.stroke(); }
@@ -3711,9 +3740,9 @@ function makeTrainTextures() {
     c.fillStyle = 'rgba(255,255,255,.12)'; for (let y = 296; y < h; y += 36) c.fillRect(0, y + 2, w, 3);
     grime(c, w, 290, 18, 0.3); grime(c, w, h, 12, 0.25);
     c.fillStyle = 'rgba(0,0,0,.35)'; c.fillRect(0, 0, w, 10);
-  });
+  }));
   // 列車的外觀（從月台看到的車身）：墨綠色的車身、金色的細線、黃銅框的車窗、鉚釘、鏽水痕
-  carriageTex = canvasTex(256, 512, (c, w, h) => {
+  carriageTex = photoTex('w3-carriage', () => canvasTex(256, 512, (c, w, h) => {
     const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#1b3524'); g.addColorStop(0.7, '#142a1c'); g.addColorStop(1, '#0c0f0d');
     c.fillStyle = g; c.fillRect(0, 0, w, h);
     c.fillStyle = '#0d0e0c'; c.fillRect(0, 400, w, 112);
@@ -3725,7 +3754,7 @@ function makeTrainTextures() {
     c.fillStyle = '#6a6a66'; for (let x = 12; x < w; x += 24) { c.beginPath(); c.arc(x, 24, 2.5, 0, 7); c.fill(); c.beginPath(); c.arc(x, 388, 2.5, 0, 7); c.fill(); }
     for (let i = 0; i < 8; i++) { c.fillStyle = `rgba(120,70,30,${0.15 + rnd() * 0.3})`; const x = rnd() * w; c.fillRect(x, 330 + rnd() * 60, 2 + rnd() * 3, 40 + rnd() * 120); }
     grime(c, w, h, 16, 0.3);
-  });
+  }));
   // 天花板：象牙白，一格一格的線板，泛黃、有水漬
   ceil3Tex = photoTex('w3-ceiling', () => canvasTex(128, 128, (c, w, h) => {
     c.fillStyle = '#e2d7bd'; c.fillRect(0, 0, w, h);
@@ -3734,7 +3763,7 @@ function makeTrainTextures() {
     for (let i = 0; i < 6; i++) { c.fillStyle = `rgba(150,120,70,${0.08 + rnd() * 0.18})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 8 + rnd() * 20, 6 + rnd() * 14, rnd() * 3, 0, 7); c.fill(); }
   }));
   // 包廂的門：胡桃木滑門，上面是蝕刻玻璃（霧面、扇形花紋），黃銅把手；車站側的車門是墨綠色的車身
-  doorPanelTex = canvasTex(128, 256, (c, w, h) => {
+  doorPanelTex = photoTex('w3-door', () => canvasTex(128, 256, (c, w, h) => {
     c.fillStyle = '#3a2316'; c.fillRect(0, 0, w, h);
     for (let i = 0; i < 40; i++) { c.strokeStyle = `rgba(20,10,6,${0.25 + rnd() * 0.4})`; c.lineWidth = 1; const x = rnd() * w; c.beginPath(); c.moveTo(x, 0); c.lineTo(x + (rnd() - 0.5) * 4, h); c.stroke(); }
     c.fillStyle = '#b9c4c2'; c.fillRect(18, 18, w - 36, 100);
@@ -3742,14 +3771,14 @@ function makeTrainTextures() {
     c.strokeStyle = '#5a3a24'; c.lineWidth = 4; c.strokeRect(18, 18, w - 36, 100); c.strokeRect(18, 138, w - 36, 96);
     c.fillStyle = '#c9a24a'; c.fillRect(w - 28, 150, 8, 26);
     grime(c, w, h, 8, 0.25);
-  });
-  carriageDoorTex = canvasTex(128, 256, (c, w, h) => {
+  }));
+  carriageDoorTex = photoTex('w3-cardoor', () => canvasTex(128, 256, (c, w, h) => {
     c.fillStyle = '#17301f'; c.fillRect(0, 0, w, h);
     c.fillStyle = '#9c7b35'; c.fillRect(16, 24, w - 32, 96); c.fillStyle = '#0b1420'; c.fillRect(22, 30, w - 44, 84);
     c.fillStyle = '#c9a24a'; c.fillRect(0, 140, w, 3); c.fillStyle = '#0d0e0c'; c.fillRect(0, 200, w, 56);
     c.fillStyle = '#c9a24a'; c.fillRect(w - 24, 150, 6, 30);
     grime(c, w, h, 8, 0.3);
-  });
+  }));
   for (const t of [doorPanelTex, carriageDoorTex]) t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
   // 髒髒的玻璃（寒寂之境會結霜：用顏色和透明度調）
   glassTex = canvasTex(64, 96, (c, w, h) => {
@@ -3799,7 +3828,7 @@ function makeTrainTextures() {
       c.beginPath(); c.ellipse(x + dx, y + dy + 8 * sc, 42 * sc, 9 * sc, 0, 0, 7); c.fill();
     }
   };
-  skyFarTex = canvasTex(1024, 256, (c, w, h) => {
+  skyFarTex = photoTex('w3-far', () => canvasTex(1024, 256, (c, w, h) => {
     // 四面牆的天空不畫雲（四面牆在角落接起來，雲會被切成一條）；雲都在頭頂那一片。上面一段是純色，跟頭頂那一片的邊接得起來
     const g = c.createLinearGradient(0, 0, 0, 175); g.addColorStop(0, SKY_TOP); g.addColorStop(0.4, SKY_TOP); g.addColorStop(0.8, '#9ecbf5'); g.addColorStop(1, '#d9ecfb');
     c.fillStyle = g; c.fillRect(0, 0, w, 175);
@@ -3807,7 +3836,7 @@ function makeTrainTextures() {
     range(0.011, 70, '#7a8fcc', 168); range(0.017, 46, '#4f8a74', 176); range(0.03, 22, '#5fa04a', 184);
     c.fillStyle = '#5c9c40'; c.fillRect(0, 188, w, h - 188);
     for (let i = 0; i < 160; i++) { c.fillStyle = ['#ff9ec8', '#ffe066', '#ffffff', '#8fb8ff', '#ff6a6a'][(rnd() * 5) | 0]; c.beginPath(); c.arc(rnd() * w, 190 + rnd() * 66, 1.2 + rnd() * 2, 0, 7); c.fill(); }
-  });
+  }));
   skyFarTex.wrapT = THREE.ClampToEdgeWrapping;   // 上下不重複，接天空的地方才不會有一條線
   // 遠山上面再接一片天空（從車頂看得到更高的地方）：顏色跟遠山那張貼圖的最上面一樣
   skyTopTex = canvasTex(8, 8, (c, w, h) => { c.fillStyle = SKY_TOP; c.fillRect(0, 0, w, h); });
@@ -3866,7 +3895,7 @@ function makeTrainTextures() {
     c.fillStyle = '#3a3129'; for (let x = 30; x < w; x += 64) c.fillRect(x, 200, 6, 56);
   });
   // 白天的站場：對面的月台、站房、鐘塔、水塔、煤氣燈
-  yardTex = canvasTex(1024, 256, (c, w, h) => {
+  yardTex = photoTex('w3-yard', () => canvasTex(1024, 256, (c, w, h) => {
     c.clearRect(0, 0, w, h);
     c.fillStyle = '#9a9484'; c.fillRect(0, 196, w, 60); c.fillStyle = '#b8b2a2'; c.fillRect(0, 196, w, 6);
     for (let i = 0; i < 90; i++) { c.fillStyle = ['#ff9ec8', '#ffe066', '#ffffff', '#8fb8ff'][(rnd() * 4) | 0]; c.beginPath(); c.arc(rnd() * w, 230 + rnd() * 26, 1.5 + rnd() * 2, 0, 7); c.fill(); }
@@ -3876,7 +3905,22 @@ function makeTrainTextures() {
     c.fillStyle = '#4a4a4e'; c.fillRect(800, 60, 80, 60); c.fillRect(806, 120, 8, 76); c.fillRect(866, 120, 8, 76); c.fillRect(820, 120, 40, 8);
     for (const x of [40, 520, 760, 960]) { c.fillStyle = '#2a2320'; c.fillRect(x - 3, 90, 6, 106); c.fillStyle = '#e8d8a0'; c.fillRect(x - 8, 76, 16, 18); }
     grime(c, w, h, 20, 0.2);
-  });
+  }));
+  // 中景換成照片（Gemini 畫在洋紅色背景上再去背的）：五種都有才換，大小才會一樣（換中景時是直接換圖）
+  const MIDS = ['plain', 'trees', 'bridge', 'snow', 'city'];
+  if (MIDS.every(n => photos['w3-mid-' + n])) for (const n of MIDS) midTexes[n] = photoTex('w3-mid-' + n);
+}
+// 牆上的旅行海報（W3.posters）：一張薄薄的紙貼在牆上，被燈照到才看得清楚
+function buildPosters3() {
+  if (!W3.posters) return;
+  for (const p of W3.posters) {
+    const name = 'w3-poster-' + p.img;
+    if (!photos[name]) continue;
+    const m = new THREE.Mesh(geo('poster3', () => new THREE.PlaneGeometry(0.72, 0.96)), photoMat(name, '#ffffff'));
+    const s = p.face === 's' ? 1 : -1;
+    m.position.set(p.x, 1.55, p.z + s * 0.012); m.rotation.y = p.face === 's' ? 0 : Math.PI;
+    m.receiveShadow = true; houseGroup.add(m);
+  }
 }
 // 牆的一小塊（窗戶上下左右）：貼圖照它在整面牆上的位置取，壁紙、黃銅線、鑲板才跟旁邊整面的牆對得上
 function wallPiece(g, x0, x1, y0, y1, z0, z1, mat) {
@@ -3997,12 +4041,13 @@ function buildBackdrop() {
   const cx = MAP_W / 2, cz = MAP_H / 2;
   // 北面（列車的窗戶、車頂看出去）和南面（車站的窗戶）各三層加白天的站場；東西面只有遠山和中景（正面的風景不會捲動）
   for (const [z, ry, dir] of [[-12, 0, -1], [MAP_H + 12, Math.PI, 1]]) {
-    const back = dir < 0 ? 1 : -1;   // 往地圖外面是哪個方向
+    const back = dir < 0 ? -1 : 1;   // 往地圖外面是哪個方向（北面是 -z）：中景、近景、站場都往地圖裡面放，才會在遠景前面
     mk(skyFarTex, 300, 26, cx, 6, z, ry, true, 0.012).dir = dir;
     mk(skyTopTex, 300, 50, cx, 44, z, ry, true, 0);
     const mid = mk(midTexes.plain, 230, 9, cx, 3.2, z - back * 7, ry, false, 0.07); mid.dir = dir; mid.isMid = true;
-    const near = mk(nearTex, 200, 6, cx, 2.6, z - back * 11.5, ry, false, 0.24); near.dir = dir; near.isNear = true;
-    const yard = mk(yardTex, 200, 7, cx, 2.9, z - back * 11.8, ry, false, 0); yard.isYard = true;
+    const nearIn = dir < 0 ? 11.5 : 8;   // 南面是車站，近景和站場離候車室的南牆遠一點（不然從窗戶看像貼在玻璃上）
+    const near = mk(nearTex, 200, 6, cx, 2.6, z - back * nearIn, ry, false, 0.24); near.dir = dir; near.isNear = true;
+    const yard = mk(yardTex, 200, 7, cx, 2.9, z - back * (nearIn + 0.3), ry, false, 0); yard.isYard = true;
   }
   for (const [x, ry] of [[-15, Math.PI / 2], [MAP_W + 15, -Math.PI / 2]]) {
     mk(skyFarTex, 240, 26, x, 6, cz, ry, true, 0);
@@ -4032,7 +4077,8 @@ function syncTrain3(dt, t, dark) {
   if (backdrop.scenery !== sc) {
     backdrop.scenery = sc;
     const tex = midTexes[sc === 'yard' ? 'plain' : sc === 'tunnel' ? 'trees' : sc];
-    for (const L of backdrop.layers) if (L.isMid) { L.t.image = tex.image; L.t.needsUpdate = true; }
+    // 換成那一種中景的圖（換 source，不要改 image：image 是跟原本的貼圖共用的，改了草原那張就回不來了）
+    for (const L of backdrop.layers) if (L.isMid) { L.t.source = tex.source; L.t.needsUpdate = true; }
   }
   const dk = clamp(dark / NIGHT_DARK, 0, 1), blood = !!(G.ev && G.ev.blood && G.phase === 'night'), cold = !!G.cold;
   const r = 1 - dk * (blood ? 0.72 : 0.9), gg = 1 - dk * (blood ? 0.93 : 0.88), b = 1 - dk * (blood ? 0.94 : 0.78);
@@ -4952,22 +4998,23 @@ function gramHorn(g, x, y, z, brass) {
 }
 function trainFurniture(f, g, r, W, D, side, len, cabinet) {
   if (!isW3()) return false;
-  const walnut = lm('#3b2416'), walnut2 = lm('#5a3a24'), brass = lm('#8a6a2a'), brass2 = lm('#5e4a1e'), iron = lm('#3a3a3e'), ivory = lm('#d8cfbd');
-  const leather = lm('#5a3a22'), leather2 = lm('#2a2a2e'), glassM = ownLM('#cfe0e8', { transparent: true, opacity: 0.35, depthWrite: false });
+  // 胡桃木、黃銅、皮箱、象牙白的布（桌布、枕頭）都用照片材質，顏色跟原本的一樣
+  const walnut = photoMat('w3-wood', '#3b2416'), walnut2 = photoMat('w3-wood', '#5a3a24'), brass = photoMat('w3-brass', '#8a6a2a'), brass2 = photoMat('w3-brass', '#5e4a1e'), iron = lm('#3a3a3e'), ivory = photoMat('w3-linen', '#d8cfbd');
+  const leather = photoMat('w3-leather', '#5a3a22'), leather2 = photoMat('w3-leather', '#2a2a2e'), glassM = ownLM('#cfe0e8', { transparent: true, opacity: 0.35, depthWrite: false });
   // 在正面座標 (u, v) 放一個坐著的乘客（v 是背靠椅背往前 0.2 的地方），seat 是座面高度
   const paxOn = (u, v, seat, o) => { const [x, z] = fpos(f, side, u, v); addPassenger(g, r, x, z, faceOf(side), seat, o); };
   switch (f.type) {
     case 'rug': {
       if (!f.deco) return false;
       // 裝飾藝術的地毯：深色底、金色的花邊和一圈圓花紋，磨得有點舊
-      const t = canvasTex(256, 256, (c) => {
+      const t = photoTex('w3-rug', () => canvasTex(256, 256, (c) => {
         c.fillStyle = f.color; c.fillRect(0, 0, 256, 256);
         for (let i = 0; i < 400; i++) { c.fillStyle = 'rgba(255,255,255,.04)'; c.fillRect(rnd() * 256, rnd() * 256, 2, 2); }
         c.strokeStyle = 'rgba(214,180,90,.7)'; c.lineWidth = 5; c.strokeRect(14, 14, 228, 228); c.lineWidth = 2; c.strokeRect(26, 26, 204, 204);
         for (let k = 0; k < 7; k++) { const p = 32 + k * 32; for (const [x, y] of [[p, 32], [p, 224], [32, p], [224, p]]) { c.beginPath(); c.arc(x, y, 10, 0, 7); c.stroke(); } }
         for (let i = 0; i < 6; i++) { c.fillStyle = `rgba(0,0,0,${0.1 + rnd() * 0.2})`; c.beginPath(); c.ellipse(rnd() * 256, rnd() * 256, 10 + rnd() * 30, 6 + rnd() * 20, rnd() * 3, 0, 7); c.fill(); }
-      });
-      const mat = patchLM(new THREE.MeshLambertMaterial({ map: t })); mat.userData.own = true;
+      }));
+      const mat = patchLM(new THREE.MeshLambertMaterial({ map: t })); mat.userData.own = true; mat.userData.maps = [t];
       const m = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.2, D - 0.2), mat); m.userData.ownGeo = true;
       m.rotation.x = -Math.PI / 2; m.position.set(W / 2, 0.006, D / 2); m.receiveShadow = true; g.add(m);
       return true;
@@ -5201,7 +5248,12 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
       r.glow = ownSprite(glowTex, 0xffb060); r.glow.position.set(0.5, 2.26, 0.5); r.glow.scale.setScalar(0.9); g.add(r.glow);
       r.top = 2.6;
       return true;
-    case 'timetable': // 牆上的時刻表：木框、泛黃的紙、一行一行的字
+    case 'timetable': // 牆上的時刻表：木框、泛黃的紙、一行一行的字（有照片就是印著十二個站名和時間的舊時刻表）
+      if (photos['w3-timetable']) {
+        fb(g, f, side, len / 2 - 0.45, len / 2 + 0.45, 0.75, 1.95, D - 0.05, D - 0.01, photoMat('w3-timetable', '#ffffff'));
+        r.top = 1.95;
+        return true;
+      }
       fb(g, f, side, 0.1, len - 0.1, 1.1, 1.9, D - 0.08, D - 0.02, walnut2);
       fb(g, f, side, 0.15, len - 0.15, 1.15, 1.85, D - 0.09, D - 0.03, ivory, false);
       for (let i = 0; i < 7; i++) fb(g, f, side, 0.25, len - 0.25 - rnd() * 0.3, 1.22 + i * 0.09, 1.24 + i * 0.09, D - 0.1, D - 0.03, lm('#3a3230'), false);
@@ -5234,7 +5286,7 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
       return true;
     }
     case 'bunk': { // 臥鋪的上下鋪：胡桃木床架、兩層泛黃的床墊和暗紅的毯子、小鐵梯；下鋪躺著一個死去的乘客（頭枕在枕頭上）
-      const mat = lm('#d6cdb9');
+      const mat = photoMat('w3-linen', '#d6cdb9');
       for (const [y0, y1] of [[0.35, 0.47], [1.35, 1.47]]) {
         box(g, 0.03, W - 0.03, y0 - 0.08, y0, 0.03, D - 0.03, walnut);
         box(g, 0.06, W - 0.06, y0, y1, 0.06, D - 0.06, mat);
@@ -5250,7 +5302,7 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
     }
     case 'bed': { // 臥鋪 A（你的床）：胡桃木床框、泛黃的床單和枕頭、暗紅的毯子；床底下會伸出手（跟第一世界一樣）
       box(g, 0.03, W - 0.03, 0, 0.3, 0.03, D - 0.03, walnut);
-      box(g, 0.06, W - 0.06, 0.3, 0.48, 0.06, D - 0.06, lm('#d6cdb9'));
+      box(g, 0.06, W - 0.06, 0.3, 0.48, 0.06, D - 0.06, photoMat('w3-linen', '#d6cdb9'));
       fb(g, f, side, 0.1, 0.55, 0.48, 0.6, 0.15, D - 0.15, ivory);
       fb(g, f, side, 0.65, len - 0.06, 0.46, 0.56, 0.08, D - 0.08, velvet());
       r.hand = new THREE.Group(); g.add(r.hand); r.hand.visible = false;
@@ -5700,7 +5752,7 @@ function init() {
   buildExtras();
   glowPts = makePoints(0.07, THREE.AdditiveBlending);
   smokePts = makePoints(0.3, THREE.NormalBlending);
-  window.Renderer = { render, resize, setWorld, book: { ok: bookOk, show: bookShow, stats: book.stats }, pax: paxStats, photos: () => Object.keys(photos) };
+  window.Renderer = { render, resize, setWorld, book: { ok: bookOk, show: bookShow, stats: book.stats }, pax: paxStats, photos: () => ({ loaded: Object.keys(photos), total: PHOTO_TEX.length }) };
   resize();
 }
 loadPhotos().then(init);   // 照片貼圖載入好才開始（最多等 5 秒）

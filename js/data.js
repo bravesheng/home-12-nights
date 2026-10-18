@@ -375,6 +375,12 @@ const W3 = {
   platform: { x0: 11, x1: 57, y0: 11, y1: 14 },
   patrol: [{ x: 5.5, y: 7.5 }, { x: 70.5, y: 5.5 }],
   loco: { chimney: { x: -3.3, y: 7.5 } },   // 車頭煙囪的位置（在地圖外面，從車頂看得到）
+  // 牆上的旅行海報（照片貼圖 tex/w3-poster-*.webp）：x 是中心、z 是牆面那條線、face 是海報朝哪邊（s 朝南、n 朝北）
+  // 候車室裡面的北牆和南牆各掛幾張，候車室朝月台的那面外牆也掛兩張（都避開窗戶和門）
+  posters: [
+    { x: 23.5, z: 16, face: 's', img: 'bridge' }, { x: 23.5, z: 22, face: 'n', img: 'snow' }, { x: 29.5, z: 22, face: 'n', img: 'meadow' },
+    { x: 18.5, z: 15, face: 'n', img: 'meadow' }, { x: 32.5, z: 15, face: 'n', img: 'bridge' },
+  ],
 };
 // 窗戶（牆格）：dir 是窗外的方向（n 北、s 南）；train 是列車的窗（掛窗簾、列車停下來時外面會貼著眼睛）
 const W3_WINDOWS = [];

@@ -10,6 +10,9 @@ const ASSETS = [
   // 第三世界的照片貼圖（render3d.js 的 PHOTO_TEX）
   './tex/w3-wall.webp', './tex/w3-ironwall.webp', './tex/w3-velvet.webp', './tex/w3-runner.webp', './tex/w3-carpet.webp',
   './tex/w3-tile.webp', './tex/w3-ceiling.webp', './tex/w3-iron.webp', './tex/w3-herringbone.webp', './tex/w3-concrete.webp',
+  './tex/w3-wood.webp', './tex/w3-leather.webp', './tex/w3-brass.webp', './tex/w3-linen.webp', './tex/w3-station.webp',
+  './tex/w3-carriage.webp', './tex/w3-cardoor.webp', './tex/w3-door.webp', './tex/w3-roof.webp', './tex/w3-rug.webp',
+  './tex/w3-far.webp', './tex/w3-mid-plain.webp', './tex/w3-mid-trees.webp', './tex/w3-mid-bridge.webp', './tex/w3-mid-snow.webp', './tex/w3-mid-city.webp',
 ];
 
 self.addEventListener('install', e => {

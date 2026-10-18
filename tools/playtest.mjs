@@ -243,8 +243,8 @@ await scenario('w3', '第三世界第 1 天（照片貼圖、各式各樣死去�
   check(wh.label === '拉汽笛' && wh.cd > 0, `駕駛台要能拉汽笛（互動「${wh.label}」）`);
   await shot('1-start');
   // 照片貼圖（Gemini 生成的牆壁、絨布、地毯、地磚、天花板、鐵板……）都要載入
-  const photoN = await page.evaluate(() => Renderer.photos().length);
-  check(photoN === 10, `第三世界的 10 張照片貼圖都要載入（tex/*.webp；現在 ${photoN} 張）`);
+  const photo = await page.evaluate(() => Renderer.photos());
+  check(photo.total >= 20 && photo.loaded.length === photo.total, `第三世界的照片貼圖都要載入（tex/*.webp；${photo.loaded.length}/${photo.total} 張）`);
   // 乘客：座位上是寫實、各式各樣的死去乘客（紳士、和服婦人、學生……），都閉著眼；「乘客轉頭」事件時頭轉過來、睜開眼睛
   const pax = await page.evaluate(() => Renderer.pax());
   check(pax.n >= 20 && pax.kinds.length >= 8 && pax.list.every(p => p.state === 'dead'), `車上要有 20 個以上、8 種以上死去的乘客（現在 ${pax.n} 個、${pax.kinds.length} 種：${pax.kinds.join('、')}）`);
@@ -356,7 +356,8 @@ await scenario('w3cold', '第三世界寒寂之境（?world=3&night=3&cold）：
     return { ok: G.lamps.length > 0 && G.lamps[0].bulb === BAYMAX_TIER, temp: G.p.temp };
   });
   check(h0.ok, '落地燈要能裝上大白燈');
-  await sleep(3000);
+  // 抱住要一點時間，低 FPS 時遊戲時間走得慢：最多等 12 秒
+  await page.waitForFunction(() => G.hugged && G.hug > 0.5, null, { timeout: 12000 }).catch(() => {});
   const h1 = await page.evaluate(() => ({ hugged: G.hugged, hug: G.hug, temp: G.p.temp, frost: G.frost }));
   check(h1.hugged && h1.hug > 0.5, `走到大白面前要被抱住（hug=${h1.hug.toFixed(2)}）`);
   check(h1.temp > h0.temp, `被大白抱住體溫要回升（${h0.temp} → ${h1.temp.toFixed(1)}）`);
@@ -744,7 +745,7 @@ await scenario('offline', '離線（快取後斷網，重新打開並開新遊�
   await sleep(2000);
   check((await state(page)).hud, '斷網後也要能開始遊戲');
   const ph = await page.evaluate(() => Renderer.photos());
-  check(ph.length === 10, `斷網後照片貼圖也要載得到（tex/*.webp 要在 sw.js 的快取清單裡；現在 ${ph.length} 張）`);
+  check(ph.loaded.length === ph.total, `斷網後照片貼圖也要載得到（tex/*.webp 要在 sw.js 的快取清單裡；${ph.loaded.length}/${ph.total} 張）`);
   await shot('1-start');
 });
 

@@ -8,7 +8,7 @@
 # 車廂的牆是一張合成圖：上面壁紙、中間黃銅線、下面胡桃木鑲板和踢腳板（跟 render3d.js 原本畫的 walnutTex 一樣的排法）
 import os, sys
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, 'generated-images')
@@ -25,7 +25,32 @@ SOURCES = {
     'iron': 'Gemini_Generated_Image_k2suq3k2suq3k2su.jpeg',
     'herringbone': 'Gemini_Generated_Image_w74rb7w74rb7w74r.jpeg',
     'concrete': 'Gemini_Generated_Image_lq8fk7lq8fk7lq8f.jpeg',
+    # 第二批（2026/10/18）：家具的胡桃木、皮箱、黃銅、桌布床單，車站的灰泥和釉面磚、墨綠車身、車頂、包廂滑門、景觀車廂的地毯
+    'wood': 'Gemini_Generated_Image_8mgmne8mgmne8mgm.jpeg',
+    'leather': 'Gemini_Generated_Image_qz4ydyqz4ydyqz4y.jpeg',
+    'brass': 'Gemini_Generated_Image_6ihf5u6ihf5u6ihf.jpeg',
+    'linen': 'Gemini_Generated_Image_rb9injrb9injrb9i.jpeg',
+    'plaster': 'Gemini_Generated_Image_5dlfl15dlfl15dlf.jpeg',
+    'walltile': 'Gemini_Generated_Image_c58hccc58hccc58h.jpeg',
+    'carbody': 'Gemini_Generated_Image_dztcoudztcoudztc.jpeg',
+    'roof': 'Gemini_Generated_Image_k4z698k4z698k4z6.jpeg',
+    'door': 'Gemini_Generated_Image_7x128b7x128b7x12.jpeg',      # 1536×2752（直的）
+    'rug': 'Gemini_Generated_Image_xx8me7xx8me7xx8m.jpeg',       # 2752×1536（橫的）
+    # 第三批（2026/10/18）：車窗外的風景（遠景、五種中景畫在洋紅色背景上，再去背）、白天的站場、時刻表、三張海報
+    # 站場、時刻表、海報：Gemini 的「下載原尺寸」沒反應，還沒有原圖（只用原尺寸的圖，不用網頁上的預覽圖）；下載好之後把檔名填進來
+    'far': 'Gemini_Generated_Image_uz7g94uz7g94uz7g.jpeg',
+    'mid-plain': 'Gemini_Generated_Image_rdqtq8rdqtq8rdqt.jpeg',
+    'mid-trees': 'Gemini_Generated_Image_mw0ex7mw0ex7mw0e.jpeg',
+    'mid-bridge': 'Gemini_Generated_Image_syuqa8syuqa8syuq.jpeg',
+    'mid-snow': 'Gemini_Generated_Image_v3359lv3359lv335.jpeg',
+    'mid-city': 'Gemini_Generated_Image_g1h12og1h12og1h1.jpeg',
+    'yard': None,
+    'timetable': None,
+    'poster-bridge': None,
+    'poster-snow': None,
+    'poster-meadow': None,
 }
+FONT = '/System/Library/Fonts/Supplemental/Songti.ttc'   # 宋體（繁體 Bold 是第 2 個、Regular 是第 7 個）
 
 
 def load(name):
@@ -180,6 +205,184 @@ def checker():
     return img
 
 
+def hpx(h):
+    """牆上的高度（公尺）→ 512×1024 牆面貼圖的像素（從上往下）"""
+    return int(round((1 - h / 2.7) * 1024))
+
+
+def station():
+    # 車站的牆（512×1024）：上面灰泥，中間一條深色的腰線，下面釉面磚（約 1.1 公尺高）
+    W, H = 512, 1024
+    img = Image.new('RGB', (W, H))
+    pl = load('plaster')
+    pl = tileable(pl[:, :int(2048 / 1.5)], 0.18, axes=(1,))
+    t1 = hpx(1.12)
+    img.paste(to_img(pl, (W, t1)), (0, 0))
+    wt = tileable(load('walltile'), 0.04)
+    img.paste(to_img(wt, (W, H - t1)), (0, t1))
+    d = ImageDraw.Draw(img)
+    d.rectangle([0, t1 - 14, W, t1], fill=(96, 84, 70)); d.line([(0, t1 - 14), (W, t1 - 14)], fill=(140, 126, 106), width=2)
+    sh = Image.new('L', (W, 40)); sd = ImageDraw.Draw(sh)   # 天花板下面被煙燻黑
+    for y in range(40): sd.line([(0, y), (W, y)], fill=int(150 * (1 - y / 40) ** 2))
+    img.paste(Image.new('RGB', (W, 40), (20, 16, 12)), (0, 0), sh)
+    return img
+
+
+CAR_GREEN = np.array([0.6, 0.72, 0.64], np.float32)   # 生成的綠色偏灰偏淺，壓深成墨綠色
+
+
+def carriage():
+    # 列車面向月台的車身（512×1024）：墨綠色烤漆鋼板、兩條金線、下面黑色的底架；畫上去的窗戶跟真的窗洞一樣大（0.95～2.0 公尺、左右留 0.15）
+    W, H = 512, 1024
+    img = Image.new('RGB', (W, H))
+    body = tileable(load('carbody'), 0.1, axes=(1,)) * CAR_GREEN
+    b1 = hpx(0.59)
+    img.paste(to_img(body, (W, b1)), (0, 0))
+    d = ImageDraw.Draw(img)
+    d.rectangle([0, b1, W, H], fill=(13, 14, 12))
+    for y in (hpx(2.12), hpx(0.63)):
+        d.rectangle([0, y - 2, W, y + 2], fill=(201, 162, 74)); d.line([(0, y - 2), (W, y - 2)], fill=(240, 210, 130))
+    br = load('brass')
+    x0, x1, y0, y1 = int(0.15 * W), int(0.85 * W), hpx(2.0), hpx(0.95)
+    frame = to_img(br, (x1 - x0 + 24, y1 - y0 + 24))
+    img.paste(frame, (x0 - 12, y0 - 12))
+    gl = Image.new('RGB', (x1 - x0, y1 - y0)); gd = ImageDraw.Draw(gl)
+    for y in range(y1 - y0):
+        t = y / (y1 - y0); gd.line([(0, y), (x1 - x0, y)], fill=(int(28 - 20 * t), int(42 - 30 * t), int(58 - 40 * t)))
+    gd.polygon([(0, y1 - y0), (int((x1 - x0) * 0.4), 0), (int((x1 - x0) * 0.55), 0), (int((x1 - x0) * 0.15), y1 - y0)], fill=(48, 62, 78))
+    img.paste(gl, (x0, y0))
+    return img
+
+
+def cardoor():
+    # 車站側的車門（256×512）：墨綠色車身、上半部黃銅框的小窗、一條金線、黃銅把手、下面一段深色
+    W, H = 256, 512
+    img = to_img(load('carbody')[200:1848, 600:1424] * CAR_GREEN, (W, H))
+    d = ImageDraw.Draw(img)
+    img.paste(to_img(load('brass'), (W - 32, 106)), (16, 24))
+    d.rectangle([24, 32, W - 24, 122], fill=(11, 20, 32)); d.polygon([(30, 122), (90, 32), (120, 32), (60, 122)], fill=(30, 42, 56))
+    d.rectangle([0, 278, W, 284], fill=(201, 162, 74))
+    d.rectangle([0, 400, W, H], fill=(14, 15, 13))
+    d.rectangle([W - 48, 300, W - 36, 360], fill=(184, 146, 58)); d.line([(W - 48, 300), (W - 48, 360)], fill=(240, 210, 130), width=2)
+    return img
+
+
+def key_magenta(a):
+    """洋紅色背景去背：越像洋紅色越透明，邊緣的洋紅色反光也去掉"""
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    m = np.minimum(r, b) - g                       # 洋紅色的程度
+    alpha = 1 - np.clip((m - 70) / 90, 0, 1)
+    spill = np.clip(m, 0, None) * (1 - alpha) * 0.9 + np.clip(m - 30, 0, None) * 0.4
+    out = np.dstack([r - spill, g, b - spill, alpha * 255])
+    out[..., :3] = np.clip(out[..., :3], 0, 255)
+    return out
+
+
+def strip(a, n, fill, size=(2048, 512)):
+    """做成可以左右重複的長條：先左右接得起來，再排 n 份；內容只佔下面 fill 的高度（上面透明，才看得到後面的遠山）"""
+    a = tileable(a, 0.12, axes=(1,))
+    a = np.concatenate([a] * n, axis=1)
+    W, H = size
+    ch = int(round(H * fill))
+    img = Image.new('RGBA', size, (0, 0, 0, 0))
+    img.paste(Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), 'RGBA').resize((W, ch), Image.LANCZOS), (0, H - ch))
+    return img
+
+
+def mid(name, top, n, fill):
+    a = load(name)[int(load(name).shape[0] * top):]
+    return strip(key_magenta(a), n, fill)
+
+
+def far():
+    """遠景（2048×512，不透明）：上面是跟頭頂一樣的藍天，下面接 Gemini 畫的遠山、山丘、花海（排三份，比例才不會壓扁）；地平線在 65% 的高度"""
+    W, H = 2048, 512
+    a = load('far')
+    land = a[int(a.shape[0] * 0.36):]                # 從遠山上面一點點的天空開始
+    land = np.concatenate([tileable(land, 0.15, axes=(1,))] * 3, axis=1)
+    lh = 300
+    limg = Image.fromarray(np.clip(land, 0, 255).astype(np.uint8)).resize((W, lh), Image.LANCZOS)
+    img = Image.new('RGB', (W, H))
+    top = np.array([0x3d, 0x8f, 0xe0], np.float32)
+    edge = np.asarray(limg, np.float32)[:6].mean(axis=(0, 1))   # 照片天空最上面的顏色
+    sky = np.zeros((H - lh, W, 3), np.float32)
+    for y in range(H - lh):
+        t = (y / (H - lh - 1)) ** 1.6
+        sky[y] = top * (1 - t) + edge * t
+    img.paste(Image.fromarray(sky.astype(np.uint8)), (0, 0))
+    img.paste(limg, (0, H - lh))
+    return img
+
+
+def yard():
+    """白天的站場（2048×512，內容佔下面八成）：站房、鐘塔、水塔只出現一次，兩邊用同一段月台接下去，才不會看到一整排一樣的站房"""
+    a = np.asarray(Image.open(os.path.join(SRC, SOURCES['yard'])).convert('RGB'), np.float32)
+    k = key_magenta(a[int(a.shape[0] * 0.3):])
+    W, H, ch = 2048, 512, 410
+    cw = int(round(k.shape[1] * ch / k.shape[0]))
+    content = Image.fromarray(np.clip(k, 0, 255).astype(np.uint8), 'RGBA').resize((cw, ch), Image.LANCZOS)
+    img = Image.new('RGBA', (W, H), (0, 0, 0, 0))
+    band = content.crop((0, int(ch * 0.74), int(cw * 0.12), ch))   # 左邊一小段沒有東西的月台和鐵軌
+    band = Image.fromarray(np.asarray(tileable(np.asarray(band, np.float32), 0.3, axes=(1,))).astype(np.uint8), 'RGBA')
+    for x in range(0, W, band.size[0]):
+        img.paste(band, (x, H - band.size[1]))
+    x0 = (W - cw) // 2
+    img.alpha_composite(content, (x0, H - ch))
+    return img
+
+
+def ink(img, draw_fn):
+    """在舊紙上印字：字畫在另一層，再用「色彩增值」疊上去，紙的污漬和紋路會透出來"""
+    layer = Image.new('RGB', img.size, (255, 255, 255))
+    draw_fn(ImageDraw.Draw(layer))
+    return Image.fromarray((np.asarray(img, np.float32) * np.asarray(layer, np.float32) / 255).astype(np.uint8))
+
+
+def timetable():
+    """時刻表（512×684）：Gemini 畫的空白表格，寫上十二個站名和到站、開車的時間（站名照 js/data.js 的 STATIONS_W3）"""
+    import re
+    src = open(os.path.join(ROOT, 'js', 'data.js'), encoding='utf-8').read()
+    names = re.findall(r"'([^']+)'", re.search(r'const STATIONS_W3 = \[([^\]]+)\]', src).group(1))
+    img = Image.open(os.path.join(SRC, SOURCES['timetable'])).convert('RGB')       # 765×1024
+    rows = [262, 307, 352, 398, 443, 489, 534, 580, 625, 671, 716, 762, 807, 852]   # 表格的橫線（看圖量的）
+    cols = [127, 165, 298, 338, 475, 515, 650]
+    t, times = 19 * 60, []
+    steps = [0, 42, 38, 51, 36, 47, 55, 40, 63, 44, 49, 58]
+    for k in range(12):
+        t += steps[k]; times.append(t)
+    hm = lambda m: f'{m // 60 % 24:02d}:{m % 60:02d}'
+    def draw(d):
+        f_title = ImageFont.truetype(FONT, 44, index=2)
+        f_head = ImageFont.truetype(FONT, 25, index=2)
+        f = ImageFont.truetype(FONT, 25, index=7)
+        f_num = ImageFont.truetype(FONT, 20, index=7)
+        ink_c = (58, 44, 34)
+        def center(txt, font, x0, x1, y0, y1):
+            w = d.textlength(txt, font=font); bb = font.getbbox(txt)
+            d.text(((x0 + x1 - w) / 2, (y0 + y1) / 2 - (bb[1] + bb[3]) / 2), txt, font=font, fill=ink_c)
+        center('末 班 列 車　時 刻 表', f_title, 160, 610, 150, 215)
+        for txt, c in (('站　名', 2), ('到　站', 4), ('開　車', 6)):
+            center(txt, f_head, cols[c - 1], cols[c], rows[0], rows[1])
+        for i, n in enumerate(names):
+            y0, y1 = rows[i + 1], rows[i + 2]
+            center(str(i + 1), f_num, cols[0], cols[1], y0, y1)
+            center(n, f, cols[1], cols[2], y0, y1)
+            center('──' if i == 0 else hm(times[i]), f, cols[3], cols[4], y0, y1)
+            center('──' if i == len(names) - 1 else hm(times[i] + 4), f, cols[5], cols[6], y0, y1)
+    return ink(img, draw).resize((512, 684), Image.LANCZOS)
+
+
+def poster(name, title, sub, color):
+    """海報（512×684）：上下留白的地方寫上站名和標語"""
+    img = Image.open(os.path.join(SRC, SOURCES[name])).convert('RGB')                # 765×1024
+    def draw(d):
+        f1 = ImageFont.truetype(FONT, 78, index=2); f2 = ImageFont.truetype(FONT, 34, index=2)
+        for txt, font, y in ((title, f1, 70), (sub, f2, 950)):
+            w = d.textlength(txt, font=font); bb = font.getbbox(txt)
+            d.text(((765 - w) / 2, y - (bb[1] + bb[3]) / 2), txt, font=font, fill=color)
+    return ink(img, draw).resize((512, 684), Image.LANCZOS)
+
+
 def main():
     out = {}
     out['w3-wall'] = save(wall(), 'w3-wall')
@@ -197,18 +400,40 @@ def main():
     out['w3-ironwall'] = save(iw, 'w3-ironwall')
     out['w3-herringbone'] = save(periodic('herringbone', lo=0.1), 'w3-herringbone')
     out['w3-concrete'] = save(to_img(tileable(load('concrete'), 0.25), (512, 512)), 'w3-concrete')
+    # 家具的材質：一個面貼一整張，不太會重複排，只要邊緣輕輕混合（混太多會出現一條條明暗帶）
+    for n in ('wood', 'leather', 'linen'):
+        out['w3-' + n] = save(to_img(tileable(load(n), 0.06), (512, 512)), 'w3-' + n)
+    out['w3-brass'] = save(to_img(tileable(load('brass'), 0.06), (256, 256)), 'w3-brass')
+    out['w3-station'] = save(station(), 'w3-station')
+    out['w3-carriage'] = save(carriage(), 'w3-carriage')
+    out['w3-cardoor'] = save(cardoor(), 'w3-cardoor')
+    dr = load('door')
+    out['w3-door'] = save(to_img(dr[:, :int(dr.shape[1] * 0.915)], (256, 512)), 'w3-door')   # 右邊多出來的門框裁掉
+    out['w3-roof'] = save(to_img(tileable(load('roof'), 0.12), (512, 512)), 'w3-roof')
+    out['w3-rug'] = save(to_img(load('rug'), (1024, 512)), 'w3-rug')
+    out['w3-far'] = save(far(), 'w3-far', q=74)
+    # 中景：(名字, 從原圖哪裡開始裁, 排幾份, 內容佔下面多少)，高度照原本程式畫的中景
+    for n, top, k, fill in (('plain', 0.52, 2, 0.5), ('trees', 0.0, 3, 0.62), ('bridge', 0.0, 2, 0.85), ('snow', 0.18, 2, 0.75), ('city', 0.25, 2, 0.85)):
+        out['w3-mid-' + n] = save(mid('mid-' + n, top, k, fill), 'w3-mid-' + n, q=74)
+    if SOURCES['yard']: out['w3-yard'] = save(yard(), 'w3-yard', q=74)
+    if SOURCES['timetable']: out['w3-timetable'] = save(timetable(), 'w3-timetable')
+    for n, title, sub, col in (('bridge', '鐵 橋 頭', '末班特快　夜夜發車', (40, 60, 64)), ('snow', '雪 嶺', '冬日溫泉　山城之旅', (52, 66, 84)), ('meadow', '霧 濱', '花開的原野　等你回家', (60, 84, 60))):
+        if SOURCES['poster-' + n]: out['w3-poster-' + n] = save(poster('poster-' + n, title, sub, col), 'w3-poster-' + n)
     if '--preview' in sys.argv:
-        tiles = [v for k, v in out.items() if k not in ('w3-wall', 'w3-ironwall')]
-        P = Image.new('RGB', (4 * 512, 3 * 512), (20, 20, 20))
+        tiles = [v for k, v in out.items() if v.size[0] == v.size[1] and v.mode == 'RGB']
+        P = Image.new('RGB', (4 * 512, 5 * 512), (20, 20, 20))
         for i, t in enumerate(tiles):
             s = t.resize((256, 256))
             x, y = (i % 4) * 512, (i // 4) * 512
             for dx in (0, 256):
                 for dy in (0, 256):
                     P.paste(s, (x + dx, y + dy))
-        wl = out['w3-wall'].resize((128, 256))
-        for i in range(4):
-            P.paste(wl, (1024 + i * 128, 1024))
+        for j, k in enumerate(('w3-wall', 'w3-station', 'w3-carriage', 'w3-ironwall')):
+            wl = out[k].resize((128, 256))
+            for i in range(2):
+                P.paste(wl, (j * 288 + i * 128, 4 * 512))
+        P.paste(out['w3-door'].resize((128, 256)), (1200, 4 * 512)); P.paste(out['w3-cardoor'].resize((128, 256)), (1340, 4 * 512))
+        P.paste(out['w3-rug'].resize((512, 256)), (1500, 4 * 512))
         os.makedirs(os.path.join(ROOT, 'playtest-out'), exist_ok=True)
         P.save(os.path.join(ROOT, 'playtest-out', 'photo-tex-preview.jpg'), quality=85)
 
