@@ -116,6 +116,8 @@ async function startFromMenu(page, world, diff, tap = false) {
 }
 // 低 FPS 時遊戲時間走很慢（每幀最多 0.05 秒），直接把時間撥到天黑前一點點
 const skipToDusk = page => page.evaluate(() => { G.t = DAY_LEN - 0.3; });
+// 已經在天黑前幾秒（例如 ?night=2 從天黑前 3 秒開始）：直接撥到天黑前一瞬間，不用等低 FPS 慢慢走完
+const skipToNight = page => page.evaluate(() => { if (G.phase === 'day') G.t = Math.max(G.t, DAY_LEN - 0.05); });
 // 版面重疊：提示不能壓到大字、燈泡卡和左上角、右上角的面板，大字不能壓到下面的物品說明和物品列，
 // 固定的東西（面板、小地圖、物品列、搖桿、按鈕、暫停鍵）彼此也不能疊在一起
 const overlaps = page => page.evaluate(() => {
@@ -294,6 +296,8 @@ await scenario('w3', '第三世界第 1 天（照片貼圖、各式各樣死去�
   check(fire.bar, '第三世界要顯示 🔥 火力條');
   // 天黑前 3 秒車站鎖門：門變成牆，還留在車站的人會被拉回車上
   await page.evaluate(() => { Object.assign(G.p, { x: 30.5, y: 13.5 }); G.t = DAY_LEN - 3.2; });
+  await page.waitForFunction(() => DOORS.some(d => d.locked) || G.phase === 'night', null, { timeout: 30000 });
+  await skipToNight(page);
   await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
   await sleep(400);
   const d = await page.evaluate(() => ({ locked: DOORS.filter(d => d.locked).length, y: G.p.y, solid: isSolid(19, 10), wall: isWall(35, 10) }));
@@ -308,6 +312,7 @@ await scenario('w3', '第三世界第 1 天（照片貼圖、各式各樣死去�
 await scenario('w3stop', '第三世界第 2 夜火爐是空的（?world=3&night=2&fire=0）：列車減速、停下來被攻擊，補燃料後重新開動', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=3&night=2&kit=1&fire=0', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
+  await skipToNight(page);
   await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
   // 火爐是空的：列車先減速，5 秒後停下來（低 FPS 下遊戲時間走很慢，直接把時間撥快）
   await page.evaluate(() => { G.train.t = TRAIN_STOP_DELAY + 1; });
@@ -470,6 +475,7 @@ await scenario('monsters3', '第三世界怪物模型（克羅諾斯・蕈裂、
 await scenario('w3roof', '第三世界的車頂（爬梯上去、風、檮杌會跟上來、艙口爬回來）和墮落戰神只在走道裡走', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=3&night=2&kit=1', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
+  await skipToNight(page);
   await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
   await sleep(500);
   // 對著景觀車廂的爬梯：互動是「爬上車頂」；爬上去之後站在車頂（地板比較高）
