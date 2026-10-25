@@ -7,7 +7,7 @@ import * as THREE from '../lib/three.module.js';
 const WALL_H = 2.7, EYE = 1.55, LMS = 4;
 // 第二世界的天花板比較高（設計師要求：溜滑梯要能玩，站在溜滑梯的平台上才不會撞到天花板）
 const CEIL_W2 = 4.6;
-const ceilH = () => (isW2() ? CEIL_W2 : WALL_H);
+const ceilH = () => (isW2() ? CEIL_W2 : isW4() ? CEIL_W4 : WALL_H);   // 第四世界的賣場天花板 4.2 公尺
 let LMW = 0, LMH = 0;   // 光照貼圖的大小（跟著地圖走，見 allocLM）
 const SRGB = THREE.SRGBColorSpace;
 
