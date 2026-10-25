@@ -648,9 +648,12 @@ function makeGardenTextures() {
 // 光照貼圖
 // ====================================================================
 function precomputeTexels() {
+  // 第四世界：隔間牆和柱子沒有天花板，牆上面的天花板要跟旁邊的房間一樣亮（不然天花板上會有一條一條黑色的影子）
+  const near4 = (x, y) => { for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [-1, -1], [1, -1], [-1, 1]]) { const r = inMap(x + dx, y + dy) && roomGrid[y + dy][x + dx]; if (r) return r; } return null; };
+  const w4 = isW4();
   for (let ty = 0; ty < LMH; ty++) for (let tx = 0; tx < LMW; tx++) {
     const x = Math.floor(tx / LMS), y = Math.floor(ty / LMS), i = ty * LMW + tx;
-    texRoom[i] = roomGrid[y][x];
+    texRoom[i] = roomGrid[y][x] || (w4 && !doorGrid[y][x] ? near4(x, y) : null);
     texDoor[i] = doorGrid[y][x] ? doorGrid[y][x].rooms : null;
   }
 }
@@ -678,7 +681,8 @@ function updateLightmap(dark) {
   const day = 1 - dark / NIGHT_DARK;
   const amb = 0.95 * day;
   const cold = isW3() && G.cold;   // 寒寂之境：偏白偏藍
-  const tg = isW2() ? 0.95 : cold ? 1.0 : isW3() ? 0.9 : 0.97, tb = isW2() ? 1.02 : cold ? 1.08 : isW3() ? 0.74 : 0.92; // 第二世界的白天帶一點粉紫色，第三世界偏褐色（像老照片）
+  const cold4 = isW4() && G.cold;   // 第四世界：日光燈偏白偏冷，寒寂之境更藍
+  const tg = isW2() ? 0.95 : cold ? 1.0 : isW3() ? 0.9 : cold4 ? 1.02 : isW4() ? 0.99 : 0.97, tb = isW2() ? 1.02 : cold ? 1.08 : isW3() ? 0.74 : cold4 ? 1.12 : isW4() ? 1.0 : 0.92; // 第二世界的白天帶一點粉紫色，第三世界偏褐色（像老照片）
   const blood = !!(G.ev && G.ev.blood && G.phase === 'night'), moon = (1 - day) * 0.05;   // 車頂晚上有一點月光（紅月偏紅）
   for (let i = 0, n = LMW * LMH; i < n; i++) {
     const r = texRoom[i];
@@ -686,14 +690,16 @@ function updateLightmap(dark) {
     lmAcc[i * 3] = a; lmAcc[i * 3 + 1] = a * tg; lmAcc[i * 3 + 2] = a * tb;
     if (r && r.roof) { lmAcc[i * 3] += moon * (blood ? 1 : 0.5); lmAcc[i * 3 + 1] += moon * (blood ? 0.3 : 0.62); lmAcc[i * 3 + 2] += moon * (blood ? 0.25 : 1); }
   }
+  const w4 = isW4();   // 第四世界的光被自己蓋的牆擋住（addLight4）
   for (const L of G.lights) {
     const c = L.color || (L.candle ? [255, 160, 70] : bulbRGB(L.tier));
     const col = [toLin(c[0]), toLin(c[1]), toLin(c[2])];
     const k = L.f * (L.candle ? 0.9 : 0.85 + L.tier * 0.04);
-    addLight(L.x, L.y, L.r, L.room, col, k);
+    if (w4) addLight4(L, col, k); else addLight(L.x, L.y, L.r, L.room, col, k);
   }
   // 玩家身邊一點點微光，才不會完全看不到自己腳邊
-  if (mode === 'play') {
+  if (mode === 'play' && w4) addLight4({ x: G.p.x, y: G.p.y, r: 2.2 }, [0.55, 0.58, 0.7], 0.2);
+  else if (mode === 'play') {
     const p = G.p, tx = Math.floor(p.x), ty = Math.floor(p.y);
     const rooms = roomGrid[ty][tx] ? [roomGrid[ty][tx]] : doorGrid[ty][tx] ? doorGrid[ty][tx].rooms : [];
     for (const r of rooms) addLight(p.x, p.y, 2.2, r, [0.55, 0.58, 0.7], 0.2);
@@ -731,6 +737,16 @@ const floorMats = {};
 function floorMat(type) {
   return floorMats[type] || (floorMats[type] = patchLM(new THREE.MeshLambertMaterial({ map: floorTex(type) })));
 }
+// 草叢：兩片交叉的草葉（第二世界的花園、第四世界紅月長出來的草）
+const tuftGeo = () => geo('tuft', () => {
+  const a = new THREE.PlaneGeometry(0.6, 0.42), b = new THREE.PlaneGeometry(0.6, 0.42);
+  a.translate(0, 0.21, 0); b.translate(0, 0.21, 0); b.rotateY(Math.PI / 2);
+  const g = new THREE.BufferGeometry();
+  for (const k of ['position', 'normal', 'uv']) g.setAttribute(k, new THREE.Float32BufferAttribute([...a.attributes[k].array, ...b.attributes[k].array], a.attributes[k].itemSize));
+  const ia = [...a.index.array], ib = [...b.index.array].map(i => i + a.attributes.position.count);
+  g.setIndex([...ia, ...ib]);
+  return g;
+});
 // 換世界：拆掉整個房子（地板、牆、家具），用新的世界重新蓋
 function setWorld() {
   if (houseGroup) {
@@ -747,6 +763,11 @@ function setWorld() {
   doorPanels.clear(); panes3 = []; walnutMat = stationMat = ironMat = wallMat3 = null; stopEyes = null; curtains = []; locoSmoke = null;
   for (const [c, r] of chestMap) { disposeGroup(r.g); chestMap.delete(c); }
   for (const k in furn3d) delete furn3d[k];
+  // 第四世界：自己蓋的牆、屋頂、地上的板子、地上一灘一灘的東西、震波（不在房子群組裡，要自己拆）
+  for (const m of [wall4Map, roof4Map, loose4Map]) { for (const r of m.values()) disposeGroup(r.g); m.clear(); }
+  for (const k in puddle4) { scene.remove(puddle4[k]); puddle4[k].material.dispose(); puddle4[k].dispose(); delete puddle4[k]; }
+  for (const [w, m] of wave4Map) { scene.remove(m); m.material.dispose(); wave4Map.delete(w); }
+  panel4 = null; panel4Info = []; grass4Mesh = null;
   allocLM();
   precomputeTexels();
   bookPlace();
@@ -755,6 +776,7 @@ function setWorld() {
 }
 function buildHouse() {
   houseGroup = new THREE.Group(); scene.add(houseGroup);
+  if (isW4()) { buildStore4(); return; }   // 第四世界：一整間賣場
   const w2 = isW2(), w3 = isW3();
   for (const r of ROOMS) addFloor(r.x, r.y, r.w, r.h, r.floor, r.roof ? ROOF_H : 0);   // 車頂的地板比較高
   for (const d of DOORS) addFloor(d.x, d.y, 1, 1, d.rooms[0] ? d.rooms[0].floor : 'wood');
@@ -903,15 +925,7 @@ function buildGardenDeco(wallList) {
   // 草叢：兩片交叉的草葉貼圖
   const bm = patchLM(new THREE.MeshLambertMaterial({ map: bladeTex, alphaTest: 0.45, side: THREE.DoubleSide }));
   bm.userData.own = true;
-  const bg = geo('tuft', () => {
-    const a = new THREE.PlaneGeometry(0.6, 0.42), b = new THREE.PlaneGeometry(0.6, 0.42);
-    a.translate(0, 0.21, 0); b.translate(0, 0.21, 0); b.rotateY(Math.PI / 2);
-    const g = new THREE.BufferGeometry();
-    for (const k of ['position', 'normal', 'uv']) g.setAttribute(k, new THREE.Float32BufferAttribute([...a.attributes[k].array, ...b.attributes[k].array], a.attributes[k].itemSize));
-    const ia = [...a.index.array], ib = [...b.index.array].map(i => i + a.attributes.position.count);
-    g.setIndex([...ia, ...ib]);
-    return g;
-  });
+  const bg = tuftGeo();
   const tufts = new THREE.InstancedMesh(bg, bm, grass.length);
   const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), pos = new THREE.Vector3();
   grass.forEach(([x, z, k, a], i) => { q.setFromAxisAngle(UP, a); s.set(k, k, k); pos.set(x, 0, z); mtx.compose(pos, q, s); tufts.setMatrixAt(i, mtx); });
@@ -994,11 +1008,15 @@ function fb(g, f, side, u0, u1, y0, y1, v0, v1, mat, shadow) {
 const frontLen = (f, side) => (side === 's' || side === 'n' ? f.w : f.h);
 
 function buildFurniture() {
-  for (const f of FURN) {
+  for (const f of FURN) if (!f.held) buildOneFurn(f);
+}
+// 一件家具（第四世界的家具搬動時會拆掉重建：Renderer.furn4）
+function buildOneFurn(f) {
+  {
     const g = new THREE.Group(); g.position.set(f.x, floorH(f.x + 0.5, f.y + 0.5), f.y); houseGroup.add(g);   // 車頂上的家具比較高
     const r = { g, top: 0.8 };
     furn3d[f.id] = r;
-    const W = f.w, D = f.h, side = frontSide(f), len = frontLen(f, side);
+    const W = f.w, D = f.h, side = f.side || frontSide(f), len = frontLen(f, side);   // 第四世界的家具有自己的方向（可以轉）
     const wood = lm('#8a6a4e'), dark = lm('#2a2226'), knob = lm('#e0c080');
     const w3 = isW3(), cm = c => (w3 ? photoMat('w3-wood', c) : lm(c));   // 第三世界的櫃子是胡桃木照片、黃銅把手
     const cabinet = (h, col) => {
@@ -1011,7 +1029,7 @@ function buildFurniture() {
       }
       r.top = h;
     };
-    if (!gardenFurniture(f, g, r, W, D, side, len, cabinet) && !trainFurniture(f, g, r, W, D, side, len, cabinet)) switch (f.type) {
+    if (!gardenFurniture(f, g, r, W, D, side, len, cabinet) && !trainFurniture(f, g, r, W, D, side, len, cabinet) && !store4Furniture(f, g, r, W, D, side, len, cabinet)) switch (f.type) {
       case 'rug': {
         const t = canvasTex(128, 128, (c) => {
           c.fillStyle = f.color; c.fillRect(0, 0, 128, 128);
@@ -1295,6 +1313,7 @@ function buildFurniture() {
       r.glint.position.set(W / 2, r.top + 0.18, D / 2);
       g.add(r.glint);
     }
+    if (isW4()) mergeByMat(g);   // 賣場的家具很多：零件照材質合成幾個網格，平板才跑得動
   }
 }
 // ====================================================================
@@ -1581,13 +1600,18 @@ function updateFurniture(t) {
     cl.doors.position.x = rattling ? Math.sin(t * 45) * 0.012 * (1 + (18 - ev.closet) / 6) : 0;
     cl.g.rotation.z = rattling ? Math.sin(t * 38) * 0.004 : 0;
   }
-  furn3d.bed.hand.visible = ev.bedTimer > 0.6;
-  if (furn3d.bed.hand.visible) furn3d.bed.hand.position.z = Math.sin(t * 9) * 0.03;
-  const ph = furn3d.phone.handset;
-  ph.emissive.setRGB(ev.phone > 0 && Math.sin(t * 20) > 0 ? 0.8 : 0, 0, 0);
-  furn3d.phone.g.position.x = FURN_BY_ID.phone.x + (ev.phone > 0 ? Math.sin(t * 70) * 0.01 : 0);
-  const led = furn3d.breaker.led.material.color;
-  if (G.power) led.set(0x33ff66); else led.set(Math.sin(t * 8) > 0 ? 0xff2020 : 0x220000);
+  if (furn3d.bed && furn3d.bed.hand) {   // 第四世界沒有床底下的手、電話
+    furn3d.bed.hand.visible = ev.bedTimer > 0.6;
+    if (furn3d.bed.hand.visible) furn3d.bed.hand.position.z = Math.sin(t * 9) * 0.03;
+  }
+  if (furn3d.phone && furn3d.phone.handset) {
+    furn3d.phone.handset.emissive.setRGB(ev.phone > 0 && Math.sin(t * 20) > 0 ? 0.8 : 0, 0, 0);
+    furn3d.phone.g.position.x = FURN_BY_ID.phone.x + (ev.phone > 0 ? Math.sin(t * 70) * 0.01 : 0);
+  }
+  if (furn3d.breaker && furn3d.breaker.led) {
+    const led = furn3d.breaker.led.material.color;
+    if (G.power) led.set(0x33ff66); else led.set(Math.sin(t * 8) > 0 ? 0xff2020 : 0x220000);
+  }
   // 娃娃的頭會轉向你（第三世界沒有娃娃）
   if (furn3d.doll && furn3d.doll.head) {
     const doll = furn3d.doll.head, df = FURN_BY_ID.doll;
@@ -1601,6 +1625,7 @@ function updateFurniture(t) {
     r.lock.visible = !open;
   }
   if (isW3()) updateTrainFurniture(t);
+  if (isW4()) updateStoreFurniture4(t);
   // 電視自己打開時顯示雜訊（第二世界沒有電視）
   if (furn3d.tvcab && furn3d.tvcab.screen) {
     const scr = furn3d.tvcab.screen.material;
@@ -1615,7 +1640,7 @@ function updateFurniture(t) {
   }
   for (const f of FURN) {
     const r = furn3d[f.id];
-    if (!r.glint) continue;
+    if (!r || !r.glint) continue;   // 第四世界拿在手上的家具沒有模型
     const has = mode === 'play' && G.containers[f.id] && G.containers[f.id].items.length > 0;
     r.glint.visible = has;
     if (has) r.glint.material.opacity = (0.45 + 0.35 * Math.sin(t * 4 + f.x)) * (G.phase === 'night' ? 0.5 : 1);
@@ -2321,7 +2346,8 @@ function buildGirl(r, g) {
   r.mats.push(top, skirt, skin, blood, branch, petal, eye, white, sock, shoe, hemM, scalp, faceMat, hairM);
 }
 const NEW_BUILD = { stick: buildStick, momo: buildMomo, crawler: buildCrawler, balloon: buildBalloon, clown: buildClown, grass: buildGrass, snail: buildSnail, girl: buildGirl,
-  kronos: buildKronos, tyrant: buildTyrant, warlord: buildWarlord, taowu: buildTaowu };
+  kronos: buildKronos, tyrant: buildTyrant, warlord: buildWarlord, taowu: buildTaowu,
+  staff: buildStaff, shake: buildShake, mimic: buildMimic, hubert: buildHubert, ember: buildEmber };
 
 function syncNewMonster(e, r, t, p = G.p) {
   const d = Math.hypot(e.x - p.x, e.y - p.y);
@@ -2415,6 +2441,7 @@ function syncNewMonster(e, r, t, p = G.p) {
       break;
     }
     case 'kronos': case 'tyrant': case 'warlord': case 'taowu': syncMonster3(e, r, t, p, d, dt); break;
+    case 'staff': case 'shake': case 'mimic': case 'hubert': case 'ember': syncMonster4(e, r, t, p, d, dt); break;
     case 'girl': {
       // 被手電筒照到時，樹枝上的眼球花會閉起來
       const shut = e.blind > 0 ? 0.15 : 1;
@@ -3080,6 +3107,366 @@ function syncMonster3(e, r, t, p, d, dt) {
     }
   }
 }
+// ====================================================================
+// 第四世界的 5 隻新怪物（照設計圖做成寫實風，皮膚、布、塑膠用照片的細節紋路）：
+// SCP-3008-2（店員）、葵氏奶昔、紅涎偽人、Hubert、燼皇；還有神秘店員（不是怪物，是賣東西的）
+// 臉都是 world4.js 的 2D 畫法畫成貼圖（驚嚇畫面、圖鑑縮圖也用同一張）
+// ====================================================================
+let staffShirtTex, staffFaceTex, mimicFaceTex, emberFaceTex, clerkFaceTex, shakeOpenTex, shakeShutTex, cartonTex, emberCapeTex, clerkRobeTex;
+function makeMonster4Textures() {
+  if (staffShirtTex) return;
+  const faceT = (draw, S = 512) => { const t = canvasTex(S, S, c => draw(c, S)); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; return t; };
+  staffFaceTex = faceT(drawStaffFace); mimicFaceTex = faceT(drawMimicFace); emberFaceTex = faceT(drawEmberFace); clerkFaceTex = faceT(drawClerkFace, 256);
+  shakeOpenTex = faceT((c, S) => drawShakeFront(c, S, 1), 256); shakeShutTex = faceT((c, S) => drawShakeFront(c, S, 0), 256);
+  // 店員的黃色制服：紫色細條紋、洗舊的布、皺褶和污漬
+  staffShirtTex = canvasTex(256, 256, (c, w, h) => {
+    c.fillStyle = '#d9b032'; c.fillRect(0, 0, w, h);
+    for (let x = 4; x < w; x += 32) { c.fillStyle = 'rgba(110,60,150,.75)'; c.fillRect(x, 0, 5, h); }
+    for (let i = 0; i < 900; i++) { c.fillStyle = `rgba(${rnd() < 0.5 ? '255,240,180' : '90,60,10'},${0.05 + rnd() * 0.08})`; c.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 2, 1 + rnd() * 3); }
+    for (let i = 0; i < 14; i++) { c.strokeStyle = `rgba(80,55,10,${0.12 + rnd() * 0.12})`; c.lineWidth = 2 + rnd() * 4; c.beginPath(); const x = rnd() * w, y = rnd() * h; c.moveTo(x, y); c.quadraticCurveTo(x + (rnd() - 0.5) * 40, y + 30, x + (rnd() - 0.5) * 30, y + 60 + rnd() * 40); c.stroke(); }
+    for (let i = 0; i < 6; i++) { c.fillStyle = `rgba(90,70,30,${0.08 + rnd() * 0.1})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 8 + rnd() * 20, 6 + rnd() * 14, rnd() * 3, 0, 7); c.fill(); }
+  });
+  // 奶昔紙盒的側面：泛白的紙板、紅條紋、受潮的污漬
+  cartonTex = canvasTex(128, 128, (c, w, h) => {
+    c.fillStyle = '#efe9dc'; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 160; i++) { c.fillStyle = `rgba(${150 + rnd() * 60 | 0},${140 + rnd() * 50 | 0},${110 + rnd() * 40 | 0},${0.05 + rnd() * 0.1})`; c.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 4, 1 + rnd() * 4); }
+    c.fillStyle = '#c4242c'; for (const y of [6, 18, 104, 116]) c.fillRect(0, y, w, 6);
+    for (let i = 0; i < 3; i++) { c.fillStyle = `rgba(150,120,70,${0.1 + rnd() * 0.1})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 10 + rnd() * 20, 6 + rnd() * 14, rnd() * 3, 0, 7); c.fill(); }
+  });
+  // 燼皇的紅披風：暗紅色的絨布、燒焦的破洞，下擺燒成橘紅色
+  emberCapeTex = canvasTex(64, 256, (c, w, h) => {
+    const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#4a080c'); g.addColorStop(0.7, '#801016'); g.addColorStop(0.9, '#b8361a'); g.addColorStop(1, '#ff9a40');
+    c.fillStyle = g; c.fillRect(4, 0, w - 8, h);
+    for (let i = 0; i < 20; i++) { c.fillStyle = `rgba(20,0,0,${0.15 + rnd() * 0.3})`; c.fillRect(4 + rnd() * (w - 8), rnd() * h, 2, 10 + rnd() * 40); }
+    c.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < 6; i++) { c.beginPath(); c.moveTo(i * 12, h); c.lineTo(i * 12 + 6, h - 14 - rnd() * 30); c.lineTo(i * 12 + 12, h); c.fill(); }
+    for (let i = 0; i < 5; i++) { c.beginPath(); c.arc(8 + rnd() * 48, 60 + rnd() * 160, 2 + rnd() * 4, 0, 7); c.fill(); }
+    c.globalCompositeOperation = 'source-over';
+  });
+  // 神秘店員的黃色雨衣：塑膠布、接縫、下面沾到的髒污
+  clerkRobeTex = canvasTex(128, 256, (c, w, h) => {
+    c.fillStyle = '#e2b21c'; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 500; i++) { c.fillStyle = `rgba(${rnd() < 0.5 ? '255,250,210' : '120,80,0'},${0.04 + rnd() * 0.06})`; c.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 3, 1 + rnd() * 3); }
+    for (const x of [30, 98]) { c.fillStyle = 'rgba(120,80,0,.35)'; c.fillRect(x, 0, 2, h); }
+    for (let i = 0; i < 10; i++) { c.fillStyle = `rgba(70,50,20,${0.08 + rnd() * 0.12})`; c.beginPath(); c.ellipse(rnd() * w, h * 0.6 + rnd() * h * 0.4, 6 + rnd() * 16, 10 + rnd() * 30, 0, 0, 7); c.fill(); }
+  });
+}
+// SCP-3008-2：2.1 公尺高、太瘦太長的店員：黃色制服（紫色細條紋、胸前的名牌）、深藍色褲子、垂到膝蓋的長手臂；骨白色沒有表情的臉
+function buildStaff(r, g) {
+  makeMonster4Textures();
+  const shirt = withDetail(ownLM('#ffffff', { map: staffShirtTex, shade: 0.7, transparent: true }), 'cotton', 4, 0.8);
+  const pants = withDetail(ownLM('#2a3560', { shade: 0.7, transparent: true }), 'cotton', 5, 0.9);
+  const skin = withDetail(ownLM('#d6ccb8', { shade: 0.75, transparent: true }), 'skin', 6, 1.2);
+  const shoe = ownLM('#1a1a1c', { shade: 0.6, transparent: true }), tag = ownLM('#f4f2ec', { transparent: true });
+  r.body = new THREE.Group(); g.add(r.body);
+  r.legs = [];
+  for (const s of [-1, 1]) {
+    const leg = new THREE.Group(); leg.position.set(s * 0.11, 1.02, 0); r.body.add(leg);
+    taper(leg, [0, 0, 0], [0, -0.5, 0.01], 0.075, 0.06, pants, 10);
+    taper(leg, [0, -0.5, 0.01], [0, -0.96, -0.01], 0.06, 0.045, pants, 10);
+    box(leg, -0.05, 0.05, -1.02, -0.94, -0.06, 0.16, shoe);
+    r.legs.push(leg);
+  }
+  cyl(r.body, 0.15, 0.14, 0.12, 0, 0.97, 0, pants, 12);
+  box(r.body, -0.15, 0.15, 1.07, 1.11, -0.1, 0.1, shoe);
+  const torso = cyl(r.body, 0.19, 0.15, 0.62, 0, 1.1, 0, shirt, 14); torso.scale.z = 0.62;
+  sph(r.body, 0.19, 0, 1.72, 0, shirt, 1.12, 0.35, 0.62, 12);
+  box(r.body, 0.05, 0.14, 1.5, 1.56, 0.09, 0.105, tag, false);
+  cyl(r.body, 0.045, 0.055, 0.18, 0, 1.74, 0, skin, 8);
+  r.head = new THREE.Group(); r.head.position.set(0, 1.9, 0); r.body.add(r.head);
+  sph(r.head, 0.13, 0, 0.1, -0.01, skin, 0.9, 1.25, 1.0, 14);
+  const faceMat = ownLM('#ffffff', { map: staffFaceTex, transparent: true, alphaTest: 0.3, shade: 0.6 });
+  r.face = new THREE.Mesh(faceGeo('staffface', 0.34, 0.11, 0.135, 0.0, 0.05), faceMat); r.face.position.set(0, 0.1, 0.075); r.head.add(r.face);
+  r.arms = [];
+  for (const s of [-1, 1]) {
+    const arm = new THREE.Group(); arm.position.set(s * 0.23, 1.68, 0); r.body.add(arm);
+    taper(arm, [0, 0, 0], [s * 0.03, -0.42, 0], 0.055, 0.045, shirt, 8);
+    taper(arm, [s * 0.03, -0.42, 0], [s * 0.04, -0.82, 0.03], 0.038, 0.03, skin, 8);
+    sph(arm, 0.04, s * 0.04, -0.86, 0.03, skin, 0.8, 1.2, 0.6, 8);
+    for (let k = -1; k <= 1; k++) taper(arm, [s * 0.04 + k * 0.015, -0.88, 0.03], [s * 0.045 + k * 0.02, -1.02, 0.05], 0.009, 0.006, skin, 5);
+    r.arms.push(arm);
+  }
+  r.mats.push(shirt, pants, skin, shoe, tag, faceMat);
+}
+// 葵氏奶昔：一盒 44 公分高的奶昔紙盒（屋頂形的盒頂、紅白吸管），正面一顆真的大眼睛；平常躺在地上闔著眼
+function buildShake(r, g) {
+  makeMonster4Textures();
+  const side = ownLM('#ffffff', { map: cartonTex, shade: 0.5, transparent: true }), top = ownLM('#e8e2d4', { shade: 0.5, transparent: true });
+  r.front = ownLM('#ffffff', { map: shakeShutTex, shade: 0.4, transparent: true });
+  const straw = ownLM('#d84a3a', { transparent: true });
+  const W = 0.3, H = 0.44;
+  r.body = new THREE.Group(); g.add(r.body);
+  r.carton = new THREE.Group(); r.body.add(r.carton);
+  const m = new THREE.Mesh(geo('carton4', () => new THREE.BoxGeometry(W, H, W)), [side, side, top, top, r.front, side]);
+  m.position.y = H / 2; r.carton.add(m);
+  const roof = new THREE.Mesh(geo('cartonroof4', () => {
+    const s = new THREE.Shape(); s.moveTo(-W / 2, 0); s.lineTo(W / 2, 0); s.lineTo(0, 0.1); s.closePath();
+    const gg = new THREE.ExtrudeGeometry(s, { depth: W, bevelEnabled: false }); gg.translate(0, 0, -W / 2); gg.rotateY(Math.PI / 2); return gg;
+  }), top);
+  roof.position.y = H; r.carton.add(roof);
+  box(r.carton, -W / 2, W / 2, H + 0.09, H + 0.14, -0.012, 0.012, top);
+  const st = cyl(r.carton, 0.011, 0.011, 0.24, 0, 0, 0, straw, 8); st.position.set(0.07, H + 0.14, 0.05); st.rotation.z = -0.35;
+  r.mats.push(side, top, r.front, straw);
+}
+// 紅涎偽人：皮包骨的灰白色身體（肋骨從破衣服底下透出來）、大頭、凸出布滿血絲的眼睛、張很大的嘴，紅色的涎液一直往下滴；
+// 晚上看到你就四腳著地衝過來
+function buildMimic(r, g) {
+  makeMonster4Textures();
+  const skin = withDetail(ownLM('#a89e94', { shade: 0.75, transparent: true }), 'corpse', 5, 1.2);
+  const cloth = withDetail(ownLM('#3a3836', { shade: 0.7, transparent: true }), 'rag', 4, 1.0);
+  const drool = ownPhong('#9a0a14', { specular: 0xffaaaa, shininess: 90, emissive: 0x200000, transparent: true, shade: 0.4 });
+  r.hip = new THREE.Group(); r.hip.position.y = 0.95; g.add(r.hip);
+  r.legs = [];
+  for (const s of [-1, 1]) {
+    const leg = new THREE.Group(); leg.position.set(s * 0.1, 0, 0); r.hip.add(leg);
+    taper(leg, [0, 0, 0], [0, -0.48, 0.03], 0.06, 0.045, cloth, 8);
+    taper(leg, [0, -0.48, 0.03], [0, -0.92, -0.02], 0.042, 0.032, skin, 8);
+    box(leg, -0.035, 0.035, -0.95, -0.92, -0.04, 0.12, skin);
+    r.legs.push(leg);
+  }
+  r.torso = new THREE.Group(); r.hip.add(r.torso);
+  const ch = cyl(r.torso, 0.15, 0.12, 0.55, 0, 0, 0, cloth, 12); ch.scale.z = 0.6;
+  for (let i = 0; i < 4; i++) { const rib = new THREE.Mesh(geo('mrib4', () => new THREE.TorusGeometry(0.13, 0.012, 5, 12, Math.PI)), skin); rib.position.set(0, 0.2 + i * 0.07, 0.03); rib.rotation.x = Math.PI / 2; rib.scale.set(1, 0.6, 1); r.torso.add(rib); }
+  cyl(r.torso, 0.04, 0.05, 0.14, 0, 0.53, 0.02, skin, 8);
+  r.head = new THREE.Group(); r.head.position.set(0, 0.84, 0.04); r.torso.add(r.head);
+  sph(r.head, 0.2, 0, 0, -0.03, skin, 0.95, 1.08, 0.95, 16);
+  const faceMat = ownLM('#ffffff', { map: mimicFaceTex, transparent: true, alphaTest: 0.3, shade: 0.55 });
+  r.face = new THREE.Mesh(faceGeo('mimicface', 0.5, 0.185, 0.215, 0.015, 0.09), faceMat); r.face.position.set(0, -0.01, 0.08); r.head.add(r.face);
+  // 從嘴角垂下來的紅涎
+  r.drool = [];
+  for (const [x, len] of [[-0.06, 0.32], [-0.01, 0.48], [0.05, 0.38], [0.09, 0.25]]) { const d = taper(r.head, [x, -0.11, 0.16], [x * 1.1, -0.11 - len, 0.15], 0.012, 0.004, drool, 5); r.drool.push(d); }
+  r.arms = [];
+  for (const s of [-1, 1]) {
+    const arm = new THREE.Group(); arm.position.set(s * 0.17, 0.5, 0); r.torso.add(arm);
+    taper(arm, [0, 0, 0], [s * 0.02, -0.4, 0.02], 0.045, 0.035, skin, 8);
+    taper(arm, [s * 0.02, -0.4, 0.02], [s * 0.02, -0.8, 0.06], 0.033, 0.025, skin, 8);
+    for (let k = -1; k <= 1; k++) taper(arm, [s * 0.02 + k * 0.012, -0.8, 0.06], [s * 0.02 + k * 0.025, -0.96, 0.1], 0.008, 0.004, skin, 5);
+    r.arms.push(arm);
+  }
+  r.mats.push(skin, cloth, drool, faceMat);
+}
+// Hubert：灰色的塑膠展示假人（沒有臉的蛋形頭、關節有接縫），飄在離地 25 公分的地方，底下透著紅光，右手拖著一根鐵管
+function buildHubert(r, g) {
+  const plastic = withDetail(ownPhong('#8e8f92', { specular: 0x555555, shininess: 45, shade: 0.85, transparent: true }), 'steel', 2, 0.25);
+  const seam = ownLM('#4a4b4e', { shade: 0.7, transparent: true });
+  const pipeM = withDetail(ownPhong('#5a5d62', { specular: 0x888888, shininess: 60, shade: 0.8, transparent: true }), 'steel', 4, 0.8);
+  r.body = new THREE.Group(); g.add(r.body);
+  r.legs = [];
+  for (const s of [-1, 1]) {
+    const leg = new THREE.Group(); leg.position.set(s * 0.11, 1.0, 0); r.body.add(leg);
+    taper(leg, [0, 0, 0], [0, -0.46, 0.02], 0.08, 0.06, plastic, 12);
+    sph(leg, 0.058, 0, -0.47, 0.02, seam, 1, 1, 1, 8);
+    taper(leg, [0, -0.48, 0.02], [0, -0.92, 0], 0.055, 0.04, plastic, 12);
+    sph(leg, 0.05, 0, -0.95, 0.04, plastic, 0.9, 0.6, 1.8, 10);
+    r.legs.push(leg);
+  }
+  sph(r.body, 0.17, 0, 1.03, 0, plastic, 1.05, 0.7, 0.75, 14);
+  sph(r.body, 0.15, 0, 1.25, 0, plastic, 1.0, 1.2, 0.68, 14);
+  sph(r.body, 0.2, 0, 1.5, 0, plastic, 1.08, 0.95, 0.68, 16);
+  cyl(r.body, 0.152, 0.152, 0.015, 0, 1.17, 0, seam, 16).scale.z = 0.7;
+  for (const s of [-1, 1]) sph(r.body, 0.065, s * 0.24, 1.62, 0, seam, 1, 1, 1, 8);
+  cyl(r.body, 0.05, 0.06, 0.14, 0, 1.64, 0, plastic, 10);
+  r.head = new THREE.Group(); r.head.position.set(0, 1.88, 0); r.body.add(r.head);
+  sph(r.head, 0.12, 0, 0, 0, plastic, 0.85, 1.15, 0.95, 16);
+  sph(r.head, 0.022, 0, -0.01, 0.105, plastic, 0.7, 1.2, 0.8, 8);
+  const armL = new THREE.Group(); armL.position.set(-0.26, 1.6, 0); r.body.add(armL);
+  taper(armL, [0, 0, 0], [-0.03, -0.4, 0.02], 0.05, 0.042, plastic, 10); sph(armL, 0.045, -0.03, -0.41, 0.02, seam, 1, 1, 1, 8);
+  taper(armL, [-0.03, -0.42, 0.02], [-0.03, -0.76, 0.06], 0.04, 0.032, plastic, 10); sph(armL, 0.045, -0.03, -0.8, 0.07, plastic, 0.8, 1.3, 0.6, 8);
+  r.armR = new THREE.Group(); r.armR.position.set(0.26, 1.6, 0); r.body.add(r.armR);
+  taper(r.armR, [0, 0, 0], [0.03, -0.4, 0.02], 0.05, 0.042, plastic, 10); sph(r.armR, 0.045, 0.03, -0.41, 0.02, seam, 1, 1, 1, 8);
+  taper(r.armR, [0.03, -0.42, 0.02], [0.03, -0.72, 0.1], 0.04, 0.032, plastic, 10); sph(r.armR, 0.048, 0.03, -0.75, 0.12, plastic, 1, 1, 1, 8);
+  r.pipe = new THREE.Group(); r.pipe.position.set(0.03, -0.75, 0.12); r.armR.add(r.pipe);
+  cyl(r.pipe, 0.024, 0.024, 1.2, 0, -0.95, 0, pipeM, 10);
+  cyl(r.pipe, 0.032, 0.032, 0.06, 0, -0.98, 0, seam, 10);
+  r.pipe.rotation.x = 0.55;
+  r.glow = ownSprite(glowTex, 0xff2418); r.glow.position.y = 0.05; r.glow.scale.set(1.3, 0.55, 1); g.add(r.glow);
+  r.mats.push(plastic, seam, pipeM);
+}
+// 燼皇（閻羅）：2.9 公尺高的骷髏長身體（燒焦的肋骨、脊椎）、陰影裡的長骷髏臉和兩點燒紅的眼睛、頭上一圈發光的荊棘光環、
+// 燒著火的紅披風一直拖到地上，長長的爪子；整個飄著
+function buildEmber(r, g) {
+  makeMonster4Textures();
+  const bone = withDetail(ownLM('#6a5048', { shade: 0.8, transparent: true }), 'bone', 5, 1.3);
+  const char = withDetail(ownLM('#2a1a16', { shade: 0.7, transparent: true }), 'corpse', 4, 1.0);
+  const claw = withDetail(ownLM('#1a1210', { shade: 0.6, transparent: true }), 'bone', 10, 0.7);
+  r.body = new THREE.Group(); g.add(r.body);
+  const inner = cyl(r.body, 0.2, 0.15, 0.85, 0, 1.3, -0.05, char, 12); inner.scale.z = 0.7;
+  cyl(r.body, 0.04, 0.05, 1.35, 0, 0.95, -0.12, bone, 8);
+  for (let i = 0; i < 7; i++) { const rib = new THREE.Mesh(geo('erib4', () => new THREE.TorusGeometry(0.21, 0.02, 6, 14, Math.PI)), bone); rib.position.set(0, 1.45 + i * 0.1, -0.02); rib.rotation.x = Math.PI / 2; rib.scale.set(1 - Math.abs(i - 3) * 0.05, 0.75, 1); r.body.add(rib); }
+  sph(r.body, 0.18, 0, 1.25, -0.02, bone, 1.2, 0.55, 0.8, 12);
+  for (const s of [-1, 1]) sph(r.body, 0.1, s * 0.3, 2.2, -0.04, bone, 1.2, 0.8, 1, 10);
+  cyl(r.body, 0.04, 0.05, 0.16, 0, 2.24, -0.02, bone, 8);
+  r.head = new THREE.Group(); r.head.position.set(0, 2.5, 0.0); r.body.add(r.head);
+  sph(r.head, 0.15, 0, 0, -0.03, char, 0.95, 1.4, 1.0, 14);
+  const faceMat = ownLM('#ffffff', { map: emberFaceTex, transparent: true, alphaTest: 0.3, shade: 0.6 });
+  r.face = new THREE.Mesh(faceGeo('emberface', 0.5, 0.137, 0.21, -0.014, 0.07), faceMat); r.face.position.set(0, 0, 0.08); r.head.add(r.face);
+  r.eyes = eyePair(r.head, 0.016, 0.17, 0xff7a20, 0.12, 0.047);
+  // 荊棘光環：一圈發光的環，外面一根一根的刺
+  r.halo = new THREE.Group(); r.halo.position.set(0, 2.92, -0.06); r.halo.rotation.x = -0.25; r.body.add(r.halo);
+  r.haloMat = ownBasic({ color: 0xfff0b0, transparent: true });
+  const ring = new THREE.Mesh(geo('halo4', () => new THREE.TorusGeometry(0.27, 0.02, 6, 32)), r.haloMat); ring.rotation.x = Math.PI / 2; r.halo.add(ring);
+  for (let i = 0; i < 14; i++) {
+    const a = i / 14 * Math.PI * 2, sp = new THREE.Mesh(geo('halospike4', () => new THREE.ConeGeometry(0.018, 0.12 + 0.0, 5)), r.haloMat);
+    sp.position.set(Math.cos(a) * 0.31, (i % 2) * 0.02, Math.sin(a) * 0.31); sp.rotation.set(0, 0, 0); sp.lookAt(Math.cos(a) * 2, 0, Math.sin(a) * 2); sp.rotateX(Math.PI / 2); r.halo.add(sp);
+  }
+  r.haloGlow = ownSprite(glowTex, 0xffd080); r.haloGlow.scale.setScalar(1.3); r.halo.add(r.haloGlow);
+  r.arms = [];
+  for (const s of [-1, 1]) {
+    const arm = new THREE.Group(); arm.position.set(s * 0.34, 2.18, -0.02); r.body.add(arm);
+    taper(arm, [0, 0, 0], [s * 0.08, -0.6, 0.06], 0.05, 0.04, bone, 8);
+    taper(arm, [s * 0.08, -0.6, 0.06], [s * 0.1, -1.15, 0.18], 0.04, 0.03, bone, 8);
+    for (let k = 0; k < 4; k++) { const c = new THREE.Mesh(geo('eclaw4', () => new THREE.ConeGeometry(0.016, 0.24, 5)), claw); c.position.set(s * 0.1 + (k - 1.5) * 0.025, -1.27, 0.2); c.rotation.x = Math.PI + 0.3; arm.add(c); }
+    r.arms.push(arm);
+  }
+  // 披風（照頭髮的做法，會飄）：從肩膀一直拖到地上，下擺燒著火
+  const cm = withDetail(hairMat(emberCapeTex, 0.6), 'rag', 3), S = [];
+  for (let x = -0.36; x <= 0.361; x += 0.06) S.push({ a: [x, 2.25, -0.14], b: [x * 1.4, 1.2, -0.32], c: [x * 1.7, 0.02, -0.38], w: 0.12, f: Math.PI, ph: x * 9, tp: 0.1 });
+  for (const s of [-1, 1]) for (let k = 0; k < 3; k++) S.push({ a: [s * 0.38, 2.2, -0.08 + k * 0.07], b: [s * 0.52, 1.2, -0.04 + k * 0.08], c: [s * 0.6, 0.02, 0.0 + k * 0.1], w: 0.12, f: s * 1.4, ph: s * 2 + k, tp: 0.15 });
+  r.body.add(new THREE.Mesh(hairGeo('ecape4', S), cm)); r.hairU = cm.userData.hair;
+  r.flames = [];
+  for (let i = 0; i < 9; i++) { const a = -0.5 + i / 8, f = ownSprite(glowTex, i % 2 ? 0xff6a10 : 0xffa030); f.position.set(a * 1.0, 0.12, -0.3 - Math.abs(a) * 0.1); f.scale.setScalar(0.35); r.body.add(f); r.flames.push(f); }
+  r.mats.push(bone, char, claw, faceMat, cm);
+}
+// 走多快（從位置的變化算；圖鑑裡用劇本的狀態）
+function moveSpeed4(e, r, dt) {
+  if (e.pose) return e.state === 'chase' || e.state === 'hunt' ? 2.8 : e.state === 'patrol' || e.state === 'wander' ? 1.3 : 0;
+  const v = r.px === undefined || dt <= 0 ? 0 : Math.hypot(e.x - r.px, e.y - r.py) / dt;
+  r.px = e.x; r.py = e.y;
+  r.spd = (r.spd || 0) + (Math.min(v, 6) - (r.spd || 0)) * Math.min(1, dt * 6);
+  return r.spd;
+}
+const wrapA = a => { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; };
+function syncMonster4(e, r, t, p, d, dt) {
+  switch (e.kind) {
+    case 'staff': {
+      const mv = moveSpeed4(e, r, dt), walk = clamp(mv / 1.4, 0, 1.4);
+      r.wph = (r.wph || 0) + dt * mv * 3.4;
+      const w = r.wph;
+      if (e.state !== 'chase' || e.idle) r.g.rotation.y = faceRot(e.face || 0);
+      r.legs[0].rotation.x = Math.sin(w) * 0.5 * walk; r.legs[1].rotation.x = -Math.sin(w) * 0.5 * walk;
+      const punch = e.cd > 1.1 ? (e.cd - 1.1) / 0.5 : 0;
+      r.arms[0].rotation.x = -Math.sin(w) * 0.3 * walk;
+      r.arms[1].rotation.x = Math.sin(w) * 0.3 * walk - punch * 1.6;
+      r.body.position.y = Math.abs(Math.sin(w)) * 0.04 * walk;
+      r.body.rotation.x = e.state === 'chase' ? 0.1 : 0;
+      // 頭：白天你靠近時慢慢轉過來看你（轉得比人能轉的還多）
+      const hy = e.look != null ? clamp(wrapA(faceRot(e.look) - r.g.rotation.y), -2.3, 2.3) : 0;
+      r.head.rotation.y += (hy - r.head.rotation.y) * Math.min(1, dt * 1.1);
+      r.head.rotation.z = Math.sin(t * 0.7 + (e.x || 0)) * 0.05 + (e.look != null ? 0.2 : 0);
+      r.g.position.y = floorH(e.x, e.y);
+      break;
+    }
+    case 'shake': {
+      const awake = !!e.awake;
+      r.front.map = awake ? shakeOpenTex : shakeShutTex;
+      r.g.position.y = floorH(e.x, e.y);
+      if (!awake) {
+        r.g.rotation.y = faceRot(e.face || 0);
+        r.carton.rotation.set(-Math.PI / 2, 0, 0); r.carton.position.set(0, 0.15, 0.22); r.carton.scale.set(1, 1, 1);
+        break;
+      }
+      const hop = Math.abs(Math.sin((e.hopT || 0) * 7)), spit = e.spitT > 3.6 ? (e.spitT - 3.6) / 0.4 : 0;
+      r.carton.rotation.set(-0.35 * spit, 0, Math.sin((e.hopT || 0) * 7) * 0.08);
+      r.carton.position.set(0, hop * 0.22, 0);
+      r.carton.scale.set(1 + (1 - hop) * 0.08, 1 - (1 - hop) * 0.12, 1 + (1 - hop) * 0.08);
+      break;
+    }
+    case 'mimic': {
+      const mv = moveSpeed4(e, r, dt), crawl = e.state === 'hunt' && !(e.retreat > 0) ? 1 : 0;
+      r.crawlK = (r.crawlK || 0) + (crawl - (r.crawlK || 0)) * Math.min(1, dt * 5);
+      const k = r.crawlK;
+      r.wph = (r.wph || 0) + dt * mv * (2.6 + k * 1.6);
+      const w = r.wph, walk = clamp(mv / 1.3, 0, 1.5);
+      if (e.retreat > 0) r.g.rotation.y = faceRot(e.face || 0);
+      r.hip.position.y = 0.95 - 0.22 * k + Math.abs(Math.sin(w)) * 0.05 * walk;
+      r.torso.rotation.x = 0.18 + 1.2 * k;
+      r.head.rotation.x = -1.05 * k + (e.retreat > 0 ? -0.3 : 0);
+      r.head.rotation.y = e.retreat > 0 ? Math.sin(t * 30) * 0.25 : Math.sin(t * 0.9) * 0.08;
+      r.head.rotation.z = (1 - k) * 0.25 + Math.sin(t * 1.3) * 0.05;   // 站著的時候頭歪一邊
+      for (const [i, leg] of r.legs.entries()) leg.rotation.x = -0.35 * k + Math.sin(w + i * Math.PI) * 0.5 * walk;
+      const knock = e.knock > 0 && (e.knockTick || 0) > 1.6 ? Math.abs(Math.sin(t * 14)) : 0;
+      r.arms[0].rotation.x = -1.2 * k + Math.sin(w + Math.PI) * (0.25 + 0.4 * k) * walk;
+      r.arms[1].rotation.x = -1.2 * k + Math.sin(w) * (0.25 + 0.4 * k) * walk - (e.knock > 0 ? 1.6 + knock * 0.4 : 0);
+      r.drool.forEach((s, i) => { s.rotation.x = r.head.rotation.x * -0.8 + Math.sin(t * 2 + i) * 0.06; });
+      r.g.position.y = floorH(e.x, e.y);
+      break;
+    }
+    case 'hubert': {
+      if (e.home && !(e.raise > 0)) r.g.rotation.y = faceRot(e.face || 0);
+      r.body.position.y = 0.22 + Math.sin(t * 1.6 + (e.x || 0)) * 0.05;
+      r.g.position.y = floorH(e.x, e.y);
+      r.legs[0].rotation.x = Math.sin(t * 1.1) * 0.08; r.legs[1].rotation.x = -Math.sin(t * 1.1) * 0.08;
+      const raise = e.raise > 0 ? clamp((1 - e.raise) * 2, 0, 1) : 0, slam = e.cd > 4.1 ? 1 : 0, swing = e.swing > 0 ? e.swing / 0.35 : 0;
+      r.armR.rotation.x = raise > 0 ? -2.9 * raise : swing > 0 ? -2.6 * swing + 0.2 : slam ? 0.35 : Math.sin(t * 0.8) * 0.05;
+      r.pipe.rotation.x = raise > 0 ? 0.55 - 0.4 * raise : 0.55;
+      r.head.rotation.y = Math.sin(t * 0.6) * 0.3;
+      r.glow.material.opacity = (0.55 + 0.3 * Math.sin(t * 3.1) + (raise > 0 ? 0.3 : 0)) * enemyAlpha(e);
+      break;
+    }
+    case 'ember': {
+      const kneel = e.kneel > 0, rain = e.rain > 0;
+      r.kneelK = (r.kneelK || 0) + ((kneel ? 1 : 0) - (r.kneelK || 0)) * Math.min(1, dt * 3);
+      r.rainK = (r.rainK || 0) + ((rain ? 1 : 0) - (r.rainK || 0)) * Math.min(1, dt * 4);
+      const kk = r.kneelK, rk = r.rainK;
+      r.body.position.y = 0.22 + Math.sin(t * 1.2) * 0.08 - kk * 0.85;
+      r.body.rotation.x = kk * 0.35;
+      r.head.rotation.x = kk * 0.45;
+      const atk = e.cd > 1.6 ? (e.cd - 1.6) / 0.6 : 0;
+      r.arms.forEach((a, i) => {
+        const s = i ? 1 : -1;
+        a.rotation.z = s * (0.15 + rk * 1.2 + Math.sin(t * 1.4 + i) * 0.05);
+        a.rotation.x = -rk * 0.4 - (i ? atk * 1.6 : 0) + kk * 0.6;
+      });
+      const hk = kneel ? 0.08 : e.haloLit ? 0.65 + 0.35 * Math.abs(Math.sin(t * 20)) : 0.85 + 0.15 * Math.sin(t * 3);
+      r.haloMat.color.setRGB(hk, hk * 0.9, hk * 0.62);
+      r.haloGlow.material.opacity = hk * 0.8 * enemyAlpha(e);
+      r.halo.rotation.y = t * 0.6;
+      for (const f of r.flames) { f.scale.setScalar(0.25 + Math.random() * 0.25); f.material.opacity = (0.5 + Math.random() * 0.4) * enemyAlpha(e) * (kneel ? 0.4 : 1); }
+      const hu = r.hairU; hu.uHT.value = t; hu.uHAmp.value = 0.03 + rk * 0.05;
+      hu.uHDrag.value.set(spring(r, 'hx', Math.sin(t * 0.8) * 0.02, dt), spring(r, 'hz', -0.05 - rk * 0.06, dt));
+      r.g.position.y = floorH(e.x, e.y);
+      break;
+    }
+  }
+}
+// 神秘店員（賣東西的，不是怪物）：黃色的塑膠雨衣和帽兜，帽兜裡一片黑，只看得到兩點發亮的眼睛和一排鋸齒狀的牙；
+// 左手提著一盞油燈、右手拿著鈴鐺，背上一個塞滿東西的大竹簍
+let clerk4 = null;
+function buildClerk4() {
+  makeMonster4Textures();
+  const g = new THREE.Group(); scene.add(g);
+  const robe = withDetail(ownPhong('#ffffff', { map: clerkRobeTex, specular: 0x333333, shininess: 25, shade: 0.6 }), 'cotton', 3, 0.6);
+  const skin = withDetail(ownLM('#8a8680', { shade: 0.7 }), 'skin', 6, 1.2), metal = lm('#3a3a3c'), brass = ownPhong('#c8a040', { specular: 0xffe0a0, shininess: 70 }), wicker = lm('#8a6a3e');
+  const body = new THREE.Mesh(geo('crobe4', () => new THREE.CylinderGeometry(0.2, 0.4, 1.38, 18, 1, true)), robe); body.position.y = 0.69; g.add(body);
+  body.material.side = THREE.DoubleSide;
+  sph(g, 0.22, 0, 1.38, 0, robe, 1.12, 0.45, 0.9, 14);
+  const hood = new THREE.Mesh(geo('chood4', () => new THREE.SphereGeometry(0.2, 18, 14, Math.PI / 2 + 0.75, Math.PI * 2 - 1.5)), robe);
+  hood.position.set(0, 1.6, -0.02); hood.scale.set(1, 1.15, 1.05); g.add(hood);
+  const face = new THREE.Mesh(geo('cface4', () => new THREE.PlaneGeometry(0.26, 0.26)), ownBasic({ map: clerkFaceTex }));
+  face.position.set(0, 1.58, 0.1); g.add(face);
+  // 袖子、蒼白的手
+  for (const s of [-1, 1]) {
+    taper(g, [s * 0.22, 1.36, 0], [s * 0.26, 1.0, 0.16], 0.07, 0.085, robe, 10);
+    sph(g, 0.045, s * 0.26, 0.95, 0.2, skin, 0.9, 1.2, 0.8, 8);
+  }
+  // 油燈（左手）
+  const lamp = new THREE.Group(); lamp.position.set(-0.26, 0.9, 0.22); g.add(lamp);
+  box(lamp, -0.07, 0.07, -0.28, -0.26, -0.07, 0.07, metal); box(lamp, -0.06, 0.06, -0.08, -0.06, -0.06, 0.06, metal);
+  for (const [x, z] of [[-0.06, -0.06], [0.06, -0.06], [-0.06, 0.06], [0.06, 0.06]]) box(lamp, x - 0.006, x + 0.006, -0.26, -0.08, z - 0.006, z + 0.006, metal);
+  box(lamp, -0.055, 0.055, -0.26, -0.08, -0.055, 0.055, ownBasic({ color: 0xffc070, transparent: true, opacity: 0.55 }), false);
+  cyl(lamp, 0.004, 0.004, 0.06, 0, -0.06, 0, metal, 4);
+  const lg = ownSprite(glowTex, 0xffb060); lg.position.y = -0.17; lg.scale.setScalar(0.7); lamp.add(lg);
+  // 鈴鐺（右手）
+  const bell = new THREE.Group(); bell.position.set(0.26, 0.93, 0.22); g.add(bell);
+  cyl(bell, 0.012, 0.012, 0.1, 0, 0, 0, lm('#3a2a1e'), 6);
+  cyl(bell, 0.02, 0.05, 0.07, 0, -0.07, 0, brass, 12, true);
+  // 背上的竹簍（塞滿東西）
+  box(g, -0.2, 0.2, 0.9, 1.45, -0.42, -0.18, wicker);
+  box(g, -0.14, 0.02, 1.45, 1.6, -0.38, -0.24, lm('#c8463a')); box(g, 0.04, 0.16, 1.45, 1.55, -0.36, -0.22, lm('#3a7ad8'));
+  cyl(g, 0.03, 0.03, 0.4, 0.12, 1.45, -0.3, lm('#c8a878'), 6);
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return { g, lamp, bell, lg };
+}
 // 熔岩暴君走過留下的熔岩：地上一灘一灘發光的痕跡，15 秒後慢慢冷卻變黑
 let lavaMesh = null;
 const LAVA_MAX = 60, _lcol = new THREE.Color();
@@ -3250,8 +3637,21 @@ function pickupTex(id) {
 }
 const pickMap = new Map();
 function syncExtras(t) {
-  merchant.visible = !!(G.stock && G.stock.length) && merchantHere();
-  if (merchant.visible) merchant.rotation.y = Math.atan2(G.p.x - MERCHANT_POS.x, G.p.y - MERCHANT_POS.y);
+  const shop = !!(G.stock && G.stock.length) && merchantHere() && mode !== 'title';
+  merchant.visible = shop && !isW4();
+  if (merchant.visible) { merchant.position.set(MERCHANT_POS.x, floorH(MERCHANT_POS.x, MERCHANT_POS.y), MERCHANT_POS.y); merchant.rotation.y = Math.atan2(G.p.x - MERCHANT_POS.x, G.p.y - MERCHANT_POS.y); }
+  // 第四世界是神秘店員（每天在不同的地方）：面向你、鈴鐺輕輕晃、油燈的火一閃一閃
+  if (isW4() && shop && !clerk4) clerk4 = buildClerk4();
+  if (clerk4) {
+    clerk4.g.visible = shop && isW4();
+    if (clerk4.g.visible) {
+      clerk4.g.position.set(MERCHANT_POS.x, 0, MERCHANT_POS.y);
+      clerk4.g.rotation.y = Math.atan2(G.p.x - MERCHANT_POS.x, G.p.y - MERCHANT_POS.y);
+      clerk4.bell.rotation.z = Math.sin(t * 5) * 0.35 * Math.max(0, Math.sin(t * 0.7));
+      clerk4.lamp.rotation.z = Math.sin(t * 1.3) * 0.08;
+      clerk4.lg.material.opacity = 0.7 + 0.2 * Math.sin(t * 13) * Math.sin(t * 7);
+    }
+  }
   gift.visible = !!G.gift && mode !== 'title';
   if (gift.visible) gift.userData.glow.material.opacity = 0.45 + 0.3 * Math.sin(t * 3);
   treasureStar.visible = !!G.treasure && mode !== 'title';
@@ -3295,6 +3695,11 @@ function barH(t) {
     case 'tyrant': return 3.0;
     case 'warlord': return 2.9;
     case 'taowu': return 2.6;
+    case 'staff': return 2.4;
+    case 'shake': return t.awake ? 0.85 : 0.6;
+    case 'mimic': return t.state === 'hunt' ? 1.5 : 2.1;
+    case 'hubert': return 2.4;
+    case 'ember': return 3.35;
     default: return 2.0;
   }
 }
@@ -3732,7 +4137,7 @@ function buildFlashlight() {
   placeGhost.visible = false;
   scene.add(placeGhost);
 }
-let bobPh = 0, bobAmt = 0, baseFov = 72;
+let bobPh = 0, bobAmt = 0, baseFov = 72, crouchK = 0;
 const yawOf = f => Math.atan2(-Math.cos(f), -Math.sin(f));
 function updateCamera(dt, t) {
   let x, y, z, face, pitch, roll = 0;
@@ -3749,7 +4154,8 @@ function updateCamera(dt, t) {
     const moving = (p.moved || 0) > 0.001 && !(p.z > 0);
     bobPh += moving ? (p.moved || 0) * 6.5 : 0;
     bobAmt += ((moving ? 1 : 0) - bobAmt) * Math.min(1, dt * 8);
-    x = p.x; z = p.y; y = EYE + (p.z || 0) + floorH(p.x, p.y) + Math.sin(bobPh) * 0.035 * bobAmt;   // 車頂比較高
+    crouchK += ((isW4() && p.crouch ? 1 : 0) - crouchK) * Math.min(1, dt * 10);   // 第四世界可以蹲下
+    x = p.x; z = p.y; y = EYE + (p.z || 0) + floorH(p.x, p.y) + Math.sin(bobPh) * 0.035 * bobAmt - crouchK * 0.6;   // 車頂比較高
     face = p.face; pitch = p.pitch;
     // 被草叢人抓住：鏡頭往下看、抖動
     if (p.grabbed) { pitch -= 0.1; y -= 0.12; x += (Math.random() - 0.5) * 0.02; }
@@ -3772,14 +4178,24 @@ function updateCamera(dt, t) {
   const on = mode !== 'title' && mode !== 'cutscene' && flashOn();
   let k = on ? 1 : 0;
   if (on && G.p.bat < 15 && Math.random() < 0.15) k = 0.3;
-  // 手電筒等級：稀有更亮、巨光更亮更寬
-  const lv = mode === 'title' ? 1 : clamp(G.p.flashLv || 1, 1, 3);
-  spot.intensity = 3.2 * k * [1, 1, 1.3, 1.6][lv];
+  // 手電筒等級：稀有更亮、巨光更亮更寬；第四世界的 4～7 級有自己的顏色，而且會在幾個顏色之間慢慢變（星辰是黑白交替，光裡有星星）
+  const lv = mode === 'title' ? 1 : clamp(G.p.flashLv || 1, 1, FLASH_MAX);
+  const ft = FLASH_TIERS[lv];
+  spot.intensity = 3.2 * k * [1, 1, 1.3, 1.6, 1.8, 2.0, 2.4, 2.2][lv];
   spot.distance = flRange() + 1.5;
   spot.angle = flHalf() * 1.1;
   strongRing.visible = lv >= 2;
-  if (lv >= 2) strongRing.material.color.set(lv === 3 ? 0xffc23a : 0x4da3ff);
-  lensMat.color.set(on ? (lv === 3 ? 0xfff2c0 : 0xfff6dd) : 0x333333);
+  if (lv >= 2) strongRing.material.color.set(ft.color);
+  if (ft.beam) {
+    const B = ft.beam, ph = (t * (ft.stars ? 0.5 : 0.35)) % B.length, i0 = Math.floor(ph), u = ph - i0, a = B[i0], b = B[(i0 + 1) % B.length];
+    const e = u * u * (3 - 2 * u);
+    spot.color.setRGB((a[0] + (b[0] - a[0]) * e) / 255, (a[1] + (b[1] - a[1]) * e) / 255, (a[2] + (b[2] - a[2]) * e) / 255, SRGB);
+    if (ft.stars) spot.intensity *= 0.75 + 0.25 * Math.sin(t * 9) * Math.sin(t * 5.3);
+    lensMat.color.copy(on ? spot.color : tmpC.set(0x333333));
+  } else {
+    spot.color.set(0xfff0d8);
+    lensMat.color.set(on ? (lv === 3 ? 0xfff2c0 : 0xfff6dd) : 0x333333);
+  }
 }
 function updatePlaceGhost() {
   const it = mode === 'play' && G.selId && ITEMS[G.selId];
@@ -5582,6 +5998,1162 @@ function updateTrainFurniture(t) {
 }
 
 // ====================================================================
+// 第四世界：3008 無盡賣場（照 Roblox 的《3008》）。灰色的水泥地（主走道是淺色地磚，畫著指引方向的箭頭）、方形的水泥柱、
+// 一間一間彩色牆的樣品間、4.2 公尺高的天花板上一格一格的日光燈板（白天亮、晚上熄，天快黑時一排一排閃掉）、
+// 吊著的區域招牌、入口打不開的玻璃自動門（門外只有白霧）。家具大部分可以搬（拿起來時拆掉、放下時重建）；
+// 自己蓋的牆、門、屋頂、地上的板子、板材堆；拿著東西時前面的預覽
+// ====================================================================
+let store4Tex = null, plankMats = null, panel4 = null, panel4Info = [], grass4Mesh = null, ghostMesh4 = null, handPlank4 = null;
+const wall4Map = new Map(), roof4Map = new Map(), loose4Map = new Map();
+let build4Ver = -1;
+// 賣場的貼圖（全部用程式畫）
+function makeStoreTextures() {
+  const T = {};
+  const speck = (c, w, h, n, col, s0 = 1, s1 = 3) => { for (let i = 0; i < n; i++) { c.fillStyle = col(); c.fillRect(rnd() * w, rnd() * h, s0 + rnd() * (s1 - s0), s0 + rnd() * (s1 - s0)); } };
+  // 打磨過的水泥地：淺灰、一點一點的斑、偶爾一條裂縫，四邊一條很淡的縫（一格 1 公尺）
+  T.store = canvasTex(256, 256, (c, w, h) => {
+    c.fillStyle = '#9fa19f'; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 40; i++) { const g = c.createRadialGradient(rnd() * w, rnd() * h, 0, rnd() * w, rnd() * h, 30 + rnd() * 50); g.addColorStop(0, `rgba(${rnd() < 0.5 ? '255,255,255' : '40,40,40'},${0.03 + rnd() * 0.05})`); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.fillRect(0, 0, w, h); }
+    speck(c, w, h, 900, () => `rgba(${rnd() < 0.5 ? '70,70,72' : '200,200,198'},${0.15 + rnd() * 0.2})`, 1, 2.5);
+    c.strokeStyle = 'rgba(60,60,62,.35)'; c.lineWidth = 2; c.strokeRect(1, 1, w - 2, h - 2);
+    if (rnd() < 1) { c.strokeStyle = 'rgba(50,50,52,.25)'; c.lineWidth = 1; c.beginPath(); let x = rnd() * w, y = 0; c.moveTo(x, y); while (y < h) { x += (rnd() - 0.5) * 18; y += 10 + rnd() * 14; c.lineTo(x, y); } c.stroke(); }
+  });
+  // 主走道：淺米灰色的大地磚
+  T.aisle = canvasTex(256, 256, (c, w, h) => {
+    c.fillStyle = '#d3cfc6'; c.fillRect(0, 0, w, h);
+    speck(c, w, h, 700, () => `rgba(${rnd() < 0.5 ? '150,145,135' : '240,238,232'},${0.2 + rnd() * 0.2})`, 1, 2);
+    c.strokeStyle = 'rgba(120,115,105,.5)'; c.lineWidth = 3; c.strokeRect(1.5, 1.5, w - 3, h - 3);
+  });
+  // 樣品間的淺色橡木地板、兒童房的灰藍色地毯
+  T.oak = canvasTex(256, 256, (c, w, h) => {
+    for (let y = 0; y < h; y += 32) {
+      const off = ((y / 32) % 2) * 96;
+      for (let x = -off; x < w; x += 192) {
+        c.fillStyle = shade('#c9a77e', (rnd() - 0.5) * 26); c.fillRect(x, y, 192, 32);
+        c.strokeStyle = 'rgba(120,85,50,.25)'; c.lineWidth = 1;
+        for (let k = 0; k < 5; k++) { c.beginPath(); c.moveTo(x, y + 4 + rnd() * 24); c.bezierCurveTo(x + 60, y + rnd() * 32, x + 120, y + rnd() * 32, x + 192, y + 4 + rnd() * 24); c.stroke(); }
+        c.fillStyle = 'rgba(70,45,25,.35)'; c.fillRect(x, y, 2, 32);
+      }
+      c.fillStyle = 'rgba(70,45,25,.3)'; c.fillRect(0, y, w, 1.5);
+    }
+  });
+  T.carpet = canvasTex(128, 128, (c, w, h) => { c.fillStyle = '#7d8ea0'; c.fillRect(0, 0, w, h); speck(c, w, h, 900, () => `rgba(${rnd() < 0.5 ? '255,255,255' : '20,30,40'},${0.06 + rnd() * 0.08})`, 1, 2); });
+  // 外牆：漆成白灰色的空心磚牆，底下一圈深灰色的踢腳板，上面一條藍灰色的線
+  T.wall = canvasTex(256, 256, (c, w, h) => {
+    c.fillStyle = '#d8d6d0'; c.fillRect(0, 0, w, h);
+    for (let y = 0; y < h; y += 32) for (let x = ((y / 32) % 2) * 32; x < w + 64; x += 64) { c.fillStyle = shade('#d8d6d0', (rnd() - 0.5) * 12); c.fillRect(x - 64 + 2, y + 2, 60, 28); }
+    speck(c, w, h, 300, () => `rgba(0,0,0,${0.03 + rnd() * 0.05})`, 1, 3);
+    c.fillStyle = '#4a4d52'; c.fillRect(0, h - 14, w, 14);
+  });
+  // 樣品間的隔間牆：白色的油漆牆（貼圖是白的，每面牆再乘上自己的顏色），底下白色踢腳板
+  T.part = canvasTex(128, 256, (c, w, h) => {
+    c.fillStyle = '#f2f0ea'; c.fillRect(0, 0, w, h);
+    speck(c, w, h, 400, () => `rgba(${rnd() < 0.5 ? '0,0,0' : '255,255,255'},${0.02 + rnd() * 0.03})`, 1, 4);
+    c.fillStyle = '#fbfaf6'; c.fillRect(0, h - 20, w, 20); c.fillStyle = 'rgba(0,0,0,.12)'; c.fillRect(0, h - 21, w, 1.5);
+  });
+  // 柱子：灰色的清水模水泥，底下一圈黃黑相間的警示線
+  T.pillar = canvasTex(128, 512, (c, w, h) => {
+    c.fillStyle = '#9b9c99'; c.fillRect(0, 0, w, h);
+    speck(c, w, h, 600, () => `rgba(${rnd() < 0.5 ? '60,60,60' : '210,210,205'},${0.1 + rnd() * 0.15})`, 1, 3);
+    for (const y of [128, 256, 384]) { c.fillStyle = 'rgba(60,60,60,.25)'; c.fillRect(0, y, w, 2); }
+    for (let x = -20; x < w; x += 20) { c.fillStyle = (x / 20) % 2 ? '#1a1a1a' : '#e8c23a'; c.beginPath(); c.moveTo(x, h); c.lineTo(x + 20, h); c.lineTo(x + 34, h - 24); c.lineTo(x + 14, h - 24); c.fill(); }
+  });
+  // 天花板：60 公分的吸音板
+  T.ceil = canvasTex(128, 128, (c, w, h) => {
+    c.fillStyle = '#c9c8c3'; c.fillRect(0, 0, w, h);
+    speck(c, w, h, 700, () => `rgba(80,80,80,${0.08 + rnd() * 0.12})`, 1, 2);
+    c.fillStyle = '#e4e3de'; c.fillRect(0, 0, w, 3); c.fillRect(0, 0, 3, h); c.fillRect(0, h / 2, w, 2); c.fillRect(w / 2, 0, 2, h);
+  });
+  // 日光燈板：白色的擴散板，四周鋁框
+  T.panel = canvasTex(128, 64, (c, w, h) => {
+    c.fillStyle = '#9da0a4'; c.fillRect(0, 0, w, h);
+    const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#f4f6ff'); g.addColorStop(0.5, '#ffffff'); g.addColorStop(1, '#eef0fa');
+    c.fillStyle = g; c.fillRect(6, 6, w - 12, h - 12);
+    c.strokeStyle = 'rgba(160,165,175,.6)'; c.lineWidth = 1; for (let x = 10; x < w - 6; x += 8) { c.beginPath(); c.moveTo(x, 6); c.lineTo(x, h - 6); c.stroke(); }
+  });
+  // 地上指方向的箭頭
+  T.arrow = canvasTex(128, 128, (c, w, h) => {
+    c.clearRect(0, 0, w, h); c.fillStyle = 'rgba(70,70,70,.55)';
+    c.beginPath(); c.moveTo(64, 14); c.lineTo(108, 62); c.lineTo(80, 62); c.lineTo(80, 114); c.lineTo(48, 114); c.lineTo(48, 62); c.lineTo(20, 62); c.closePath(); c.fill();
+  });
+  T.arrow.wrapS = T.arrow.wrapT = THREE.ClampToEdgeWrapping;
+  // 牆的裂痕（板子被打的時候疊上去，越破越明顯）
+  T.crack = canvasTex(256, 512, (c, w, h) => {
+    c.clearRect(0, 0, w, h); c.lineCap = 'round'; c.lineJoin = 'round';
+    // 幾個被打到的點，從那裡往外裂出細細的、折來折去的裂縫
+    for (let k = 0; k < 4; k++) {
+      const cx = 40 + rnd() * 176, cy = 80 + rnd() * 380;
+      for (let i = 0; i < 7; i++) {
+        let x = cx, y = cy, a = rnd() * Math.PI * 2;
+        c.beginPath(); c.moveTo(x, y);
+        for (let s = 0; s < 8; s++) { a += (rnd() - 0.5) * 0.9; const L = 8 + rnd() * 16; x += Math.cos(a) * L; y += Math.sin(a) * L; c.lineTo(x, y); }
+        c.strokeStyle = 'rgba(25,18,12,.8)'; c.lineWidth = 1.2 + rnd() * 1.2; c.stroke();
+        c.strokeStyle = 'rgba(255,255,255,.18)'; c.lineWidth = 0.6; c.stroke();
+      }
+      c.fillStyle = 'rgba(20,15,10,.55)'; c.beginPath(); c.arc(cx, cy, 3 + rnd() * 4, 0, 7); c.fill();
+    }
+  });
+  T.crack.wrapS = T.crack.wrapT = THREE.ClampToEdgeWrapping;
+  store4Tex = T;
+}
+// 吊著的招牌（深灰色的板子、白字、下面一條顏色）
+const sign4Cache = new Map();
+function sign4Tex(text, col = '#e8c23a') {
+  const key = text + col;
+  if (sign4Cache.has(key)) return sign4Cache.get(key);
+  const t = canvasTex(512, 128, (c, w, h) => {
+    c.fillStyle = '#2b2d33'; c.fillRect(0, 0, w, h);
+    c.fillStyle = col; c.fillRect(0, h - 14, w, 14);
+    c.fillStyle = '#f4f2ec'; c.font = 'bold 58px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(text, w / 2, h / 2 - 6, w - 30);
+  });
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  sign4Cache.set(key, t);
+  return t;
+}
+// 五級板子的材質：木頭夾板、白色的牆面、亮金色的金屬、黑色岩石裡流著岩漿、透明的強化玻璃
+function makePlankMats() {
+  const wood = canvasTex(128, 256, (c, w, h) => {
+    c.fillStyle = '#b8895a'; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 40; i++) { c.strokeStyle = `rgba(${110 + rnd() * 40 | 0},${70 + rnd() * 30 | 0},${40 + rnd() * 20 | 0},${0.25 + rnd() * 0.3})`; c.lineWidth = 1 + rnd() * 2; const x = rnd() * w; c.beginPath(); c.moveTo(x, 0); c.bezierCurveTo(x + (rnd() - 0.5) * 20, h * 0.3, x + (rnd() - 0.5) * 20, h * 0.7, x + (rnd() - 0.5) * 12, h); c.stroke(); }
+    for (let i = 0; i < 3; i++) { const x = rnd() * w, y = rnd() * h; c.fillStyle = 'rgba(90,55,25,.6)'; c.beginPath(); c.ellipse(x, y, 4 + rnd() * 4, 7 + rnd() * 6, 0, 0, 7); c.fill(); }
+    c.fillStyle = 'rgba(80,50,25,.45)'; c.fillRect(0, 0, 3, h); c.fillRect(w - 3, 0, 3, h);
+  });
+  const plaster = canvasTex(128, 256, (c, w, h) => {
+    c.fillStyle = '#ece9e2'; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 500; i++) { c.fillStyle = `rgba(${rnd() < 0.5 ? '0,0,0' : '255,255,255'},${0.02 + rnd() * 0.04})`; c.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 4, 1 + rnd() * 4); }
+    c.fillStyle = '#d6d2c8'; c.fillRect(0, h - 16, w, 16); c.fillStyle = 'rgba(0,0,0,.15)'; c.fillRect(0, h - 17, w, 1.5);
+  });
+  const brushed = canvasTex(64, 128, (c, w, h) => { c.fillStyle = '#d8a83a'; c.fillRect(0, 0, w, h); for (let i = 0; i < 200; i++) { c.fillStyle = `rgba(${rnd() < 0.5 ? '255,240,180' : '120,80,10'},${0.08 + rnd() * 0.1})`; c.fillRect(0, rnd() * h, w, 1); } });
+  const M = [null];
+  M[1] = patchLM(new THREE.MeshLambertMaterial({ map: wood }));
+  M[2] = patchLM(new THREE.MeshLambertMaterial({ map: plaster }));
+  M[3] = patchLM(new THREE.MeshPhongMaterial({ map: brushed, color: 0xffffff, specular: 0xfff0b0, shininess: 70, emissive: 0x2a1a00 }));
+  M[4] = patchLM(new THREE.MeshLambertMaterial({ map: rockTex, emissiveMap: lavaCrackTex, emissive: 0xff5a10 }));
+  M[5] = patchLM(new THREE.MeshPhongMaterial({ color: 0xcfe8f0, transparent: true, opacity: 0.26, specular: 0xffffff, shininess: 100, depthWrite: false, side: THREE.DoubleSide }));
+  plankMats = M;
+}
+const PLANK_EDGE = ['', '#7a5532', '#bdb8ac', '#b8861a', '#2a1208', '#e8f6ff'];
+// 一片牆（或門）：放在格子的邊上，0.1 公尺厚、2.6 公尺高；門可以打開（繞著一邊轉）
+function buildWall4(w) {
+  const g = new THREE.Group(); g.position.set(w.x, 0, w.y); scene.add(g);
+  const H = ROOF4_H, mat = plankMats[w.tier], edge = lm(PLANK_EDGE[w.tier]);
+  const res = { g, w };
+  const piv = new THREE.Group(); g.add(piv); res.piv = piv;
+  const hz = w.o === 'h';
+  // 木板子用兩片疊起來的樣子（中間一條縫），水泥、黃金、岩漿、玻璃是整片
+  const panel = (x0, x1, y0, y1) => (hz ? box(piv, x0, x1, y0, y1, -0.05, 0.05, mat, w.tier !== 5) : box(piv, -0.05, 0.05, y0, y1, x0, x1, mat, w.tier !== 5));
+  if (w.door) {
+    // 木門：門框 + 可以轉的門板（門把是黃銅）
+    const frame = (x0, x1, y0, y1) => (hz ? box(g, x0, x1, y0, y1, -0.07, 0.07, edge) : box(g, -0.07, 0.07, y0, y1, x0, x1, edge));
+    frame(0.0, 0.06, 0, H); frame(0.94, 1.0, 0, H); frame(0.0, 1.0, 2.2, H);
+    if (hz) piv.position.x = 0.06; else piv.position.z = 0.06;
+    const dp = hz ? box(piv, 0, 0.88, 0, 2.18, -0.035, 0.035, mat) : box(piv, -0.035, 0.035, 0, 2.18, 0, 0.88, mat);
+    const kn = lm('#d6a84a');
+    for (const s of [-1, 1]) sph(piv, 0.03, hz ? 0.78 : s * 0.06, 1.0, hz ? s * 0.06 : 0.78, kn);
+    res.panel = dp;
+  } else {
+    panel(0.02, 0.98, 0, H);
+    // 上下的收邊條
+    if (w.tier !== 5) { if (hz) { box(piv, 0.02, 0.98, H - 0.05, H, -0.055, 0.055, edge); box(piv, 0.02, 0.98, 0, 0.05, -0.055, 0.055, edge); } else { box(piv, -0.055, 0.055, H - 0.05, H, 0.02, 0.98, edge); box(piv, -0.055, 0.055, 0, 0.05, 0.02, 0.98, edge); } }
+    else {   // 玻璃：細細的鋁框
+      const al = lm('#c8ccd0');
+      if (hz) { box(piv, 0.0, 0.03, 0, H, -0.04, 0.04, al); box(piv, 0.97, 1.0, 0, H, -0.04, 0.04, al); box(piv, 0, 1, H - 0.04, H, -0.04, 0.04, al); box(piv, 0, 1, 0, 0.04, -0.04, 0.04, al); }
+      else { box(piv, -0.04, 0.04, 0, H, 0.0, 0.03, al); box(piv, -0.04, 0.04, 0, H, 0.97, 1.0, al); box(piv, -0.04, 0.04, H - 0.04, H, 0, 1, al); box(piv, -0.04, 0.04, 0, 0.04, 0, 1, al); }
+    }
+  }
+  // 裂痕：兩面各一片，越破越明顯
+  if (w.tier !== 5) {
+    const cm = ownBasic({ map: store4Tex.crack, transparent: true, opacity: 0, depthWrite: false });
+    for (const s of [-1, 1]) {
+      const pl = new THREE.Mesh(geo('crack4', () => new THREE.PlaneGeometry(0.9, H * 0.9)), cm);
+      if (hz) { pl.position.set(0.5, H * 0.48, s * 0.056); pl.rotation.y = s > 0 ? 0 : Math.PI; } else { pl.position.set(s * 0.056, H * 0.48, 0.5); pl.rotation.y = s > 0 ? Math.PI / 2 : -Math.PI / 2; }
+      piv.add(pl);
+    }
+    res.crack = cm;
+  }
+  res.fire = ownSprite(glowTex, 0xff7a20); res.fire.scale.set(1.4, 2.6, 1); res.fire.position.set(hz ? 0.5 : 0, 1.3, hz ? 0 : 0.5); res.fire.visible = false; g.add(res.fire);
+  return res;
+}
+function buildRoof4(r) {
+  const g = new THREE.Group(); g.position.set(r.x, 0, r.y); scene.add(g);
+  box(g, 0, 1, ROOF4_H - 0.04, ROOF4_H + 0.04, 0, 1, plankMats[r.tier], r.tier !== 5);
+  box(g, 0, 1, ROOF4_H + 0.04, ROOF4_H + 0.06, 0.48, 0.52, lm(PLANK_EDGE[r.tier]));
+  return { g, r };
+}
+// 地上的板子（躺著，縮小一點）
+function buildLoose4(l) {
+  const g = new THREE.Group(); g.position.set(l.x, 0, l.y); g.rotation.y = l.a || 0; scene.add(g);
+  box(g, -0.62, 0.62, 0, 0.05, -0.24, 0.24, plankMats[l.tier], false);
+  if (l.door) sph(g, 0.03, 0.45, 0.07, 0, lm('#d6a84a'));
+  const glow = ownSprite(glowTex, new THREE.Color(RARITY[PLANKS[l.tier].rar].color).getHex()); glow.position.y = 0.2; glow.scale.setScalar(0.6); g.add(glow);
+  return { g, glow };
+}
+// 每一幀：自己蓋的牆、屋頂、地上的板子跟遊戲狀態對齊；牆被打的時候會抖、有裂痕、著火時有火光；門打開時轉開
+function syncBuild4(t) {
+  if (!G.b4) return;
+  if (!plankMats) makePlankMats();
+  const sync = (map, list, build) => {
+    const seen = new Set();
+    for (const o of list) { seen.add(o); if (!map.has(o)) map.set(o, build(o)); }
+    for (const [o, r] of map) if (!seen.has(o)) { disposeGroup(r.g); map.delete(o); }
+  };
+  sync(wall4Map, G.b4.list, buildWall4);
+  sync(roof4Map, [...G.b4.roofs.values()], buildRoof4);
+  sync(loose4Map, G.loose4, buildLoose4);
+  for (const [w, r] of wall4Map) {
+    const k = w.tier === 5 ? 1 : clamp(w.hp / PLANKS[w.tier].hp, 0, 1);
+    if (r.crack) r.crack.opacity = k < 0.85 ? Math.min(0.9, (1 - k) * 1.2) : 0;
+    const sh = w.hitT > 0 ? (Math.random() - 0.5) * 0.03 : 0;
+    r.g.position.set(w.x + (w.o === 'v' ? sh : 0), 0, w.y + (w.o === 'h' ? sh : 0));
+    if (w.door) { const a = w.open ? -1.45 : 0; r.piv.rotation.y += (a - r.piv.rotation.y) * 0.25; }
+    r.fire.visible = w.burn > 0;
+    if (r.fire.visible) r.fire.material.opacity = 0.5 + 0.4 * Math.random();
+  }
+  if (plankMats[4]) { const k = 0.6 + 0.4 * Math.sin(t * 2.2); plankMats[4].emissive.setRGB(k, k * 0.35, k * 0.06); }
+  for (const [l, r] of loose4Map) r.glow.material.opacity = 0.35 + 0.25 * Math.sin(t * 3 + l.x);
+}
+// 預覽：拿著板子或家具時，前面放下的位置（綠色＝放得下、紅色＝放不下）
+function syncGhost4() {
+  if (!ghostMesh4) {
+    ghostMesh4 = new THREE.Group(); scene.add(ghostMesh4);
+    ghostMesh4.box = new THREE.Mesh(BOX, new THREE.MeshBasicMaterial({ color: 0x60ff80, transparent: true, opacity: 0.28, depthWrite: false }));
+    ghostMesh4.edge = new THREE.LineSegments(new THREE.EdgesGeometry(BOX), new THREE.LineBasicMaterial({ color: 0x9dffb0, transparent: true, opacity: 0.9 }));
+    ghostMesh4.add(ghostMesh4.box, ghostMesh4.edge);
+  }
+  const g = mode === 'play' && isW4() && G.hand ? ghost4() : null;   // ghost4() 在 world4.js
+  ghostMesh4.visible = !!g;
+  if (!g) return;
+  const col = g.ok ? 0x60ff80 : 0xff5050;
+  ghostMesh4.box.material.color.setHex(col); ghostMesh4.edge.material.color.setHex(g.ok ? 0xb0ffc0 : 0xff9a9a);
+  const H = ROOF4_H;
+  if (g.kind === 'wall') { if (g.o === 'h') { ghostMesh4.position.set(g.x + 0.5, H / 2, g.y); ghostMesh4.scale.set(0.96, H, 0.1); } else { ghostMesh4.position.set(g.x, H / 2, g.y + 0.5); ghostMesh4.scale.set(0.1, H, 0.96); } }
+  else if (g.kind === 'roof') { ghostMesh4.position.set(g.x + 0.5, H, g.y + 0.5); ghostMesh4.scale.set(1, 0.08, 1); }
+  else { const fh = G.hand.f.solid === false ? 0.05 : 1.0; ghostMesh4.position.set(g.x + g.w / 2, fh / 2, g.y + g.h / 2); ghostMesh4.scale.set(g.w, fh, g.h); }
+}
+// 手上拿的板子（畫面右下角）
+function syncHand4() {
+  if (!handPlank4) {
+    handPlank4 = new THREE.Group(); camera.add(handPlank4);
+    handPlank4.position.set(0.32, -0.42, -0.62); handPlank4.rotation.set(0.15, -0.5, 0.1);
+  }
+  const h = mode === 'play' && isW4() && G.hand && G.hand.k !== 'item' ? G.hand : null;
+  const key = h ? (h.k === 'plank' ? 'p' + h.tier + (h.door ? 'd' : '') : 'f') : '';
+  if (handPlank4.userData.key !== key) {
+    handPlank4.userData.key = key;
+    while (handPlank4.children.length) { const c = handPlank4.children[0]; handPlank4.remove(c); }
+    if (h && h.k === 'plank') { if (!plankMats) makePlankMats(); box(handPlank4, -0.16, 0.16, -0.32, 0.32, -0.015, 0.015, plankMats[h.tier], false); }
+    else if (h) box(handPlank4, -0.14, 0.14, -0.1, 0.1, -0.1, 0.1, lm('#b08a5a'), false);
+  }
+  handPlank4.visible = !!h;
+}
+// ====================================================================
+// 第四世界的家具（寫實風：布沙發、皮沙發、實木、鐵貨架、不鏽鋼）。布、皮、木頭用第三世界的照片乘上顏色（沒有照片就是純色）；
+// 同一種家具每件的顏色照 id 有一點不一樣（搬動後重建也一樣）
+// ====================================================================
+const fab4 = c => photoMat('w3-linen', c), vel4 = c => photoMat('w3-velvet', c), wood4 = c => photoMat('w3-wood', c), leath4 = c => photoMat('w3-leather', c);
+// 正面座標（u 沿著正面、v 從正面往內）換成家具群組裡的座標（跟 fb 一樣）
+function fpt4(f, side, u, y, v) {
+  const W = f.w, D = f.h;
+  if (side === 's') return new THREE.Vector3(u, y, D - v);
+  if (side === 'n') return new THREE.Vector3(u, y, v);
+  if (side === 'e') return new THREE.Vector3(W - v, y, u);
+  return new THREE.Vector3(v, y, u);
+}
+// 轉好方向的子群組：放在家具中間，本地的 +z 朝正面、x 沿著正面（形狀斜斜的家具用這個做比較方便）
+function orient4(g, f, side) {
+  const o = new THREE.Group(); o.position.set(f.w / 2, 0, f.h / 2);
+  o.rotation.y = { s: 0, n: Math.PI, e: Math.PI / 2, w: -Math.PI / 2 }[side] || 0;
+  g.add(o); return o;
+}
+// 兩點之間的一根方棒（梯子的腳、購物車的鐵條）
+function beam4(g, x0, y0, z0, x1, y1, z1, t, mat, t2 = t) {
+  const m = new THREE.Mesh(BOX, mat);
+  _v.set(x1 - x0, y1 - y0, z1 - z0);
+  m.scale.set(t, Math.max(0.001, _v.length()), t2);
+  m.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+  m.quaternion.setFromUnitVectors(UP, _v.normalize());
+  m.castShadow = true; m.receiveShadow = true; g.add(m); return m;
+}
+const hash4 = s => { let h = 7; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) | 0; return h >>> 0; };
+// 地毯：五種花樣（米色羊毛、灰藍條紋、菱格、深灰流蘇、復古花邊），畫一次重複用
+const rug4Mats = [];
+function rug4Mat(k) {
+  if (rug4Mats[k]) return rug4Mats[k];
+  const t = canvasTex(256, 256, (c, w, h) => {
+    const base = ['#cdbfa6', '#7d8ea0', '#d8d0c0', '#3e3f42', '#9a5a48'][k];
+    c.fillStyle = base; c.fillRect(0, 0, w, h);
+    if (k === 1) for (let x = 0; x < w; x += 32) { c.fillStyle = x % 64 ? '#5d6e80' : '#a8b4c0'; c.fillRect(x, 0, 12, h); }
+    if (k === 2) { c.strokeStyle = '#8a7a62'; c.lineWidth = 3; for (let i = -h; i < w; i += 36) { c.beginPath(); c.moveTo(i, 0); c.lineTo(i + h, h); c.moveTo(i + h, 0); c.lineTo(i, h); c.stroke(); } }
+    if (k === 4) { c.strokeStyle = '#e0c89a'; c.lineWidth = 6; c.strokeRect(14, 14, w - 28, h - 28); c.strokeStyle = '#3a2a3a'; c.lineWidth = 3; c.strokeRect(28, 28, w - 56, h - 56); c.fillStyle = '#e0c89a'; c.beginPath(); c.ellipse(w / 2, h / 2, 50, 34, 0, 0, 7); c.fill(); c.fillStyle = '#5a2e2a'; c.beginPath(); c.ellipse(w / 2, h / 2, 34, 20, 0, 0, 7); c.fill(); }
+    if (k === 0) { c.strokeStyle = 'rgba(90,70,50,.35)'; c.lineWidth = 4; c.strokeRect(16, 16, w - 32, h - 32); }
+    // 羊毛的毛絨感
+    for (let i = 0; i < 2600; i++) { c.fillStyle = `rgba(${rnd() < 0.5 ? '255,255,255' : '0,0,0'},${0.04 + rnd() * 0.06})`; c.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 2, 1 + rnd() * 2); }
+    if (k === 3) { c.fillStyle = '#d8d2c4'; for (let x = 0; x < w; x += 6) { c.fillRect(x, 0, 2, 8); c.fillRect(x, h - 8, 2, 8); } }
+  });
+  return (rug4Mats[k] = patchLM(new THREE.MeshLambertMaterial({ map: t })));
+}
+// 紙箱的貼圖（瓦楞紙、膠帶、一張白色的標籤）
+let box4Mat = null;
+function cardboard4() {
+  if (box4Mat) return box4Mat;
+  const t = canvasTex(128, 128, (c, w, h) => {
+    c.fillStyle = '#b48a5a'; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 300; i++) { c.fillStyle = `rgba(${rnd() < 0.5 ? '90,60,30' : '220,190,150'},${0.08 + rnd() * 0.1})`; c.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 3, 1); }
+    c.fillStyle = 'rgba(210,190,150,.8)'; c.fillRect(0, h / 2 - 8, w, 16);
+    c.fillStyle = '#f2efe8'; c.fillRect(14, 16, 44, 28); c.fillStyle = '#333'; for (let y = 22; y < 40; y += 5) c.fillRect(18, y, 30 + (y % 3) * 4, 2);
+  });
+  return (box4Mat = patchLM(new THREE.MeshLambertMaterial({ map: t })));
+}
+// 貨架上一盒一盒的商品（顏色鮮豔的包裝）
+const PRODUCT4 = ['#d84a3a', '#3a7ad8', '#e8c23a', '#4aa36a', '#f2efe8', '#7a4ad8', '#e8743a', '#2a2a2a', '#5ac8d8', '#c84a8a'];
+function store4Furniture(f, g, r, W, D, side, len, cabinet) {
+  if (!isW4()) return false;
+  void cabinet;
+  const dep = side === 's' || side === 'n' ? D : W;
+  const F = (u0, u1, y0, y1, v0, v1, m, sh) => fb(g, f, side, u0, u1, y0, y1, v0, v1, m, sh);
+  const legs = (x0, x1, z0, z1, h, m, t = 0.03) => { for (const [x, z] of [[x0, z0], [x1, z0], [x0, z1], [x1, z1]]) box(g, x - t, x + t, 0, h, z - t, z + t, m); };
+  const R = seeded(hash4(f.id) % 2000000 + 11), tone = hash4(f.id) % 5;
+  const pick = a => a[tone % a.length];
+  const black = lm('#1d1e20'), steel = lm('#a4a9ae'), dkSteel = lm('#4a4f55'), white = lm('#eef0ee'), porcelain = ownPhong('#f4f5f3', { specular: 0x666666, shininess: 60 });
+  const WOODS = ['#8a6a48', '#e8e2d6', '#4a3428', '#b89470', '#f0ece4'];
+  // 有門、有抽屜的櫃子：放在後面（靠牆），深度 d
+  const caseBox = (h, d, col, doors = 2, drawers = 0) => {
+    const w = wood4(col), w2 = wood4(shade(col, -10)), kb = lm('#b8b0a0');
+    F(0.04, len - 0.04, 0.06, h, dep - d, dep - 0.03, w);
+    F(0.06, len - 0.06, 0, 0.06, dep - d + 0.03, dep - 0.05, black, false);
+    const n = Math.max(1, doors * Math.round(len));
+    for (let i = 0; i < n; i++) {
+      const a = i * len / n + 0.06, b = (i + 1) * len / n - 0.06;
+      if (drawers) for (let k = 0; k < drawers; k++) { const y0 = 0.1 + k * (h - 0.14) / drawers, y1 = 0.1 + (k + 1) * (h - 0.14) / drawers - 0.03; F(a, b, y0, y1, dep - d - 0.02, dep - d, w2, false); F((a + b) / 2 - 0.06, (a + b) / 2 + 0.06, y1 - 0.08, y1 - 0.06, dep - d - 0.045, dep - d - 0.02, kb, false); }
+      else { F(a, b, 0.1, h - 0.04, dep - d - 0.02, dep - d, w2, false); const hu = i % 2 ? a + 0.06 : b - 0.06; F(hu - 0.012, hu + 0.012, h * 0.45, h * 0.45 + 0.18, dep - d - 0.05, dep - d - 0.02, kb, false); }
+    }
+    r.top = h;
+  };
+  switch (f.type) {
+    case 'sofa4': {
+      const col = pick(['#6d7466', '#8a8178', '#4f5a6a', '#9a8f7e', '#5d4c44']), c = vel4(col), c2 = vel4(shade(col, -12));
+      F(0.05, len - 0.05, 0.1, 0.42, 0.08, dep - 0.05, c);
+      F(0.05, len - 0.05, 0.42, 0.98, dep - 0.26, dep - 0.05, c2);
+      F(0.05, 0.22, 0.42, 0.68, 0.06, dep - 0.05, c2); F(len - 0.22, len - 0.05, 0.42, 0.68, 0.06, dep - 0.05, c2);
+      const n = Math.max(1, Math.round(len - 0.5));
+      for (let i = 0; i < n; i++) {
+        const a = 0.23 + i * (len - 0.46) / n, b = 0.23 + (i + 1) * (len - 0.46) / n - 0.015;
+        F(a, b, 0.42, 0.57, 0.08, dep - 0.26, c);
+        F(a + 0.02, b - 0.02, 0.57, 0.92, dep - 0.42, dep - 0.26, c);
+      }
+      for (const u of [0.12, len - 0.12]) for (const v of [0.14, dep - 0.12]) F(u - 0.025, u + 0.025, 0, 0.1, v - 0.025, v + 0.025, wood4('#3a2a1e'));
+      // 一個抱枕
+      F(0.28, 0.62, 0.55, 0.88, dep - 0.5, dep - 0.4, fab4(pick(['#d8c8a8', '#a84a3a', '#e8e4dc', '#5a6a4a', '#c89a5a'])));
+      r.top = 0.98;
+      break;
+    }
+    case 'armchair': {
+      const col = pick(['#6a4630', '#3e3a36', '#7a5a3e', '#4b3b30', '#5a3020']), c = leath4(col), c2 = leath4(shade(col, -10));
+      F(0.08, 0.92, 0.12, 0.42, 0.1, 0.92, c);
+      F(0.08, 0.92, 0.42, 0.98, 0.7, 0.92, c2);
+      F(0.08, 0.2, 0.42, 0.66, 0.08, 0.92, c2); F(0.8, 0.92, 0.42, 0.66, 0.08, 0.92, c2);
+      F(0.21, 0.79, 0.42, 0.54, 0.1, 0.7, c);
+      for (const u of [0.14, 0.86]) for (const v of [0.16, 0.86]) F(u - 0.022, u + 0.022, 0, 0.12, v - 0.022, v + 0.022, wood4('#3a2a1e'));
+      r.top = 0.98;
+      break;
+    }
+    case 'coffee4': {
+      const w = wood4(pick(WOODS));
+      box(g, 0.08, W - 0.08, 0.38, 0.43, 0.14, D - 0.14, w);
+      box(g, 0.14, W - 0.14, 0.1, 0.12, 0.2, D - 0.2, w);
+      legs(0.14, W - 0.14, 0.2, D - 0.2, 0.38, w, 0.022);
+      box(g, 0.25, 0.52, 0.43, 0.445, 0.3, 0.64, lm('#c8463a'), false);
+      box(g, 0.28, 0.5, 0.445, 0.455, 0.34, 0.6, lm('#e8e4dc'), false);
+      cyl(g, 0.045, 0.04, 0.12, W - 0.28, 0.43, D / 2, lm('#5a7a8a'), 10);
+      r.top = 0.45;
+      break;
+    }
+    case 'tv4': {
+      const w = wood4(pick(['#4a3a2e', '#e8e2d6', '#2a2a2c', '#8a6a48', '#5a4a3a'])), w2 = wood4(pick(['#3e3026', '#d8d2c6', '#1e1e20', '#7a5a3a', '#4a3a2a']));
+      const tv = 0.85;
+      F(0.05, len - 0.05, 0.05, 0.5, dep - 0.48, dep - 0.04, w);
+      F(0.1, len / 2 - 0.02, 0.09, 0.46, dep - 0.5, dep - 0.48, w2, false); F(len / 2 + 0.02, len - 0.1, 0.09, 0.46, dep - 0.5, dep - 0.48, w2, false);
+      const c = dep - 0.26, sw = Math.min(len * 0.84, 1.5), u0 = (len - sw) / 2, sh = sw * 0.5625;
+      F(len / 2 - 0.18, len / 2 + 0.18, 0.5, 0.52, c - 0.1, c + 0.1, black);
+      F(len / 2 - 0.03, len / 2 + 0.03, 0.52, tv, c - 0.015, c + 0.015, black);
+      F(u0, u0 + sw, tv - 0.05, tv - 0.05 + sh, c - 0.03, c + 0.02, black);
+      r.screen = F(u0 + 0.02, u0 + sw - 0.02, tv - 0.03, tv - 0.07 + sh, c - 0.036, c - 0.03, ownBasic({ map: staticTex, color: 0x0a0d14, fog: false }), false);
+      r.screen.userData.keep = true;
+      r.top = tv + sh;
+      break;
+    }
+    case 'bookcase4': {
+      const col = pick(['#6a4a32', '#ece6da', '#3a2a20', '#8a6a48', '#f2eee6']), w = wood4(col), H = 1.95, b0 = dep - 0.4;
+      F(0.03, 0.06, 0, H, b0, dep - 0.02, w); F(len - 0.06, len - 0.03, 0, H, b0, dep - 0.02, w);
+      F(0.03, len - 0.03, 0, H, dep - 0.04, dep - 0.02, wood4(shade(col, -15)));
+      F(0.03, len - 0.03, H - 0.03, H, b0, dep - 0.02, w);
+      const BOOK = ['#7a2e2e', '#2e4a6a', '#c9b48a', '#3e5a3a', '#5a4a6a', '#d8d2c4', '#8a6a3a', '#2a2a2a', '#a85a3a'];
+      for (let s = 0; s < 5; s++) {
+        const y = 0.04 + s * 0.47;
+        F(0.06, len - 0.06, y, y + 0.025, b0, dep - 0.04, w);
+        if (s === 4) continue;
+        let u = 0.08;
+        while (u < len - 0.12) {
+          if (R() < 0.1) { u += 0.12 + R() * 0.15; continue; }
+          if (R() < 0.06) { cyl(g, 0.05, 0.04, 0.16, fpt4(f, side, u + 0.06, 0, b0 + 0.18).x, y + 0.025, fpt4(f, side, u + 0.06, 0, b0 + 0.18).z, lm(pick(['#d8d0c0', '#5a7a8a', '#3a3a3a'])), 10); u += 0.16; continue; }
+          const bw = 0.025 + R() * 0.035, bh = 0.2 + R() * 0.17;
+          F(u, u + bw, y + 0.025, y + 0.025 + bh, b0 + 0.03 + R() * 0.04, dep - 0.08, lm(BOOK[(R() * BOOK.length) | 0]), false);
+          u += bw + 0.004;
+        }
+      }
+      r.top = H;
+      break;
+    }
+    case 'plant4': {
+      const pot = lm(pick(['#e8e4dc', '#3a3a3a', '#b86a48', '#d8d0c0', '#6a7a6a']));
+      cyl(g, 0.2, 0.15, 0.42, 0.5, 0, 0.5, pot, 16); cyl(g, 0.18, 0.18, 0.02, 0.5, 0.39, 0.5, lm('#3a2a1e'), 14);
+      cyl(g, 0.014, 0.02, 0.95, 0.5, 0.4, 0.5, wood4('#5a4030'), 6);
+      const leaf = lm('#2f5a2a'), leaf2 = lm('#3e6e34');
+      for (let i = 0; i < 16; i++) {
+        const a = i * 2.39, h = 0.62 + i * 0.05, rr = 0.08 + (16 - i) * 0.012;
+        const m = sph(g, 0.1, 0.5 + Math.cos(a) * rr, h, 0.5 + Math.sin(a) * rr, i % 2 ? leaf : leaf2, 1.4, 0.16, 0.85, 8);
+        m.rotation.set(0.35 * Math.cos(a), -a, 0.45);
+      }
+      r.top = 1.45;
+      break;
+    }
+    case 'rug4': {
+      const pl = new THREE.Mesh(geo('rug4' + W + 'x' + D, () => new THREE.PlaneGeometry(W - 0.16, D - 0.16)), rug4Mat(tone));
+      pl.rotation.x = -Math.PI / 2; pl.position.set(W / 2, 0.009, D / 2); pl.receiveShadow = true; g.add(pl);
+      r.top = 0.01;
+      break;
+    }
+    case 'blanket4': {
+      const col = pick(['#a33a3a', '#c8b89a', '#4a5a7a', '#7a8a6a', '#d8d0c8']), c = fab4(col);
+      box(g, 0.14, W - 0.14, 0, 0.035, 0.14, D - 0.14, c, false);
+      box(g, 0.14, W - 0.14, 0.035, 0.07, D * 0.55, D - 0.14, fab4(shade(col, -10)), false);
+      box(g, 0.16, W - 0.16, 0.07, 0.1, D * 0.62, D - 0.18, c, false);
+      for (const z of [0.3, D - 0.36]) box(g, 0.14, W - 0.14, 0.036, 0.04, z, z + 0.05, fab4('#efe8da'), false);
+      r.top = 0.1;
+      break;
+    }
+    case 'bed4': {
+      const fr = pick(['#6a4a32', '#d8d2c8', '#3a3a3e', '#8a6a48', '#5a6a7a']), frm = tone === 1 || tone === 4 ? fab4(fr) : wood4(fr);
+      const duvet = fab4(pick(['#e8e4dc', '#9aa8b8', '#c8b8a0', '#e0d8e8', '#a8b8a0'])), accent = fab4(pick(['#7a3a3a', '#3a4a6a', '#5a6a4a', '#8a6a3a', '#4a4a4a'])), pil = fab4('#f6f4ee');
+      F(0.04, len - 0.04, 0.1, 0.32, 0.04, dep - 0.08, frm);
+      for (const u of [0.1, len - 0.1]) F(u - 0.03, u + 0.03, 0, 0.1, 0.1, 0.16, black);
+      F(0.02, len - 0.02, 0, 1.15, dep - 0.1, dep - 0.02, frm);
+      F(0.08, len - 0.08, 0.32, 0.55, 0.08, dep - 0.12, fab4('#f2efe8'));
+      F(0.06, len - 0.06, 0.55, 0.62, 0.05, dep * 0.72, duvet);
+      F(0.06, len - 0.06, 0.24, 0.62, 0.035, 0.06, duvet);
+      for (const s of [0, 1]) { const a = s ? len / 2 + 0.04 : 0.14, b = s ? len - 0.14 : len / 2 - 0.04; F(a, b, 0.55, 0.69, dep - 0.46, dep - 0.14, pil); }
+      F(0.07, len - 0.07, 0.62, 0.64, 0.1, 0.42, accent);
+      r.top = 0.69;
+      break;
+    }
+    case 'bunk4': {
+      const w = wood4('#c8a878'), mat = fab4('#f2efe8'), sheet = [fab4('#6a8ab8'), fab4('#c86a5a')], pil = fab4('#f6f4ee');
+      for (const u of [0.06, len - 0.06]) for (const v of [0.06, dep - 0.06]) F(u - 0.04, u + 0.04, 0, 1.95, v - 0.04, v + 0.04, w);
+      [0.26, 1.36].forEach((y, s) => {
+        F(0.06, len - 0.06, y, y + 0.1, 0.03, dep - 0.03, w);
+        F(0.1, len - 0.1, y + 0.1, y + 0.26, 0.08, dep - 0.08, mat);
+        F(0.1, len - 0.36, y + 0.26, y + 0.3, 0.07, dep - 0.07, sheet[s]);
+        F(len - 0.38, len - 0.12, y + 0.26, y + 0.36, 0.15, dep - 0.15, pil);
+      });
+      F(0.6, len - 0.06, 1.72, 1.78, 0.02, 0.06, w); F(0.06, len - 0.06, 1.72, 1.78, dep - 0.06, dep - 0.02, w);
+      F(0.2, 0.24, 0, 1.78, 0, 0.04, w); F(0.52, 0.56, 0, 1.78, 0, 0.04, w);
+      for (let y = 0.5; y < 1.7; y += 0.28) F(0.24, 0.52, y, y + 0.03, 0.005, 0.035, w);
+      r.top = 1.95;
+      break;
+    }
+    case 'nightstand4': {
+      const col = pick(WOODS), w = wood4(col), w2 = wood4(shade(col, -10)), kb = lm('#b8a070'), d0 = dep - 0.46;
+      F(0.12, len - 0.12, 0, 0.56, d0, dep - 0.04, w);
+      for (const y of [0.08, 0.31]) { F(0.15, len - 0.15, y, y + 0.2, d0 - 0.02, d0, w2, false); F(len / 2 - 0.05, len / 2 + 0.05, y + 0.12, y + 0.14, d0 - 0.04, d0 - 0.02, kb, false); }
+      F(0.24, 0.5, 0.56, 0.6, d0 + 0.08, d0 + 0.3, lm(pick(['#7a2e2e', '#2e4a6a', '#3e5a3a'])));
+      r.top = 0.6;
+      break;
+    }
+    case 'wardrobe4': {
+      const col = pick(WOODS);
+      caseBox(2.12, 0.6, col, 2);
+      F(0.02, len - 0.02, 2.12, 2.17, dep - 0.62, dep - 0.02, wood4(shade(col, -6)));
+      r.top = 2.17;
+      break;
+    }
+    case 'dresser4': {
+      const col = pick(WOODS);
+      caseBox(1.08, 0.5, col, Math.max(1, Math.round(len)) > 1 ? 0.5 : 1, 5);
+      F(0.04, len - 0.04, 1.08, 1.11, dep - 0.52, dep - 0.02, wood4(shade(col, -8)));
+      // 上面一面鏡子、一個花瓶
+      F(len * 0.3, len * 0.7, 1.11, 1.8, dep - 0.08, dep - 0.04, wood4(shade(col, -20)));
+      F(len * 0.3 + 0.04, len * 0.7 - 0.04, 1.15, 1.76, dep - 0.085, dep - 0.08, ownPhong('#b8c4cc', { specular: 0xffffff, shininess: 120 }), false);
+      const vp = fpt4(f, side, len * 0.15, 1.11, dep - 0.25);
+      cyl(g, 0.05, 0.06, 0.2, vp.x, 1.11, vp.z, lm('#d8d0c0'), 10);
+      r.top = 1.11;
+      break;
+    }
+    case 'toybox': {
+      F(0.12, len - 0.12, 0, 0.48, dep - 0.62, dep - 0.08, wood4('#e8dcc8'));
+      F(0.1, len - 0.1, 0.48, 0.55, dep - 0.64, dep - 0.06, wood4('#5a8ab8'));
+      F(0.2, 0.42, 0.14, 0.36, dep - 0.635, dep - 0.62, lm('#d84a3a'), false); F(0.55, 0.77, 0.14, 0.36, dep - 0.635, dep - 0.62, lm('#e8c23a'), false);
+      const bp = fpt4(f, side, 0.22, 0, 0.18);
+      sph(g, 0.1, bp.x, 0.1, bp.z, lm('#3a7ad8'), 1, 1, 1, 12);
+      // 一隻舊舊的熊布偶靠在箱子上
+      const tp = fpt4(f, side, len - 0.25, 0, dep - 0.72), bear = fab4('#8a6a48');
+      sph(g, 0.12, tp.x, 0.13, tp.z, bear, 1, 1.15, 0.9); sph(g, 0.09, tp.x, 0.34, tp.z, bear);
+      for (const s of [-1, 1]) { const ep = fpt4(f, side, len - 0.25 + s * 0.07, 0, dep - 0.72); sph(g, 0.035, ep.x, 0.42, ep.z, bear); }
+      r.top = 0.55;
+      break;
+    }
+    case 'desk4': {
+      const top = wood4(pick(['#c8a878', '#e8e4dc', '#4a3a2e', '#8a6a48', '#d8d0c0'])), leg = lm('#3a3c40'), d0 = dep - 0.7;
+      F(0.04, len - 0.04, 0.72, 0.76, d0, dep - 0.04, top);
+      for (const u of [0.08, len - 0.08]) { F(u - 0.022, u + 0.022, 0, 0.72, d0 + 0.04, d0 + 0.08, leg); F(u - 0.022, u + 0.022, 0, 0.72, dep - 0.1, dep - 0.06, leg); F(u - 0.022, u + 0.022, 0.02, 0.05, d0 + 0.04, dep - 0.06, leg); }
+      if (len >= 1.5) { F(len - 0.5, len - 0.1, 0.08, 0.72, d0 + 0.05, dep - 0.08, top); for (const y of [0.12, 0.32, 0.52]) { F(len - 0.48, len - 0.12, y, y + 0.17, d0 + 0.03, d0 + 0.05, wood4('#b8a080'), false); F(len - 0.33, len - 0.27, y + 0.12, y + 0.14, d0 + 0.01, d0 + 0.03, steel, false); } }
+      F(0.3, 0.66, 0.76, 0.78, d0 + 0.2, d0 + 0.45, lm('#8a8d92'));
+      F(0.3, 0.66, 0.78, 1.0, d0 + 0.45, d0 + 0.47, black);
+      F(len * 0.5, len * 0.5 + 0.22, 0.76, 0.81, d0 + 0.32, d0 + 0.6, lm('#2e4a6a')); F(len * 0.5 + 0.01, len * 0.5 + 0.2, 0.81, 0.85, d0 + 0.34, d0 + 0.58, lm('#7a2e2e'));
+      r.top = 0.78;
+      break;
+    }
+    case 'chair4': {
+      const w = wood4(pick(['#8a6a48', '#3a2a20', '#c8a878', '#5a4030', '#e8e2d6'])), seat = fab4(pick(['#8a8178', '#4f5a6a', '#c8b89a', '#6d7466', '#9a3a3a']));
+      const u0 = len / 2 - 0.23, u1 = len / 2 + 0.23, v0 = dep / 2 - 0.22, v1 = dep / 2 + 0.22;
+      for (const u of [u0 + 0.03, u1 - 0.03]) for (const v of [v0 + 0.03, v1 - 0.03]) F(u - 0.02, u + 0.02, 0, 0.44, v - 0.02, v + 0.02, w);
+      F(u0, u1, 0.42, 0.46, v0, v1, w); F(u0 + 0.02, u1 - 0.02, 0.46, 0.5, v0 + 0.02, v1 - 0.04, seat);
+      for (const u of [u0 + 0.03, u1 - 0.03]) F(u - 0.02, u + 0.02, 0.44, 0.96, v1 - 0.05, v1 - 0.01, w);
+      F(u0 + 0.01, u1 - 0.01, 0.68, 0.94, v1 - 0.045, v1 - 0.015, w);
+      r.top = 0.96;
+      break;
+    }
+    case 'fireplace4': {
+      // 會燒柴的鑄鐵火爐，放在石板上；正面的玻璃窗看得到火（有燃料才亮），煙囪管往上
+      const iron = lm('#2a2a2c'), iron2 = lm('#3a3a3c'), stone = lm('#8a8680'), c = len / 2, m0 = dep / 2;
+      F(0.05, len - 0.05, 0, 0.06, 0.05, dep - 0.05, stone);
+      F(c - 0.42, c + 0.42, 0.06, 0.16, m0 - 0.3, m0 + 0.3, iron);
+      F(c - 0.4, c + 0.4, 0.16, 0.86, m0 - 0.28, m0 + 0.28, iron);
+      F(c - 0.44, c + 0.44, 0.86, 0.92, m0 - 0.31, m0 + 0.31, iron2);
+      F(c - 0.31, c + 0.31, 0.26, 0.74, m0 - 0.3, m0 - 0.28, iron2, false);
+      r.window = F(c - 0.27, c + 0.27, 0.3, 0.7, m0 - 0.305, m0 - 0.3, ownBasic({ color: 0x120804 }), false);
+      r.window.userData.keep = true;
+      F(c + 0.3, c + 0.34, 0.45, 0.55, m0 - 0.36, m0 - 0.3, steel, false);
+      F(c - 0.08, c + 0.08, 0.92, ROOF4_H - 0.05, m0 + 0.06, m0 + 0.22, iron);
+      // 旁邊一籃木柴
+      for (let i = 0; i < 5; i++) F(len - 0.32 + (i % 3) * 0.07, len - 0.26 + (i % 3) * 0.07, 0.06 + (i > 2 ? 0.07 : 0), 0.13 + (i > 2 ? 0.07 : 0), 0.15, dep - 0.2, wood4('#6a4a30'));
+      r.fireGlow = ownSprite(glowTex, 0xff8a30); r.fireGlow.position.copy(fpt4(f, side, c, 0.5, m0 - 0.45)); r.fireGlow.scale.set(1.6, 1.2, 1); r.fireGlow.visible = false; g.add(r.fireGlow);
+      r.top = 0.92;
+      break;
+    }
+    case 'ladder4': {
+      // 鋁製 A 字梯
+      const o = orient4(g, f, side), al = lm('#b8bcc0'), al2 = lm('#7a7e82'), H = 1.9;
+      for (const x of [-0.22, 0.22]) { beam4(o, x * 1.05, 0, 0.32, x, H, 0.03, 0.05, al, 0.025); beam4(o, x * 1.05, 0, -0.32, x, H, -0.03, 0.045, al2, 0.025); }
+      for (let i = 1; i <= 5; i++) { const k = i / 6, z = 0.32 * (1 - k) + 0.03 * k; box(o, -0.22, 0.22, k * H - 0.02, k * H + 0.01, z - 0.05, z + 0.05, al); }
+      box(o, -0.24, 0.24, H, H + 0.05, -0.12, 0.12, lm('#c84a3a'));
+      for (const x of [-0.18, 0.18]) beam4(o, x, 0.9, 0.17, x, 0.9, -0.17, 0.012, al2);
+      r.top = H + 0.05;
+      break;
+    }
+    case 'table4': {
+      const w = wood4(pick(WOODS));
+      box(g, 0.05, W - 0.05, 0.72, 0.77, 0.05, D - 0.05, w);
+      legs(0.13, W - 0.13, 0.13, D - 0.13, 0.72, w, 0.032);
+      box(g, 0.13, W - 0.13, 0.64, 0.72, 0.11, 0.14, w, false); box(g, 0.13, W - 0.13, 0.64, 0.72, D - 0.14, D - 0.11, w, false);
+      if (W * D >= 2) {
+        const pl = lm('#f4f2ec');
+        for (let i = 0; i < Math.round(Math.max(W, D)); i++) { const x = W >= D ? i + 0.5 : W / 2, z = W >= D ? D / 2 : i + 0.5; cyl(g, 0.12, 0.1, 0.015, x, 0.77, z, pl, 16); }
+        box(g, W >= D ? 0.2 : W / 2 - 0.15, W >= D ? W - 0.2 : W / 2 + 0.15, 0.771, 0.773, W >= D ? D / 2 - 0.15 : 0.2, W >= D ? D / 2 + 0.15 : D - 0.2, fab4('#d8c8a8'), false);
+      }
+      r.top = 0.78;
+      break;
+    }
+    case 'sideboard4': {
+      const col = pick(WOODS);
+      caseBox(0.84, 0.46, col, 1);
+      F(0.02, len - 0.02, 0.84, 0.87, dep - 0.48, dep - 0.02, wood4(shade(col, -8)));
+      const lp = fpt4(f, side, len * 0.25, 0, dep - 0.25), vp = fpt4(f, side, len * 0.75, 0, dep - 0.25);
+      cyl(g, 0.07, 0.05, 0.28, vp.x, 0.87, vp.z, lm('#3a5a6a'), 12);
+      for (let i = 0; i < 3; i++) cyl(g, 0.13 - i * 0.01, 0.13 - i * 0.01, 0.015, lp.x, 0.87 + i * 0.016, lp.z, lm('#f4f2ec'), 16);
+      r.top = 0.87;
+      break;
+    }
+    case 'cabinet4': {
+      caseBox(0.95, 0.5, pick(['#f2eee6', '#e8e2d6', '#8a6a48', '#cfd6d8', '#f4f2ec']), 1);
+      r.top = 0.95;
+      break;
+    }
+    case 'counter4': {
+      // 廚房的下櫃、石頭檯面、牆上的吊櫃
+      const col = pick(['#e8e4dc', '#4a5a5a', '#8a6a48', '#f2f0ea', '#3a3a3e']);
+      caseBox(0.86, 0.6, col, 1);
+      F(0, len, 0.86, 0.9, dep - 0.64, dep, ownPhong('#d8d4cc', { specular: 0x555555, shininess: 40 }));
+      F(0.02, len - 0.02, 0.9, 1.45, dep - 0.02, dep, lm('#e8e6e0'));
+      F(0.04, len - 0.04, 1.45, 2.15, dep - 0.36, dep - 0.02, wood4(col));
+      for (let i = 0; i < Math.round(len); i++) { const a = i + 0.06, b = i + 0.94; F(a, b, 1.49, 2.11, dep - 0.38, dep - 0.36, wood4(shade(col, -10)), false); F(b - 0.08, b - 0.06, 1.52, 1.7, dep - 0.4, dep - 0.38, steel, false); }
+      F(len * 0.3, len * 0.3 + 0.3, 0.9, 1.0, dep - 0.45, dep - 0.2, wood4('#c8a878'));
+      r.top = 0.9;
+      break;
+    }
+    case 'stove4': {
+      F(0.03, len - 0.03, 0.06, 0.88, dep - 0.62, dep - 0.03, steel);
+      F(0.03, len - 0.03, 0, 0.06, dep - 0.6, dep - 0.05, black);
+      F(0.08, len - 0.08, 0.15, 0.62, dep - 0.64, dep - 0.62, ownPhong('#1a1a1c', { specular: 0x888888, shininess: 90 }), false);
+      F(0.12, len - 0.12, 0.66, 0.68, dep - 0.67, dep - 0.64, steel, false);
+      F(0.03, len - 0.03, 0.88, 0.91, dep - 0.62, dep - 0.03, ownPhong('#121214', { specular: 0x999999, shininess: 100 }));
+      for (const [u, v] of [[0.28, 0.2], [0.72, 0.2], [0.28, 0.45], [0.72, 0.45]]) { const p = fpt4(f, side, u * len, 0, dep - 0.62 + v + 0.05); cyl(g, 0.09, 0.09, 0.008, p.x, 0.91, p.z, lm('#3a2220'), 18); }
+      for (let i = 0; i < 4; i++) F(0.15 + i * 0.2, 0.2 + i * 0.2, 0.74, 0.8, dep - 0.66, dep - 0.62, black, false);
+      F(0.04, len - 0.04, 1.75, 1.95, dep - 0.5, dep - 0.02, steel);
+      F(len / 2 - 0.15, len / 2 + 0.15, 1.95, 2.6, dep - 0.2, dep - 0.02, steel);
+      r.top = 0.91;
+      break;
+    }
+    case 'sink4': {
+      const cube = W4MAP.cubes.find(c => f.x >= c.x && f.x < c.x + c.w && f.y >= c.y && f.y < c.y + c.h), kitchen = cube && cube.kind === 'kitchen';
+      const col = kitchen ? pick(['#e8e4dc', '#4a5a5a', '#8a6a48', '#f2f0ea', '#3a3a3e']) : '#f2f0ea';
+      caseBox(0.84, 0.55, col, 1);
+      F(0, len, 0.84, 0.88, dep - 0.58, dep, kitchen ? ownPhong('#d8d4cc', { specular: 0x555555, shininess: 40 }) : porcelain);
+      F(0.15, len - 0.15, 0.82, 0.885, dep - 0.48, dep - 0.12, kitchen ? steel : porcelain, false);
+      F(0.18, len - 0.18, 0.885, 0.887, dep - 0.45, dep - 0.15, lm(kitchen ? '#6a6e72' : '#c8d0d4'), false);
+      F(len / 2 - 0.025, len / 2 + 0.025, 0.88, 1.15, dep - 0.08, dep - 0.04, steel); F(len / 2 - 0.025, len / 2 + 0.025, 1.12, 1.15, dep - 0.25, dep - 0.04, steel);
+      if (!kitchen) { F(0.1, len - 0.1, 1.2, 1.85, dep - 0.03, dep - 0.01, lm('#d8d4cc')); F(0.13, len - 0.13, 1.23, 1.82, dep - 0.035, dep - 0.03, ownPhong('#aab8c0', { specular: 0xffffff, shininess: 120 }), false); }
+      else F(0.02, len - 0.02, 0.88, 1.45, dep - 0.02, dep, lm('#e8e6e0'));
+      r.top = 0.88;
+      break;
+    }
+    case 'fridge4': {
+      const body = ownPhong(pick(['#d8dcdf', '#c8ccd0', '#e8eaec', '#3a3c40', '#d0d4d8']), { specular: 0x777777, shininess: 50 });
+      F(0.05, len - 0.05, 0.03, 1.88, dep - 0.7, dep - 0.04, body);
+      F(0.07, len - 0.07, 1.25, 1.27, dep - 0.705, dep - 0.7, dkSteel, false);
+      F(len - 0.16, len - 0.13, 0.55, 1.15, dep - 0.75, dep - 0.705, steel); F(len - 0.16, len - 0.13, 1.35, 1.7, dep - 0.75, dep - 0.705, steel);
+      F(0.07, len - 0.07, 0, 0.03, dep - 0.68, dep - 0.06, black);
+      r.top = 1.88;
+      break;
+    }
+    case 'bathtub4': {
+      F(0.03, len - 0.03, 0, 0.56, dep - 0.78, dep - 0.03, porcelain);
+      F(0.13, len - 0.13, 0.2, 0.565, dep - 0.68, dep - 0.13, lm('#d8dcdc'), false);
+      F(len - 0.24, len - 0.2, 0.56, 0.75, dep - 0.42, dep - 0.38, steel); F(len - 0.24, len - 0.2, 0.72, 0.75, dep - 0.5, dep - 0.38, steel);
+      F(0.03, len - 0.03, 0.56, 1.6, dep - 0.03, dep, lm('#e8eef0'));
+      r.top = 0.56;
+      break;
+    }
+    case 'toilet4': {
+      const o = orient4(g, f, side);
+      cyl(o, 0.17, 0.13, 0.38, 0, 0, 0.02, porcelain, 18);
+      const bowl = sph(o, 0.2, 0, 0.38, 0.06, porcelain, 0.95, 0.25, 1.15, 16);
+      void bowl;
+      box(o, -0.19, 0.19, 0.42, 0.45, -0.18, 0.3, lm('#f6f6f4'));
+      box(o, -0.2, 0.2, 0.42, 0.8, -0.38, -0.2, porcelain);
+      box(o, -0.21, 0.21, 0.8, 0.83, -0.39, -0.19, porcelain);
+      box(o, 0.1, 0.16, 0.72, 0.75, -0.2, -0.18, steel, false);
+      r.top = 0.83;
+      break;
+    }
+    case 'rack4': {
+      // 自助倉儲區 4 公尺高的鐵貨架：藍色的立柱、橘色的橫樑、木頭棧板，上面堆滿紙箱
+      const blue = lm('#2a4a8a'), orange = lm('#d8742a'), ply = wood4('#c8a878'), cb = cardboard4();
+      const bays = Math.max(1, Math.round(len / 3)), H = 3.9;
+      for (let i = 0; i <= bays; i++) {
+        const u = Math.min(len - 0.05, Math.max(0.05, i * len / bays));
+        for (const v of [0.12, dep - 0.12]) F(u - 0.04, u + 0.04, 0, H, v - 0.04, v + 0.04, blue);
+        // 前後兩根立柱中間的斜撐（Z 字形）
+        for (let k = 0; k < 4; k++) {
+          const y0 = 0.25 + k * 0.9, a = fpt4(f, side, u, y0, k % 2 ? dep - 0.12 : 0.12), b = fpt4(f, side, u, y0 + 0.9, k % 2 ? 0.12 : dep - 0.12);
+          beam4(g, a.x, a.y, a.z, b.x, b.y, b.z, 0.025, blue);
+          F(u - 0.012, u + 0.012, y0, y0 + 0.025, 0.12, dep - 0.12, blue, false);
+        }
+      }
+      for (const y of [0.12, 1.25, 2.4, 3.5]) {
+        for (const v of [0.12, dep - 0.12]) F(0.05, len - 0.05, y, y + 0.1, v - 0.04, v + 0.04, orange);
+        F(0.08, len - 0.08, y + 0.1, y + 0.13, 0.14, dep - 0.14, ply);
+        for (let b = 0; b < bays; b++) {
+          let u = b * len / bays + 0.12;
+          const ue = (b + 1) * len / bays - 0.12;
+          while (u < ue - 0.3) {
+            const bw = Math.min(ue - u, 0.4 + R() * 0.6), bh = 0.3 + R() * (y > 3 ? 0.35 : 0.65), bd = 0.5 + R() * (dep - 0.75);
+            if (R() < 0.85) F(u, u + bw - 0.03, y + 0.13, y + 0.13 + bh, 0.18, 0.18 + bd, cb);
+            u += bw;
+          }
+        }
+      }
+      r.top = H;
+      break;
+    }
+    case 'goods4': {
+      // 雙面的貨架：灰白色的鐵架、洞洞板，一層一層的商品
+      const frame = lm('#d8dadc'), peg = lm('#c8cacc'), H = 1.6, mid = dep / 2;
+      F(0.02, len - 0.02, 0, 0.12, 0.05, dep - 0.05, lm('#5a5e64'));
+      F(0.02, len - 0.02, 0.12, H, mid - 0.02, mid + 0.02, peg);
+      for (const u of [0.03, len - 0.03]) F(u - 0.025, u + 0.025, 0, H + 0.05, 0.08, dep - 0.08, frame);
+      for (const y of [0.12, 0.5, 0.88, 1.26]) for (const [a, b] of [[0.08, mid - 0.03], [mid + 0.03, dep - 0.08]]) {
+        F(0.05, len - 0.05, y, y + 0.025, a, b, frame);
+        F(0.05, len - 0.05, y - 0.04, y + 0.025, a < mid ? a : b - 0.015, a < mid ? a + 0.015 : b, lm('#f2c84a'), false);
+        let u = 0.08;
+        while (u < len - 0.15) {
+          const bw = 0.12 + R() * 0.2, bh = 0.12 + R() * 0.2, col = PRODUCT4[(R() * PRODUCT4.length) | 0];
+          const n = 1 + ((R() * 3) | 0);
+          for (let k = 0; k < n; k++) F(u, u + bw - 0.015, y + 0.025, y + 0.025 + bh, a + 0.02 + k * (b - a) / 3, a + (k + 1) * (b - a) / 3 - 0.01, lm(col), false);
+          u += bw;
+        }
+      }
+      F(0.02, len - 0.02, H, H + 0.05, 0.08, dep - 0.08, frame);
+      r.top = H + 0.05;
+      break;
+    }
+    case 'lampshelf': {
+      // 燈具區的展示架：一層一層的檯燈和落地燈（燈罩是布做的）
+      const frame = lm('#3a3c40'), H = 1.8, d0 = dep - 0.5;
+      for (const u of [0.04, len - 0.04]) F(u - 0.02, u + 0.02, 0, H, d0, dep - 0.04, frame);
+      F(0.04, len - 0.04, 0.1, H, dep - 0.05, dep - 0.03, lm('#e8e6e0'));
+      for (const y of [0.1, 0.7, 1.3]) {
+        F(0.04, len - 0.04, y, y + 0.03, d0, dep - 0.04, wood4('#e8e2d6'));
+        for (let u = 0.3; u < len - 0.2; u += 0.45) {
+          const p = fpt4(f, side, u + (R() - 0.5) * 0.1, 0, d0 + 0.22), shadeC = lm(['#f2ead8', '#e8dcc0', '#d8d0c0', '#3a3a3a', '#c8b89a'][(R() * 5) | 0]);
+          cyl(g, 0.06, 0.07, 0.03, p.x, y + 0.03, p.z, lm('#8a8d92'), 12);
+          cyl(g, 0.012, 0.012, 0.25, p.x, y + 0.06, p.z, lm('#b8a070'), 6);
+          cyl(g, 0.08, 0.13, 0.16, p.x, y + 0.28, p.z, shadeC, 16, true);
+        }
+      }
+      r.top = H;
+      break;
+    }
+    case 'bedding4': {
+      // 寢具架：塑膠袋包著的被子、枕頭，一疊一疊
+      const frame = lm('#d8dadc'), H = 1.75, d0 = dep - 0.6;
+      for (const u of [0.04, len - 0.04]) F(u - 0.025, u + 0.025, 0, H, d0, dep - 0.04, frame);
+      for (const y of [0.1, 0.65, 1.2]) {
+        F(0.04, len - 0.04, y, y + 0.03, d0, dep - 0.04, frame);
+        let u = 0.08;
+        while (u < len - 0.4) {
+          const m = fab4(['#e8e4dc', '#9aa8b8', '#c8b8a0', '#e0d8e8', '#a8b8a0', '#d8a8a0'][(R() * 6) | 0]);
+          const n = 2 + ((R() * 3) | 0);
+          for (let k = 0; k < n; k++) F(u, u + 0.45, y + 0.03 + k * 0.11, y + 0.13 + k * 0.11, d0 + 0.04, dep - 0.08, m, false);
+          u += 0.5;
+        }
+      }
+      r.top = H;
+      break;
+    }
+    case 'crate4': {
+      const cb = cardboard4(), pal = wood4('#c8a878');
+      box(g, 0.08, 0.92, 0, 0.12, 0.08, 0.92, pal);
+      box(g, 0.1, 0.62, 0.12, 0.6, 0.12, 0.6, cb); box(g, 0.48, 0.9, 0.12, 0.5, 0.4, 0.9, cb); box(g, 0.14, 0.52, 0.6, 0.92, 0.18, 0.55, cb);
+      r.top = 0.92;
+      break;
+    }
+    case 'plankpile': {
+      // 板材堆：木頭棧板上疊著那一級的板子（剩幾片就疊多高），旁邊一張顏色是稀有度的牌子
+      if (!plankMats) makePlankMats();
+      const pal = wood4('#9a7a58');
+      box(g, 0.06, 0.94, 0, 0.1, 0.06, 0.94, pal);
+      r.stack = new THREE.Group(); r.stack.userData.keep = true; g.add(r.stack);
+      for (let i = 0; i < 8; i++) { const m = box(r.stack, 0.1, 0.9, 0.1 + i * 0.06, 0.15 + i * 0.06, 0.18 + (i % 2) * 0.03, 0.82 - (1 - i % 2) * 0.03, plankMats[f.tier], i === 7); m.userData.i = i; }
+      const tag = box(g, 0.35, 0.65, 0.12, 0.32, 0.03, 0.05, ownBasic({ color: new THREE.Color(RARITY[PLANKS[f.tier].rar].color) }), false);
+      tag.userData.keep = true;
+      if (f.special) { r.spGlow = ownSprite(glowTex, new THREE.Color(RARITY[PLANKS[f.tier].rar].color).getHex()); r.spGlow.position.set(0.5, 0.7, 0.5); r.spGlow.scale.setScalar(1.6); g.add(r.spGlow); }
+      r.top = 0.6;
+      break;
+    }
+    case 'foodcounter': {
+      // 熱食櫃台：不鏽鋼的台子、玻璃擋板、一格一格的熱食（熱狗、肉丸、薯條、披薩）
+      const glass = ownPhong('#dbe9f0', { transparent: true, opacity: 0.3, specular: 0xffffff, shininess: 90, depthWrite: false });
+      F(0.02, len - 0.02, 0, 0.9, 0.1, dep - 0.05, steel);
+      F(0.04, len - 0.04, 0.05, 0.85, 0.08, 0.1, lm('#b8bcc0'), false);
+      F(0, len, 0.9, 0.94, 0.05, dep, ownPhong('#c8ccd0', { specular: 0xaaaaaa, shininess: 80 }));
+      F(0.04, len - 0.04, 1.25, 1.28, 0.08, dep * 0.6, glass, false); F(0.04, len - 0.04, 0.94, 1.25, 0.08, 0.1, glass, false);
+      const FOOD = ['#b8562a', '#6a3a22', '#e8c25a', '#d8a04a'];
+      for (let i = 0; i < Math.round(len * 2); i++) { const a = 0.1 + i * (len - 0.2) / Math.round(len * 2); F(a, a + (len - 0.2) / Math.round(len * 2) - 0.03, 0.9, 0.96, 0.2, dep * 0.6, steel, false); F(a + 0.03, a + (len - 0.2) / Math.round(len * 2) - 0.06, 0.96, 1.0, 0.24, dep * 0.6 - 0.04, lm(FOOD[i % 4]), false); }
+      r.lamp = ownSprite(glowTex, 0xffa040); r.lamp.position.copy(fpt4(f, side, len / 2, 1.1, dep * 0.35)); r.lamp.scale.set(len * 0.9, 0.5, 1); g.add(r.lamp);
+      F(0.3, len - 0.3, 1.9, 2.4, dep - 0.08, dep - 0.04, ownBasic({ map: sign4Tex('熱食・熱狗・肉丸', '#e8743a') }), false).userData.keep = true;
+      r.top = 0.94;
+      break;
+    }
+    case 'drink4': {
+      F(0.1, len - 0.1, 0, 1.6, dep - 0.62, dep - 0.04, steel);
+      F(0.12, len - 0.12, 0.95, 1.55, dep - 0.64, dep - 0.62, ownBasic({ map: sign4Tex('汽水', '#3a8fd8'), color: 0xcccccc }), false).userData.keep = true;
+      for (let i = 0; i < 3; i++) F(0.2 + i * 0.22, 0.28 + i * 0.22, 0.7, 0.85, dep - 0.7, dep - 0.62, black, false);
+      F(0.12, len - 0.12, 0.4, 0.45, dep - 0.85, dep - 0.62, dkSteel, false);
+      const cp = fpt4(f, side, len * 0.25, 0, dep - 0.75);
+      for (let i = 0; i < 3; i++) cyl(g, 0.045, 0.035, 0.12, cp.x, 0.45 + i * 0.02, cp.z, lm('#f2efe8'), 10, true);
+      r.top = 1.6;
+      break;
+    }
+    case 'coldcase': {
+      // 冷藏櫃：玻璃門、裡面白色的燈、一排一排的飲料瓶
+      const body = lm('#e8eaec'), glass = ownPhong('#e0f0f8', { transparent: true, opacity: 0.22, specular: 0xffffff, shininess: 100, depthWrite: false });
+      F(0.03, len - 0.03, 0, 2.0, dep - 0.7, dep - 0.03, body);
+      F(0.08, len - 0.08, 0.15, 1.85, dep - 0.705, dep - 0.69, ownBasic({ color: 0xdfeaf2 }), false).userData.keep = true;
+      const BOT = ['#d84a3a', '#3a7ad8', '#4aa36a', '#e8c23a', '#f2efe8', '#2a2a2a'];
+      for (const y of [0.2, 0.62, 1.04, 1.46]) {
+        F(0.08, len - 0.08, y, y + 0.02, dep - 0.69, dep - 0.08, lm('#c8ccd0'), false);
+        for (let u = 0.14; u < len - 0.1; u += 0.11) F(u, u + 0.07, y + 0.02, y + 0.3, dep - 0.66, dep - 0.58, lm(BOT[(R() * BOT.length) | 0]), false);
+      }
+      F(0.05, len - 0.05, 0.12, 1.88, dep - 0.73, dep - 0.71, glass, false);
+      for (let i = 1; i < Math.round(len); i++) F(i - 0.02, i + 0.02, 0.12, 1.88, dep - 0.735, dep - 0.7, lm('#8a8d92'), false);
+      r.top = 2.0;
+      break;
+    }
+    case 'locker4': {
+      const col = '#5a6e66', body = lm(col), door = lm(shade(col, 8)), vent = lm('#2a302e');
+      F(0.03, len - 0.03, 0, 1.9, dep - 0.5, dep - 0.03, body);
+      const n = Math.round(len * 2);
+      for (let i = 0; i < n; i++) {
+        const a = i * len / n + 0.03, b = (i + 1) * len / n - 0.03;
+        F(a, b, 0.08, 1.85, dep - 0.52, dep - 0.5, door, false);
+        for (let k = 0; k < 4; k++) F(a + 0.06, b - 0.06, 1.55 + k * 0.05, 1.57 + k * 0.05, dep - 0.525, dep - 0.52, vent, false);
+        F(b - 0.07, b - 0.04, 0.9, 1.05, dep - 0.54, dep - 0.52, steel, false);
+      }
+      r.top = 1.9;
+      break;
+    }
+    case 'vending4': {
+      // 販賣機：紅色的機身、玻璃後面一排一排的零食、裡面亮著燈（停電時暗掉）
+      const body = ownPhong('#a8262a', { specular: 0x444444, shininess: 40 });
+      F(0.06, len - 0.06, 0, 1.85, dep - 0.8, dep - 0.04, body);
+      r.vlight = F(0.1, len * 0.7, 0.55, 1.75, dep - 0.805, dep - 0.79, ownBasic({ color: 0xe8f0f4 }), false); r.vlight.userData.keep = true;
+      for (const y of [0.6, 0.9, 1.2, 1.5]) for (let u = 0.14; u < len * 0.7 - 0.08; u += 0.1) F(u, u + 0.07, y, y + 0.16, dep - 0.82, dep - 0.808, lm(PRODUCT4[(R() * PRODUCT4.length) | 0]), false);
+      F(len * 0.72, len - 0.1, 1.0, 1.4, dep - 0.82, dep - 0.8, black, false);
+      F(0.12, len * 0.7, 0.15, 0.4, dep - 0.82, dep - 0.8, black, false);
+      r.top = 1.85;
+      break;
+    }
+    case 'bagrack': {
+      const frame = lm('#3a3c40'), bag = fab4('#2a5aa8'), bag2 = fab4('#e8c23a');
+      F(0.05, len - 0.05, 0, 0.05, 0.2, dep - 0.2, frame);
+      for (const u of [0.1, len - 0.1]) F(u - 0.02, u + 0.02, 0, 1.3, dep / 2 - 0.02, dep / 2 + 0.02, frame);
+      F(0.08, len - 0.08, 1.28, 1.31, dep / 2 - 0.02, dep / 2 + 0.02, frame);
+      for (let u = 0.2; u < len - 0.15; u += 0.11) F(u, u + 0.08, 0.6, 1.28, dep / 2 - 0.25, dep / 2 + 0.25, R() < 0.8 ? bag : bag2, false);
+      r.top = 1.31;
+      break;
+    }
+    case 'infodesk': {
+      const top = ownPhong('#e8e6e0', { specular: 0x555555, shininess: 40 });
+      F(0.03, len - 0.03, 0, 1.05, 0.05, dep - 0.35, wood4('#d8c8a8'));
+      F(0, len, 1.05, 1.1, 0, dep - 0.3, top);
+      F(0.03, len - 0.03, 0.7, 0.74, dep - 0.35, dep - 0.03, top);
+      F(len * 0.6, len * 0.6 + 0.45, 1.1, 1.13, dep - 0.55, dep - 0.4, black);
+      F(len * 0.6 + 0.2, len * 0.6 + 0.25, 1.13, 1.25, dep - 0.5, dep - 0.45, black);
+      F(len * 0.6, len * 0.6 + 0.45, 1.25, 1.55, dep - 0.5, dep - 0.47, black);
+      F(0.3, len - 0.3, 0.55, 0.85, 0.035, 0.05, ownBasic({ map: sign4Tex('服務台', '#3a8fd8') }), false).userData.keep = true;
+      r.top = 1.1;
+      break;
+    }
+    case 'cart4': {
+      // 購物車：鐵絲籃、塑膠把手、四個輪子
+      const o = orient4(g, f, side), wire = lm('#b8bcc0'), wire2 = lm('#8a8e92'), red = lm('#c8262a');
+      o.rotation.y += (hash4(f.id) % 40 - 20) / 100;
+      for (const [x, z] of [[-0.22, 0.32], [0.22, 0.32], [-0.2, -0.32], [0.2, -0.32]]) { cyl(o, 0.045, 0.045, 0.04, x, 0.02, z, black, 10).rotation.z = Math.PI / 2; beam4(o, x, 0.06, z, x, 0.35, z * 0.95, 0.025, wire2); }
+      box(o, -0.22, 0.22, 0.34, 0.37, -0.34, 0.32, wire2);
+      for (let i = 0; i < 6; i++) { const y = 0.42 + i * 0.09; box(o, -0.26, 0.26, y, y + 0.01, -0.36, -0.35, wire, false); box(o, -0.24, 0.24, y, y + 0.01, 0.37, 0.38, wire, false); for (const x of [-0.25, 0.25]) box(o, x - 0.005, x + 0.005, y, y + 0.01, -0.36, 0.38, wire, false); }
+      for (let k = -4; k <= 4; k++) { box(o, k * 0.06 - 0.004, k * 0.06 + 0.004, 0.42, 0.88, -0.355, -0.345, wire, false); box(o, -0.25, 0.25, 0.42, 0.425, k * 0.08 - 0.004, k * 0.08 + 0.004, wire, false); }
+      for (const x of [-0.26, 0.26]) beam4(o, x, 0.88, -0.36, x, 1.0, -0.48, 0.02, wire2);
+      box(o, -0.28, 0.28, 0.98, 1.03, -0.5, -0.46, red);
+      r.top = 0.9;
+      break;
+    }
+    default:
+      return false;
+  }
+  return true;
+}
+// 每一幀：電視開著有畫面、火爐有燃料時窗裡有火光、板材堆照剩幾片疊高、販賣機停電時暗掉
+function updateStoreFurniture4(t) {
+  let tv = false;
+  for (const f of FURN) {
+    const r = furn3d[f.id];
+    if (!r) continue;
+    if (r.screen && f.type === 'tv4') {
+      const on = !!(f.on && G.power);
+      if (on) { tv = true; r.screen.material.color.setRGB(0.75 + Math.random() * 0.1, 0.8, 0.95); } else r.screen.material.color.set(0x0a0d14);
+    } else if (r.window) {
+      const lit = fireLeft4(f) > 0, k = lit ? 0.7 + 0.3 * Math.sin(t * 13 + f.x) * Math.sin(t * 7.3) : 0;
+      r.window.material.color.setRGB(0.07 + k * 1.0, 0.03 + k * 0.42, 0.02 + k * 0.08);
+      r.fireGlow.visible = lit;
+      if (lit) r.fireGlow.material.opacity = 0.55 + 0.25 * k;
+    } else if (r.stack) {
+      const n = Math.max(0, Math.min(8, Math.ceil((f.count || 0) / 2)));
+      for (const m of r.stack.children) m.visible = m.userData.i < n;
+      if (r.spGlow) r.spGlow.material.opacity = 0.5 + 0.3 * Math.sin(t * 3);
+    } else if (r.vlight) r.vlight.material.color.setHex(G.power ? 0xe8f0f4 : 0x1a1c1e);
+  }
+  if (tv) drawStatic();
+}
+// 蓋賣場：地板、天花板和日光燈板、外牆、柱子、樣品間的彩色隔間牆、小房間、入口的玻璃門、招牌、地上的箭頭
+function buildStore4() {
+  if (!store4Tex) makeStoreTextures();
+  if (!plankMats) makePlankMats();
+  const T = store4Tex;
+  const fm = (tex, rep = 1) => { const m = patchLM(new THREE.MeshLambertMaterial({ map: tex })); m.userData.own = true; void rep; return m; };
+  const plane = (x, y, w, h, mat, hgt, su = w, sv = h, down = false) => {
+    const g = new THREE.PlaneGeometry(w, h); scaleUV(g, su, sv);
+    const m = new THREE.Mesh(g, mat); m.userData.ownGeo = true; m.rotation.x = down ? Math.PI / 2 : -Math.PI / 2; m.position.set(x + w / 2, hgt, y + h / 2); m.receiveShadow = !down;
+    houseGroup.add(m); return m;
+  };
+  // 地板：賣場的水泥地、洗手間的磁磚、員工專用區的水泥；樣品間和主走道再鋪一層
+  const floorM = { store4: fm(T.store), aisle4: fm(T.aisle), oak4: fm(T.oak), carpet4: fm(T.carpet), concrete: fm(T.store) };
+  for (const r of ROOMS) plane(r.x, r.y, r.w, r.h, floorM[r.floor] || floorMat(r.floor), 0);
+  for (const d of DOORS) if (!d.front) plane(d.x, d.y, 1, 1, floorM.store4, 0);
+  for (const f of W4MAP.floors) plane(f.x, f.y, f.w, f.h, floorM[f.floor] || floorMat(f.floor), f.floor === 'aisle4' ? 0.003 : 0.005);
+  // 主走道上指方向的箭頭（照 3008）
+  const am = patchLM(new THREE.MeshLambertMaterial({ map: T.arrow, transparent: true, depthWrite: false, opacity: 0.8 })); am.userData.own = true;
+  const arrows = [];
+  for (let y = 4; y < MAP_H - 2; y += 5) arrows.push([29.5, y + 0.5, y < 21 ? 0 : Math.PI], [30.5, y + 0.5, y < 21 ? Math.PI : 0]);
+  for (let x = 4; x < MAP_W - 2; x += 5) if (x < 28 || x > 31) arrows.push([x + 0.5, 21.5, x < 29 ? -Math.PI / 2 : Math.PI / 2], [x + 0.5, 22.5, x < 29 ? Math.PI / 2 : -Math.PI / 2]);
+  const ai = new THREE.InstancedMesh(geo('arrow4', () => new THREE.PlaneGeometry(0.7, 0.7)), am, arrows.length);
+  arrows.forEach(([x, z, a], i) => { _q.setFromEuler(_e.set(-Math.PI / 2, 0, a, 'XYZ')); _m4.compose(_v.set(x, 0.007, z), _q, _one); ai.setMatrixAt(i, _m4); });
+  ai.computeBoundingSphere(); houseGroup.add(ai);
+  // 天花板：賣場 4.2 公尺高的吸音板；有天花板的小房間（洗手間、員工專用區）2.7 公尺
+  const cm = patchLM(new THREE.MeshLambertMaterial({ map: T.ceil })); cm.userData.own = true;
+  plane(0, 0, MAP_W, MAP_H, cm, CEIL_W4, MAP_W * 1.7, MAP_H * 1.7, true);
+  for (const r of ROOMS) if (r.ceil) plane(r.x, r.y, r.w, r.h, cm, WALL_H, r.w * 1.7, r.h * 1.7, true);
+  // 日光燈板：每 3 格一片（白天亮、晚上熄；天快黑時一排一排閃掉），用一個 InstancedMesh、每片自己的亮度
+  panel4Info = [];
+  for (let y = 2; y < MAP_H - 1; y += 3) for (let x = 2; x < MAP_W - 1; x += 3) { const r = roomGrid[y][x]; if (r && r.id === 'store') panel4Info.push({ x: x + 0.5, y: y + 0.5, row: Math.floor(y / 3), ph: Math.random() * 6 }); }
+  panel4 = new THREE.InstancedMesh(geo('panel4', () => new THREE.PlaneGeometry(1.2, 0.6)), ownBasic({ map: T.panel, color: 0xffffff }), panel4Info.length);
+  panel4Info.forEach((p, i) => { _q.setFromEuler(_e.set(Math.PI / 2, 0, 0, 'XYZ')); _m4.compose(_v.set(p.x, CEIL_W4 - 0.01, p.y), _q, _one); panel4.setMatrixAt(i, _m4); panel4.setColorAt(i, new THREE.Color(1, 1, 1)); });
+  panel4.computeBoundingSphere(); houseGroup.add(panel4);
+  // 牆：外牆和小房間的牆一直到天花板；柱子是方形的水泥柱；樣品間的隔間牆 2.75 公尺高，漆成那一間的顏色
+  const inner = new Set(W4MAP.walls.map(([x, y]) => x + ',' + y));
+  const isWallT = (x, y) => !inMap(x, y) || tiles[y][x] === 0;
+  const tall = [], parts = [], pillars = [];
+  const front = new Set(), fd = DOORS.find(d => d.front);
+  for (let x = fd.x - 2; x <= fd.x + 3; x++) front.add(x + ',' + fd.y);
+  for (let y = 0; y < MAP_H; y++) for (let x = 0; x < MAP_W; x++) {
+    if (tiles[y][x] !== 0 || front.has(x + ',' + y)) continue;
+    let near = false, ceilNear = false;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!inMap(x + dx, y + dy) || tiles[y + dy][x + dx] === 0) continue;
+      near = true;
+      const r = roomGrid[y + dy][x + dx] || (doorGrid[y + dy][x + dx] && doorGrid[y + dy][x + dx].rooms[0]);
+      if (r && r.ceil) ceilNear = true;
+    }
+    if (!near) continue;
+    if (!inner.has(x + ',' + y) || ceilNear || x === 0 || y === 0 || x === MAP_W - 1 || y === MAP_H - 1) tall.push([x, y]);
+    else if (!isWallT(x + 1, y) && !isWallT(x - 1, y) && !isWallT(x, y + 1) && !isWallT(x, y - 1)) pillars.push([x, y]);
+    else {
+      const cube = W4MAP.cubes.find(c => x >= c.x - 1 && x <= c.x + c.w && y >= c.y - 1 && y <= c.y + c.h);
+      parts.push([x, y, cube ? cube.wall : '#e8e6e0']);
+    }
+  }
+  const inst = (list, gm, mat, place) => {
+    const im = new THREE.InstancedMesh(gm, mat, list.length);
+    const col = new THREE.Color();
+    list.forEach((it, i) => { place(it); im.setMatrixAt(i, _m4); if (it[2]) im.setColorAt(i, col.set(it[2])); });
+    im.castShadow = true; im.receiveShadow = true; im.computeBoundingSphere(); houseGroup.add(im); return im;
+  };
+  const wm = patchLM(new THREE.MeshLambertMaterial({ map: T.wall })); wm.userData.own = true;
+  inst(tall, geo('wall4t', () => { const g = new THREE.BoxGeometry(1, CEIL_W4, 1); scaleUV(g, 1, CEIL_W4 / 2); return g; }), wm, ([x, y]) => _m4.makeTranslation(x + 0.5, CEIL_W4 / 2, y + 0.5));
+  const pm = patchLM(new THREE.MeshLambertMaterial({ map: T.pillar })); pm.userData.own = true;
+  inst(pillars, geo('pillar4', () => new THREE.BoxGeometry(0.8, CEIL_W4, 0.8)), pm, ([x, y]) => _m4.makeTranslation(x + 0.5, CEIL_W4 / 2, y + 0.5));
+  const PH = 2.75;
+  const ptm = patchLM(new THREE.MeshLambertMaterial({ map: T.part, color: 0xffffff })); ptm.userData.own = true;
+  inst(parts, geo('part4', () => new THREE.BoxGeometry(1, PH, 1)), ptm, ([x, y]) => _m4.makeTranslation(x + 0.5, PH / 2, y + 0.5));
+  inst(parts.map(([x, y]) => [x, y]), geo('partcap4', () => new THREE.BoxGeometry(1.02, 0.05, 1.02)), lm('#d8d5cc'), ([x, y]) => _m4.makeTranslation(x + 0.5, PH + 0.025, y + 0.5));
+  // 小房間的門框
+  const trim = lm('#8a8d92');
+  for (const d of DOORS) {
+    if (d.front) continue;
+    const g = new THREE.Group(); g.position.set(d.x, 0, d.y); houseGroup.add(g);
+    const ew = !!(tiles[d.y - 1] && tiles[d.y - 1][d.x] === 0);
+    box(g, 0, 1, 2.15, CEIL_W4, 0, 1, wm);
+    if (ew) { box(g, 0, 1, 0, 2.15, 0, 0.06, trim); box(g, 0, 1, 0, 2.15, 0.94, 1, trim); } else { box(g, 0, 0.06, 0, 2.15, 0, 1, trim); box(g, 0.94, 1, 0, 2.15, 0, 1, trim); }
+    const sg = new THREE.Mesh(geo('doorsign4', () => new THREE.PlaneGeometry(0.9, 0.22)), ownBasic({ map: sign4Tex(d.staff ? '員工專用' : '洗手間', d.staff ? '#d84a3a' : '#4aa3d8') }));
+    if (ew) { sg.position.set(d.x < 30 ? 1.02 : -0.02, 2.4, 0.5); sg.rotation.y = d.x < 30 ? Math.PI / 2 : -Math.PI / 2; } else { sg.position.set(0.5, 2.4, 1.02); }
+    g.add(sg);
+  }
+  // 入口：打不開的玻璃自動門，門外只有一片白霧；上面是「3008」的招牌和綠色的出口燈箱
+  {
+    const g = new THREE.Group(); g.position.set(fd.x - 2, 0, fd.y); houseGroup.add(g);
+    const al = lm('#b9bdc2'), glass = ownPhong('#dbe9f0', { transparent: true, opacity: 0.35, specular: 0xffffff, shininess: 90, depthWrite: false });
+    box(g, 0, 6, CEIL_W4 - 1.3, CEIL_W4, 0, 1, wm);
+    for (let i = 0; i <= 6; i++) box(g, i - 0.04, i + 0.04, 0, CEIL_W4 - 1.3, 0.4, 0.6, al);
+    box(g, 0, 6, CEIL_W4 - 1.38, CEIL_W4 - 1.3, 0.4, 0.6, al);
+    for (let i = 0; i < 6; i++) box(g, i + 0.04, i + 0.96, 0, CEIL_W4 - 1.38, 0.47, 0.53, glass, false);
+    const fog = new THREE.Mesh(geo('fog4', () => new THREE.PlaneGeometry(8, 4)), ownBasic({ color: 0xf4f6f8, fog: false }));
+    fog.position.set(3, 1.6, 2.2); fog.rotation.y = Math.PI; g.add(fog);
+    const glow = ownSprite(glowTex, 0xffffff); glow.position.set(3, 1.4, 1.2); glow.scale.set(9, 4, 1); g.add(glow);
+    const logo = new THREE.Mesh(geo('logo4', () => new THREE.PlaneGeometry(3.2, 0.8)), ownBasic({ map: sign4Tex('3008  家居', '#3a8fd8') }));
+    logo.position.set(3, CEIL_W4 - 0.65, -0.02); logo.rotation.y = Math.PI; g.add(logo);
+    const exit = new THREE.Mesh(geo('exit4', () => new THREE.PlaneGeometry(1.0, 0.3)), ownBasic({ map: exitTex4() }));
+    exit.position.set(3, CEIL_W4 - 1.55, -0.03); exit.rotation.y = Math.PI; g.add(exit);
+    const rg = ownSprite(glowTex, 0x40ff80); rg.position.set(3, CEIL_W4 - 1.55, -0.1); rg.scale.setScalar(0.9); g.add(rg);
+  }
+  // 吊著的招牌：每間樣品間的開口上面一塊，別的區域在中間一塊（兩面都有字），另外幾塊永遠走不到的「出口 →」
+  const rod = lm('#55585e');
+  const hang = (x, z, ry, text, col, w = 2.4) => {
+    const g = new THREE.Group(); g.position.set(x, 3.25, z); g.rotation.y = ry; houseGroup.add(g);
+    const m = ownBasic({ map: sign4Tex(text, col) });
+    for (const s of [0, Math.PI]) { const p = new THREE.Mesh(geo('sign4' + w, () => new THREE.PlaneGeometry(w, w / 4)), m); p.rotation.y = s; p.position.z = s ? -0.012 : 0.012; g.add(p); }
+    box(g, -w / 2, w / 2, -w / 8 - 0.02, w / 8 + 0.02, -0.01, 0.01, lm('#1e2024'), false);
+    for (const s of [-1, 1]) cyl(g, 0.008, 0.008, CEIL_W4 - 3.25 - w / 8, s * w * 0.4, w / 8, 0, rod, 4);
+  };
+  const ZCOL = { 自助倉儲區: '#e8c23a', 美食區: '#e8743a', 燈具區: '#f2d24a', 布料寢具區: '#b07ad8', 沙發區: '#6ab06a', 床墊區: '#5a9ad8', 雜貨區: '#d8a04a', 入口: '#3a8fd8', 餐桌區: '#d86a6a' };
+  for (const c of W4MAP.cubes) hang(c.x + c.w / 2, c.open === 's' ? c.y + c.h + 0.1 : c.y - 0.1, 0, c.name.replace('樣品間', ''), c.wall.replace(/^#(..)(..)(..)$/, (m, a, b, d) => '#' + [a, b, d].map(h => Math.max(0, parseInt(h, 16) - 70).toString(16).padStart(2, '0')).join('')), 2.0);
+  const done = new Set();
+  for (const z of W4MAP.zones) {
+    if (z.cube || z.aisle || done.has(z.name) || z.name === '洗手間' || z.name === '員工專用區') continue;
+    done.add(z.name);
+    hang(z.x + z.w / 2, z.y + z.h / 2, 0, z.name, ZCOL[z.name] || '#aaa');
+  }
+  for (const [x, z, a] of [[29.5, 10, 0], [10, 21.5, Math.PI / 2], [48, 21.5, -Math.PI / 2], [29.5, 33, 0]]) hang(x, z, a, '出口 →', '#3ad870', 1.6);
+}
+function exitTex4() {
+  return canvasTex(256, 80, (c, w, h) => { c.fillStyle = '#1a8a3a'; c.fillRect(0, 0, w, h); c.fillStyle = '#eafff0'; c.font = 'bold 44px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('🏃 出口', w / 2, h / 2 + 2); });
+}
+// 每一幀：日光燈板白天亮、晚上熄；天快黑時一排一排閃掉，天亮時一排一排亮起來；停電時全熄
+function syncStore4(t, dark) {
+  if (!panel4) return;
+  const k = 1 - clamp(dark / NIGHT_DARK, 0, 1), col = _c4;
+  const dusk = G.phase === 'day' && G.t > DAY_LEN - DUSK;
+  panel4Info.forEach((p, i) => {
+    let v = k;
+    if (dusk) { const off = (G.t - (DAY_LEN - DUSK)) / DUSK * 16 - p.row * 0.9; v = off > 1 ? 0 : off > 0 ? (Math.sin(t * 40 + p.ph) > 0 ? 0.9 : 0.05) : 1; }
+    else if (G.phase === 'day' && G.t < DAWN) v = G.t / DAWN * 16 - p.row * 0.9 > 0 ? 1 : 0.04;
+    v = Math.max(0.035, v);
+    col.setRGB(v, v, v * 0.98);
+    panel4.setColorAt(i, col);
+  });
+  panel4.instanceColor.needsUpdate = true;
+}
+const _c4 = new THREE.Color();
+// 紅月的晚上：賣場的地上長出一叢一叢的草
+function syncGrass4() {
+  const on = !!(G.grass4 && G.ev.blood && G.phase === 'night');
+  if (on && !grass4Mesh) {
+    const pts = [], r = seeded(808);
+    for (let y = 1; y < MAP_H - 1; y++) for (let x = 1; x < MAP_W - 1; x++) {
+      if (tiles[y][x] !== 1 || furnGrid[y][x] || r() > 0.45) continue;
+      for (let k = 0; k < 2; k++) pts.push([x + 0.15 + r() * 0.7, y + 0.15 + r() * 0.7, 0.5 + r() * 0.7, r() * Math.PI]);
+    }
+    const bm = patchLM(new THREE.MeshLambertMaterial({ map: bladeTex, alphaTest: 0.45, side: THREE.DoubleSide })); bm.userData.own = true;
+    grass4Mesh = new THREE.InstancedMesh(tuftGeo(), bm, pts.length);
+    const q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3(), m = new THREE.Matrix4();
+    pts.forEach(([x, z, k, a], i) => { q.setFromAxisAngle(UP, a); sc.set(k, k, k); pos.set(x, 0, z); m.compose(pos, q, sc); grass4Mesh.setMatrixAt(i, m); });
+    grass4Mesh.computeBoundingSphere(); houseGroup.add(grass4Mesh);
+  }
+  if (grass4Mesh) grass4Mesh.visible = on;
+}
+// 地上一灘一灘的東西：葵氏奶昔的奶（白）、紅涎偽人的紅涎（紅、濕亮）、燼皇的玫瑰藤（深紅、帶刺）
+const puddle4 = {};
+function syncPuddles4(t) {
+  const kinds = [['milk4', [0.95, 0.93, 0.86]], ['drool4', [0.55, 0.02, 0.05]], ['thorns4', [0.32, 0.04, 0.06]]];
+  for (const [k, c] of kinds) {
+    const list = G[k] || [];
+    let m = puddle4[k];
+    if (!m && list.length) {
+      m = puddle4[k] = new THREE.InstancedMesh(geo(k === 'thorns4' ? 'thornGeo' : 'trail', () => (k === 'thorns4' ? new THREE.RingGeometry(0.5, 1, 7, 1) : new THREE.CircleGeometry(1, 14))), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.88, depthWrite: false }), 40);
+      m.frustumCulled = false; m.count = 0; scene.add(m);
+    }
+    if (!m) continue;
+    const n = Math.min(40, list.length);
+    for (let i = 0; i < n; i++) {
+      const l = list[list.length - n + i], fade = clamp(l.life / 3, 0, 1);
+      _q.setFromEuler(_e.set(-Math.PI / 2, 0, l.a + (k === 'thorns4' ? t * 0.1 : 0), 'XYZ'));
+      _m4.compose(_v.set(l.x, 0.012 + i * 0.00005, l.y), _q, _sc.set(l.r, l.r * 0.85, 1));
+      m.setMatrixAt(i, _m4);
+      _c4.setRGB(c[0] * fade, c[1] * fade, c[2] * fade); m.setColorAt(i, _c4);
+    }
+    m.count = n; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  }
+}
+// Hubert 的震波：從牠腳下往外擴散的紅色圓圈
+const wave4Map = new Map();
+function syncWaves4() {
+  const seen = new Set();
+  for (const w of G.waves4 || []) {
+    seen.add(w);
+    let m = wave4Map.get(w);
+    if (!m) { m = new THREE.Mesh(geo('wave4', () => new THREE.RingGeometry(0.85, 1, 40)), ownBasic({ color: 0xff3020, transparent: true, depthWrite: false, side: THREE.DoubleSide })); m.rotation.x = -Math.PI / 2; scene.add(m); wave4Map.set(w, m); }
+    m.position.set(w.x, 0.05, w.y); m.scale.setScalar(Math.max(0.1, w.r)); m.material.opacity = clamp(1 - w.r / (w.max + 0.5), 0, 1) * 0.85;
+  }
+  for (const [w, m] of wave4Map) if (!seen.has(w)) { scene.remove(m); m.material.dispose(); wave4Map.delete(w); }
+}
+// 寒寂之境的雪、酸雨：從賣場的天花板落下來的粒子（在你身邊一圈；屋頂底下、有天花板的小房間裡沒有）
+let weather4 = null;
+function syncWeather4(dt) {
+  const snow = isW4() && !!G.cold, acid = isW4() && acidOn4();
+  if (!snow && !acid) { if (weather4) weather4.pts.visible = false; return; }
+  if (!weather4) {
+    const N = 700, geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+    const pts = new THREE.Points(geom, new THREE.PointsMaterial({ size: 0.07, map: glowTex, transparent: true, depthWrite: false, opacity: 0.85 }));
+    pts.frustumCulled = false; scene.add(pts);
+    weather4 = { pts, N, v: Array.from({ length: N }, () => ({ x: 0, y: -1, z: 0, s: Math.random() })), init: false };
+  }
+  const W = weather4, pos = W.pts.geometry.attributes.position.array, p = G.p, R = 9, fall = acid ? 9 : 0.9;
+  W.pts.visible = true;
+  W.pts.material.color.set(acid ? 0xb8e070 : 0xffffff); W.pts.material.size = acid ? 0.04 : 0.07;
+  for (let i = 0; i < W.N; i++) {
+    const q = W.v[i];
+    if (!W.init || q.y < 0 || Math.abs(q.x - p.x) > R || Math.abs(q.z - p.y) > R) {
+      q.x = p.x + (Math.random() * 2 - 1) * R; q.z = p.y + (Math.random() * 2 - 1) * R; q.y = W.init ? CEIL_W4 - 0.05 : Math.random() * CEIL_W4;
+    }
+    q.y -= fall * dt * (0.7 + q.s * 0.6);
+    if (snow) q.x += Math.sin(G.time * 0.7 + q.s * 9) * 0.3 * dt;
+    const hide = (q.y < ROOF4_H && sheltered4(q.x, q.z)) || isWall(Math.floor(q.x), Math.floor(q.z));
+    pos[i * 3] = q.x; pos[i * 3 + 1] = hide ? -50 : q.y; pos[i * 3 + 2] = q.z;
+  }
+  W.init = true;
+  W.pts.geometry.attributes.position.needsUpdate = true;
+}
+// 第四世界的光照貼圖：光從燈往外一格一格擴散（world4.js 的 lightMask4），被牆、柱子和不透明的板子擋住
+function addLight4(L, col, k) {
+  const m = lightMask4(L), r = L.r, r2 = r * r;
+  const x0 = Math.max(0, Math.floor((L.x - r) * LMS)), x1 = Math.min(LMW - 1, Math.ceil((L.x + r) * LMS));
+  const y0 = Math.max(0, Math.floor((L.y - r) * LMS)), y1 = Math.min(LMH - 1, Math.ceil((L.y + r) * LMS));
+  for (let ty = y0; ty <= y1; ty++) {
+    const wy = (ty + 0.5) / LMS - L.y, gy = Math.floor(ty / LMS);
+    for (let tx = x0; tx <= x1; tx++) {
+      const wx = (tx + 0.5) / LMS - L.x, d2 = wx * wx + wy * wy;
+      if (d2 >= r2 || !maskHas(m, Math.floor(tx / LMS), gy)) continue;
+      const i = ty * LMW + tx, I = (1 - Math.pow(Math.sqrt(d2) / r, 1.8)) * k;
+      lmAcc[i * 3] += col[0] * I; lmAcc[i * 3 + 1] += col[1] * I; lmAcc[i * 3 + 2] += col[2] * I;
+    }
+  }
+}
+// 把一件家具的零件照材質合成幾個網格（不會動的零件；userData.keep 的零件和光點不合併）
+function mergeByMat(root) {
+  root.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert(), buckets = new Map(), parts = [];
+  root.traverse(o => { if (o.isMesh && !o.isInstancedMesh && !o.userData.keep && !(o.parent && o.parent.userData.keep) && o.geometry.attributes.uv && o.geometry.attributes.normal) parts.push(o); });
+  for (const o of parts) {
+    const key = o.material.uuid;
+    let b = buckets.get(key);
+    if (!b) buckets.set(key, b = { mat: o.material, list: [] });
+    b.list.push({ o, m: new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld) });
+  }
+  for (const b of buckets.values()) {
+    if (b.list.length < 2) continue;
+    let nv = 0, ni = 0;
+    for (const { o } of b.list) { const g = o.geometry; nv += g.attributes.position.count; ni += g.index ? g.index.count : g.attributes.position.count; }
+    const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), idx = new Uint32Array(ni);
+    let vo = 0, io = 0;
+    for (const { o, m } of b.list) {
+      const g = o.geometry, P = g.attributes.position, N = g.attributes.normal, U = g.attributes.uv, I = g.index, n = P.count;
+      _pn.getNormalMatrix(m);
+      for (let i = 0; i < n; i++) {
+        const k = (vo + i) * 3;
+        _pv.fromBufferAttribute(P, i).applyMatrix4(m); pos[k] = _pv.x; pos[k + 1] = _pv.y; pos[k + 2] = _pv.z;
+        _pv.fromBufferAttribute(N, i).applyMatrix3(_pn).normalize(); nor[k] = _pv.x; nor[k + 1] = _pv.y; nor[k + 2] = _pv.z;
+        uv[(vo + i) * 2] = U.getX(i); uv[(vo + i) * 2 + 1] = U.getY(i);
+      }
+      if (I) for (let i = 0; i < I.count; i++) idx[io++] = I.getX(i) + vo; else for (let i = 0; i < n; i++) idx[io++] = i + vo;
+      vo += n;
+      o.parent.remove(o);
+      if (o.userData.ownGeo) g.dispose();
+    }
+    const mg = new THREE.BufferGeometry();
+    mg.setAttribute('position', new THREE.BufferAttribute(pos, 3)); mg.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); mg.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    mg.setIndex(new THREE.BufferAttribute(idx, 1)); mg.computeBoundingSphere();
+    const mesh = new THREE.Mesh(mg, b.mat); mesh.castShadow = true; mesh.receiveShadow = true; mesh.userData.ownGeo = true;
+    root.add(mesh);
+  }
+}
+// 家具搬動：拿起來的時候拆掉，放下的時候照新的位置和方向重建（removed：整個從地圖上拿掉了，例如特別板材堆拿完了）
+function furnChanged4(f, removed) {
+  const r = furn3d[f.id];
+  if (r) { disposeGroup(r.g); delete furn3d[f.id]; }
+  if (!removed && !f.held && houseGroup) buildOneFurn(f);
+}
+
+// ====================================================================
 // 霧、窗戶、主繪圖
 // ====================================================================
 const cDayFog = new THREE.Color('#1b1720'), cNightFog = new THREE.Color('#020104'), cBloodFog = new THREE.Color('#160205');
@@ -5590,9 +7162,21 @@ const cWinDay = new THREE.Color('#dcebf5'), cWinDusk = new THREE.Color('#e89a5a'
 const cW2Day = new THREE.Color('#cdbfe0'), cW2Night = new THREE.Color('#05041a'), cAwakeA = new THREE.Color('#1c0a2c'), cAwakeB = new THREE.Color('#06221a');
 // 第三世界：白天是淡藍色的薄霧（窗外是夢核風的藍天白雲），晚上黑；紅月偏紅
 const cW3Day = new THREE.Color('#a9c9e8'), cW3Night = new THREE.Color('#030204'), cW3Blood = new THREE.Color('#1a0406');
+const cW4Day = new THREE.Color('#bfc3c6'), cW4Cold = new THREE.Color('#c8d6e6'), cW4Acid = new THREE.Color('#b9bea2');
 const tmpC = new THREE.Color(), tmpC2 = new THREE.Color();
 function updateAtmosphere(dark, t) {
   const k = dark / NIGHT_DARK;
+  // 第四世界：白天賣場裡有一層淡淡的灰白色霧（遠處看不到盡頭，像走不完一樣），晚上全黑；紅月偏紅、寒寂之境偏藍、酸雨偏黃綠
+  const far = isW4() ? 46 : 160;
+  if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); }
+  if (isW4()) {
+    const blood = G.ev.blood && G.phase === 'night';
+    const day = G.cold ? cW4Cold : acidOn4() ? cW4Acid : cW4Day;
+    tmpC.copy(day).lerp(blood ? cW3Blood : cW3Night, k);
+    scene.fog.color.copy(tmpC); scene.background.copy(tmpC);
+    scene.fog.near = 9 - 7.5 * k; scene.fog.far = 42 - 29 * k;
+    return;
+  }
   if (isW3()) {
     const blood = G.ev.blood && G.phase === 'night';
     tmpC.copy(cW3Day).lerp(blood ? cW3Blood : cW3Night, k);
@@ -5626,7 +7210,8 @@ const book = { active: false, items: [], models: new Map(), renderer: null, scen
 const BOOK_P = { x: 0, y: 0, flash: false };   // 假的玩家：怪物會面向它
 // 每種怪物的取景：h 高度、d 鏡頭距離、cy 看著的高度（沒寫就用高度算）
 const BOOK_VIEW = { crawler: { h: 1.0, d: 2.8, cy: 0.4 }, snail: { h: 1.45, d: 2.9, cy: 0.6 }, blob: { h: 1.0, d: 2.4, cy: 0.5 }, shroom: { h: 1.95, d: 3.7 }, grass: { h: 1.95 }, sunflower: { h: 1.75 }, eye: { h: 1.65 },
-  kronos: { h: 1.7, d: 3.3, cy: 0.8 }, tyrant: { h: 3.0, d: 5.4, cy: 1.4 }, warlord: { h: 2.75, d: 5.0, cy: 1.3 }, taowu: { h: 2.3, d: 5.0, cy: 1.1 } };
+  kronos: { h: 1.7, d: 3.3, cy: 0.8 }, tyrant: { h: 3.0, d: 5.4, cy: 1.4 }, warlord: { h: 2.75, d: 5.0, cy: 1.3 }, taowu: { h: 2.3, d: 5.0, cy: 1.1 },
+  staff: { h: 2.15, d: 4.3, cy: 1.1 }, shake: { h: 0.65, d: 1.8, cy: 0.3 }, mimic: { h: 1.95, d: 3.9, cy: 0.95 }, hubert: { h: 2.2, d: 4.3, cy: 1.1 }, ember: { h: 3.1, d: 5.8, cy: 1.55 } };
 function bookOk() {
   if (book.okFlag !== null) return book.okFlag;
   try {
@@ -5728,6 +7313,12 @@ function bookAnimate(m, t, dt, ph) {
     case 'tyrant': { const c = (t + ph) % 6; e.stomp = c < 0.6 ? 0.6 - c : 0; e.cooled = c > 3.5 && c < 5 ? 1 : 0; break; }                    // 跺腳、被聖水冷卻變黑
     case 'warlord': { const c = (t + ph) % 5; e.swing = c > 2 && c < 2.6 ? 2.6 - c : 0; e.cd = c >= 2.6 && c < 3.8 ? 3.8 - c : 0; e.state = c < 2 ? 'patrol' : 'charge'; break; }   // 走、舉劍、橫掃
     case 'taowu': { const c = (t + ph) % 14, k = Math.floor(c / 1.1); e.eyes.forEach((x, i) => { x.shut = i < k; }); e.lit = c < 9.9; e.blind = c >= 9.9 && c < 13 ? 1 : 0; e.roar = c > 13 ? 14 - c : 0; e.pounce = 0; break; }   // 眼睛一顆一顆閉上、瞎了、咆哮
+    // 第四世界
+    case 'staff': { const c = (t + ph) % 7; e.idle = c < 3; e.state = c < 3 ? 'idle' : 'chase'; e.face = Math.PI / 2 + 1.2; e.look = c < 3 && c > 0.8 ? Math.PI / 2 : null; e.cd = c > 5.4 && c < 5.9 ? 1.6 - (c - 5.4) : 0; if (!e.idle) e.face = Math.PI / 2; break; }   // 背對著站、頭慢慢轉過來、走過來、揮拳
+    case 'shake': { const c = (t + ph) % 6; e.awake = c > 2; e.hopT = t; e.spitT = c > 4 && c < 4.4 ? 4 - (c - 4) : 1; break; }   // 躺著闔眼 → 睜眼跳 → 噴奶
+    case 'mimic': { const c = (t + ph) % 8; e.state = c < 3.5 ? 'wander' : c < 6.5 ? 'hunt' : 'knock'; e.knock = c >= 6.5 ? 1 : 0; e.knockTick = 2.4 - ((c * 2.4) % 2.4) * 0.5; e.retreat = 0; break; }   // 站著歪頭、四腳著地衝、敲門
+    case 'hubert': { const c = (t + ph) % 6; e.raise = c > 2 && c < 3 ? 3 - c : 0; e.cd = c >= 3 && c < 3.5 ? 4.5 - (c - 3) : 0; e.swing = c > 4.6 && c < 4.95 ? 4.95 - c : 0; e.home = false; break; }   // 舉起鐵管、砸地、敲牆
+    case 'ember': { const c = (t + ph) % 10; e.rain = c > 1 && c < 4 ? 1 : 0; e.haloLit = c > 5 && c < 6.5; e.kneel = c > 6.5 && c < 9 ? 1 : 0; e.cd = c > 0.2 && c < 0.8 ? 2.2 - (c - 0.2) : 0; break; }   // 揮爪、燼雨張開手、光環被照、跪下
   }
   BOOK_P.x = e.x; BOOK_P.y = e.y + near;
   syncEnemy(e, m.r, t, BOOK_P);
@@ -5786,6 +7377,9 @@ function render(dt) {
   syncProjectiles(t);
   syncWorld2(t);
   if (isW3()) { syncChests3(t); syncStopEyes(t); syncLava3(t); }
+  if (isW4()) { syncBuild4(t); syncStore4(t, dark); syncGrass4(); syncPuddles4(t); syncWaves4(); }
+  if (isW4() || ghostMesh4) { syncGhost4(); syncHand4(); }
+  if (isW4() || weather4) syncWeather4(Math.min(dt, 0.1));
   syncStun(t);
   syncHpBars();
   syncGhosts();
@@ -5844,7 +7438,7 @@ function init() {
   buildExtras();
   glowPts = makePoints(0.07, THREE.AdditiveBlending);
   smokePts = makePoints(0.3, THREE.NormalBlending);
-  window.Renderer = { render, resize, setWorld, book: { ok: bookOk, show: bookShow, stats: book.stats }, pax: paxStats, photos: () => ({ loaded: Object.keys(photos), total: PHOTO_TEX.length }) };
+  window.Renderer = { render, resize, setWorld, furn4: furnChanged4, dbg: () => ({ scene, camera, THREE }), book: { ok: bookOk, show: bookShow, stats: book.stats }, pax: paxStats, photos: () => ({ loaded: Object.keys(photos), total: PHOTO_TEX.length }) };
   resize();
 }
 loadPhotos().then(init);   // 照片貼圖載入好才開始（最多等 5 秒）

@@ -27,6 +27,8 @@
     <div id="coldfx" class="fxl"></div>
     <div id="timefx" class="fxl"></div>
     <div id="stopfx" class="fxl"></div>
+    <div id="acidfx" class="fxl"></div>
+    <div id="milkfx" class="fxl"></div>
     <div id="cross"></div>
     <div id="prompt"></div>
     <canvas id="minimap"></canvas>
@@ -44,7 +46,7 @@
       <div class="bar"><span class="ico">🏃</span><div class="track"><div id="stamFill" class="fill stam"></div></div></div>
       <div class="bar hidden" id="fireBar"><span class="ico">🔥</span><div class="track"><div id="fireFill" class="fill fire"></div></div><b id="fireText" class="ftier">0 秒</b></div>
       <div class="bar hidden" id="tempBar"><span class="ico">🌡️</span><div class="track"><div id="tempFill" class="fill temp"></div></div></div>
-      <div class="coins">🪙 <b id="coinText">0</b></div>
+      <div class="coins">🪙 <b id="coinText">0</b><span id="bagCount" class="bagcount w4only"></span></div>
       <div class="bar hidden" id="noiseBar"><span class="ico">👂</span><div class="track"><div id="noiseFill" class="fill noise"></div></div></div>
     </div>
     <div id="bottom">
@@ -65,6 +67,17 @@
         <button class="tb big" data-k="e">E<small>互動</small></button>
       </div>
       <button id="tpause" class="tb">⏸</button>
+      <!-- 第四世界：📍 記錄位置、🎒 書包；蹲下、一直跑；拿起東西後才出現的蓋房子按鈕（X／Y／Z 選軸、轉、遠、近、放） -->
+      <button id="thome" class="tb sm w4only">📍<small>記錄位置</small></button>
+      <button id="tbag" class="tb sm w4only">🎒<small>書包</small></button>
+      <div id="w4btns" class="w4only">
+        <button id="tcrouch" class="tb sm">⬇<small>蹲下</small></button>
+        <button id="trun" class="tb sm">🏃<small>走／跑</small></button>
+        <div id="bbtns">
+          <button class="bb" data-ax="x">X</button><button class="bb" data-ax="y">Y</button><button class="bb" data-ax="z">Z</button><button class="bb" data-k="rot">🔄<small>轉</small></button>
+          <button class="bb" data-k="far">⬆<small>遠</small></button><button class="bb" data-k="near">⬇<small>近</small></button><button class="bb put" data-k="put">✅<small>放</small></button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -88,11 +101,13 @@
         <button id="btnContinue">繼續遊戲</button>
         <button id="btnNew">新遊戲</button>
         <button id="btnHelp" class="ghost">玩法說明</button>
-        <button id="btnBook" class="ghost">怪物圖鑑</button>
+        <button id="btnBook" class="ghost">生物圖鑑</button>
+        <button id="btnBulbs" class="ghost">燈泡圖鑑</button>
         <button id="btnTransfer" class="ghost">存檔轉移</button>
       </div>
       <p id="w2Badge" class="w2badge hidden">🌸 第二世界：夢核花園 已解鎖</p>
       <p id="w3Badge" class="w2badge w3badge hidden">🚂 第三世界：末班列車 已解鎖</p>
+      <p id="w4Badge" class="w2badge w4badge hidden">🏬 第四世界：3008 無盡賣場 已解鎖</p>
       <p id="testBadge" class="w2badge testbadge hidden">🧪 測試版：所有世界和怪物都開著，新遊戲可以從任一夜開始</p>
       <p id="saveInfo" class="small"></p>
       <p id="buildInfo" class="small build"></p>
@@ -107,6 +122,7 @@
         <button class="worldbtn w1" data-w="1"><b>🏠 第一世界：家</b><small>停電的家裡有東西。白天找燈泡，晚上撐過 12 夜。</small></button>
         <button class="worldbtn w2" data-w="2"><b>🌸 第二世界：夢核花園</b><small>🔒 打贏第一世界的 12 夜就會解鎖</small></button>
         <button class="worldbtn w3" data-w="3"><b>🚂 第三世界：末班列車</b><small>🔒 打贏第二世界的 12 夜就會解鎖</small></button>
+        <button class="worldbtn w4" data-w="4"><b>🏬 第四世界：3008 無盡賣場</b><small>🔒 打贏第三世界的 12 夜就會解鎖（有網路時可以直接玩）</small></button>
       </div>
       <div class="btns"><button id="btnWorldBack" class="ghost">返回</button></div>
     </div>
@@ -215,16 +231,27 @@
     </div>
   </div>
 
-  <!-- 怪物圖鑑 -->
+  <!-- 生物圖鑑（原本叫怪物圖鑑） -->
   <div id="book" class="screen hidden">
     <div class="panel">
-      <h2>怪物圖鑑</h2>
-      <div id="bookTabs" class="tabs"><button data-w="1" class="on">🏠 第一世界</button><button data-w="2">🌸 第二世界</button><button data-w="3">🚂 第三世界</button></div>
+      <h2>生物圖鑑</h2>
+      <div id="bookTabs" class="tabs"><button data-w="1" class="on">🏠 第一世界</button><button data-w="2">🌸 第二世界</button><button data-w="3">🚂 第三世界</button><button data-w="4">🏬 第四世界</button></div>
       <p id="bookNote" class="small book-note">所有怪物都有等級（Lv）和血量，夜晚越後面等級越高、越耐打。</p>
       <p id="bookUnseen" class="small book-note hidden">❓ 還沒見過的怪物只會顯示問號（在你 8 格內出現超過 1 秒就算見過），但牠的說明照樣看得到。</p>
       <div id="bookGrades" class="grades"></div>
       <div id="bookList" class="book"></div>
       <div class="btns"><button id="btnBookBack">返回</button></div>
+    </div>
+  </div>
+
+  <!-- 燈泡圖鑑：燈泡、手電筒、板子；沒拿過的只顯示問號 -->
+  <div id="bulbBook" class="screen hidden">
+    <div class="panel">
+      <h2>燈泡圖鑑</h2>
+      <div id="bulbTabs" class="tabs"><button data-t="bulb" class="on">💡 燈泡</button><button data-t="flash">🔦 手電筒</button><button data-t="plank">🧱 板子</button></div>
+      <p id="bulbNote" class="small book-note"></p>
+      <div id="bulbList" class="bulbs"></div>
+      <div class="btns"><button id="btnBulbsBack">返回</button></div>
     </div>
   </div>
 
@@ -236,7 +263,8 @@
         <button id="btnResume">繼續</button>
         <button id="btnMute" class="ghost">🔊 聲音：開</button>
         <button id="btnPauseHelp" class="ghost">玩法說明</button>
-        <button id="btnPauseBook" class="ghost">怪物圖鑑</button>
+        <button id="btnPauseBook" class="ghost">生物圖鑑</button>
+        <button id="btnPauseBulbs" class="ghost">燈泡圖鑑</button>
         <button id="btnQuit" class="ghost">回主選單</button>
       </div>
       <p class="small">遊戲會在每天早上自動存檔。</p>
@@ -252,6 +280,7 @@
       <p id="goText"></p>
       <div class="btns col">
         <button id="btnRetry">從上次存檔重來</button>
+        <button id="btnNextWorld" class="hidden">🏬 走進對面的賣場（第四世界）</button>
         <button id="btnGoMenu" class="ghost">回主選單</button>
       </div>
     </div>
@@ -262,6 +291,7 @@
   <script src="js/audio.js?v=23"></script>
   <script src="js/world2.js?v=23"></script>
   <script src="js/world3.js?v=23"></script>
+  <script src="js/world4.js?v=23"></script>
   <script src="js/game.js?v=23"></script>
   <script type="module" src="js/render3d.js?v=23"></script>
 </body>

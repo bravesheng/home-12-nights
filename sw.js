@@ -4,7 +4,7 @@
 const VERSION = 'home12-v23';
 const ASSETS = [
   './', './index.html', './style.css', './manifest.webmanifest', './test.html', './manifest-test.webmanifest',
-  './js/version.js', './js/data.js', './js/audio.js', './js/world2.js', './js/world3.js', './js/game.js', './js/render3d.js',
+  './js/version.js', './js/data.js', './js/audio.js', './js/world2.js', './js/world3.js', './js/world4.js', './js/game.js', './js/render3d.js',
   './lib/three.module.js', './lib/three.core.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png',
   // 照片貼圖（render3d.js 的 PHOTO_TEX）：第三世界的場景

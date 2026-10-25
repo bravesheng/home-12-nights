@@ -45,6 +45,24 @@ const Sound = (() => {
   }
 
   const sfx = {
+    // 第四世界：放板子、怪物打牆、板子被打破、賣場的燈熄掉／亮起來、廣播、神秘店員的鈴鐺、酸雨、店員、奶昔、紅涎偽人、Hubert、燼皇
+    plank() { noise(0.08, 0.35, 400, 0, 2); tone(140, 0.12, 'triangle', 0.15, 90); },
+    wallHit() { noise(0.15, 0.45, 250, 0, 1.5); noise(0.05, 0.2, 2500, 0.02, 3); },
+    plankBreak() { for (let i = 0; i < 4; i++) noise(0.07, 0.35, 1200 + i * 400, i * 0.04, 2); tone(90, 0.3, 'sawtooth', 0.12, 50); },
+    lightsOff() { noise(0.25, 0.5, 120, 0, 1); tone(60, 0.6, 'sawtooth', 0.08, 40); tone(120, 0.5, 'square', 0.03, 100, 0.05); },
+    lightsOn() { for (let i = 0; i < 4; i++) noise(0.03, 0.2, 3000, i * 0.12, 4); tone(100, 0.8, 'sawtooth', 0.03, 120, 0.4); },
+    pa() { tone(784, 0.6, 'sine', 0.12); tone(622, 0.9, 'sine', 0.12, null, 0.45); noise(1.2, 0.08, 500, 1.0, 1); },
+    bell() { tone(1568, 0.5, 'sine', 0.08); tone(2093, 0.4, 'sine', 0.05, null, 0.02); tone(1568, 0.5, 'sine', 0.06, null, 0.18); },
+    acid() { noise(0.6, 0.15, 5000, 0, 0.8); },
+    rain() { for (let i = 0; i < 8; i++) noise(0.05, 0.08, rnd(2500, 4500), rnd(0, 0.6), 2); },
+    staffAlert() { tone(110, 0.6, 'sawtooth', 0.12, 90); tone(220, 0.4, 'triangle', 0.06, 180, 0.05); noise(0.3, 0.1, 300, 0, 1); },
+    step() { noise(0.08, 0.3, 180, 0, 1.2); },
+    punch() { noise(0.12, 0.6, 150, 0, 1); tone(80, 0.15, 'sine', 0.3, 40); },
+    squirt() { noise(0.25, 0.3, 1800, 0, 0.6); tone(600, 0.2, 'sine', 0.05, 200); },
+    mimicScreech() { tone(900, 0.6, 'sawtooth', 0.12, 1400); tone(1300, 0.5, 'square', 0.06, 700, 0.05); noise(0.5, 0.2, 2500, 0, 3); },
+    friendCall() { tone(330, 0.35, 'triangle', 0.08, 440); tone(440, 0.5, 'triangle', 0.07, 300, 0.35); noise(0.6, 0.03, 800, 0, 1); },
+    hubertRaise() { tone(200, 0.9, 'sawtooth', 0.06, 600); noise(0.9, 0.12, 3500, 0, 6); },
+    emberRain() { noise(1.2, 0.25, 600, 0, 0.7); for (let i = 0; i < 10; i++) noise(0.03, 0.15, 4000, rnd(0, 1.2), 5); },
     pickup() { tone(660, 0.08, 'square', 0.08); tone(990, 0.12, 'square', 0.07, null, 0.07); },
     empty() { tone(220, 0.12, 'triangle', 0.1); },
     click() { noise(0.04, 0.3, 3000, 0, 2); tone(1200, 0.05, 'square', 0.05); },
