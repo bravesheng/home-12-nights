@@ -393,3 +393,64 @@ body.touch.phone #bottom { left: calc(50% - 13px); max-width: calc(100vw - 316px
   body.phone #toasts { left: 4%; right: 4%; }
   body.touch.phone #bottom { left: 50%; max-width: calc(100vw - 16px); bottom: 170px; }
 }
+
+/* ===== 第四世界：3008 無盡賣場 ===== */
+body:not(.w4) .w4only { display: none !important; }
+.worldbtn.w4 { border-color: rgba(120, 200, 240, .8); background: linear-gradient(135deg, rgba(240, 210, 60, .14), rgba(60, 120, 200, .16)); }
+.worldbtn.w4 b { color: #9fdcff; }
+.w4badge { color: #9fdcff; border-color: rgba(120, 200, 240, .7); background: rgba(120, 200, 240, .1); }
+/* 狀態列的背包格數 */
+.bagcount { margin-left: 12px; font-size: 13px; font-weight: 700; color: #dfe8f0; }
+.bagcount.full { color: #ff8a8a; }
+/* 酸雨：畫面邊緣泛綠、往下流的雨絲；酸掉的奶噴到臉上：一團一團白色的糊 */
+#acidfx { background: linear-gradient(180deg, rgba(110, 255, 90, .28), rgba(110, 255, 90, 0) 30%), radial-gradient(ellipse at center, rgba(80, 200, 60, 0) 45%, rgba(90, 220, 60, .42) 100%); transition: opacity .4s; }
+#milkfx { background: radial-gradient(circle at 30% 40%, rgba(250, 246, 235, .96) 0, rgba(250, 246, 235, .9) 14%, transparent 26%),
+  radial-gradient(circle at 62% 55%, rgba(245, 240, 228, .95) 0, rgba(245, 240, 228, .85) 16%, transparent 30%),
+  radial-gradient(circle at 48% 28%, rgba(240, 236, 222, .9) 0, transparent 18%), radial-gradient(circle at 75% 30%, rgba(240, 236, 222, .85) 0, transparent 14%),
+  radial-gradient(ellipse at center, rgba(235, 230, 215, .35), rgba(235, 230, 215, .6)); }
+/* 觸控：📍 記錄位置、🎒 書包（右上，暫停鍵下面）；⬇ 蹲下、🏃 一直跑（右下按鈕上面）；拿起東西後才出現的蓋房子按鈕 */
+.tb.sm { width: 64px; height: 64px; font-size: 22px; }
+.tb.sm small { font-size: 11px; }
+.tb.sm.on { background: rgba(126, 224, 129, .3); border-color: #7ee081; }
+#thome { position: absolute; right: 92px; top: 170px; }
+#tbag { position: absolute; right: 164px; top: 170px; }
+#w4btns { position: absolute; right: 20px; bottom: 252px; display: flex; gap: 10px; align-items: flex-end; }
+#bbtns { display: none; grid-template-columns: repeat(4, 62px); gap: 8px; }
+body.holding #bbtns { display: grid; }
+body.holding #tcrouch, body.holding #trun { display: none; }
+.bb { pointer-events: auto; touch-action: none; width: 62px; height: 62px; padding: 0; border-radius: 14px; font-size: 20px; font-weight: 800;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(20, 16, 30, .62); color: #fff; border: 2px solid rgba(255, 255, 255, .25); }
+.bb small { font-size: 11px; font-weight: 600; opacity: .85; }
+.bb.on { background: rgba(255, 209, 102, .35); border-color: #ffd166; color: #ffd166; }
+.bb.put { border-color: #7ee081; background: rgba(126, 224, 129, .22); }
+.bb.down { transform: scale(.92); background: rgba(255, 209, 102, .4); }
+.slot.hand { border-color: rgba(126, 224, 129, .8); background: rgba(126, 224, 129, .12); }
+.slot.hand .key { opacity: 1; font-size: 13px; }
+.slot .ic { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+.slot .ic svg { width: 44px; height: 44px; }
+#mBody .ic.r-common, #mBody .ic.r-mythic { border-radius: 10px; border: 2px solid; }
+#mBody .ic.r-common { border-color: rgba(169, 169, 178, .8); background: rgba(169, 169, 178, .1); }
+#mBody .ic.r-mythic { border-color: rgba(255, 74, 74, .95); background: rgba(255, 74, 74, .14); box-shadow: 0 0 14px rgba(255, 74, 74, .45); }
+.rar.r-common { background: #a9a9b2; color: #222; }
+.rar.r-mythic { background: #ff4a4a; color: #fff; }
+.shopcard.sel { border-color: #ffd166; }
+body.touch.phone .tb.sm { width: 44px; height: 44px; font-size: 16px; }
+body.touch.phone .tb.sm small { font-size: 8px; }
+body.touch.phone #thome { top: 56px; right: 8px; }
+body.touch.phone #tbag { top: 104px; right: 8px; }
+body.touch.phone #w4btns { right: 12px; bottom: 172px; gap: 6px; }
+body.touch.phone #bbtns { grid-template-columns: repeat(7, 40px); gap: 5px; }
+body.touch.phone .bb { width: 40px; height: 40px; font-size: 14px; border-radius: 10px; }
+body.touch.phone .bb small { font-size: 8px; }
+@media (orientation: portrait) { body.touch.phone #w4btns { bottom: 262px; } }
+/* 燈泡圖鑑 */
+.bulbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.bcardx { display: flex; gap: 10px; align-items: center; padding: 10px; border-radius: 12px; background: rgba(255, 255, 255, .05); border: 2px solid var(--rc, rgba(255, 255, 255, .1)); }
+.bcardx .ic { width: 64px; height: 64px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; font-size: 40px; }
+.bcardx .ic svg { width: 60px; height: 60px; }
+.bcardx .tx { display: flex; flex-direction: column; gap: 3px; font-size: 12px; line-height: 1.45; }
+.bcardx .tx b { font-size: 15px; }
+.bcardx .tx small { opacity: .7; }
+.bcardx .ic.q { font-size: 34px; font-weight: 800; color: #9a94a8; background: rgba(0, 0, 0, .35); border-radius: 10px; }
+.bcardx.unseen .tx b { color: #aaa; }
+.flashbeam { width: 60px; height: 22px; border-radius: 4px 30px 30px 4px; }

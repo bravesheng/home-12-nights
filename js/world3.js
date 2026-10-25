@@ -206,7 +206,7 @@ function alerts3() {
 function hud3() {
   const w3 = isW3();
   $('fireBar').classList.toggle('hidden', !w3);
-  $('tempBar').classList.toggle('hidden', !w3 || !G.cold);
+  $('tempBar').classList.toggle('hidden', !(w3 || isW4()) || !G.cold);   // 第四世界的寒寂之境也有體溫
   if (!w3) return;
   const left = fuelLeft();
   setBar('fireFill', left / NIGHT_LEN * 100);
@@ -568,6 +568,7 @@ const GRADE3 = { kronos: 'general', tyrant: 'judge', warlord: 'judge', taowu: 'r
 // 怪物受到不同攻擊的傷害倍數（src：flash 手電筒、pan 平底鍋、shot 彈珠、spray 聖水槍、salt 鹽巴、bomb 鞭炮、fire 火球、angel 天使）
 function monsterDmgMult(t, src) {
   if (!t.kind) return 1;
+  if (GRADE4[t.kind]) return monsterDmgMult4(t, src);   // 第四世界的新怪物（world4.js）
   if (t.kind === 'tyrant') {
     if (src === 'flash') return 0;                      // 手電筒對岩石沒用
     if (src === 'spray') {   // 聖水冷卻：嘶——
@@ -702,6 +703,7 @@ function updateLava(dt) {
 // ---------- 墮落戰神：只在車廂的走道裡走（不進包廂、不上車頂、不去車站）。看到你就衝過來，2 格內橫掃一劍（打飛、眩暈）；
 // 你躲進包廂就在門外等 10 秒，然後繼續從列車的一頭巡邏到另一頭 ----------
 function inHall(x, y) {
+  if (isW4()) return inAisle4(x, y) && !isSolid(Math.floor(x), Math.floor(y));   // 第四世界：只在主走道上巡邏
   const tx = Math.floor(x), ty = Math.floor(y);
   if (!inMap(tx, ty)) return false;
   const r = roomGrid[ty][tx];
@@ -752,7 +754,7 @@ function updateWarlord(e, dt) {
     if (e.waitT <= 0) { e.state = 'patrol'; e.pt = null; }
   } else {
     // 巡邏：從列車的一頭走到另一頭
-    if (!e.pt || Math.hypot(e.pt.x - e.x, e.pt.y - e.y) < 1.2) e.pt = W3.patrol[e.x < MAP_W / 2 ? 1 : 0];
+    if (!e.pt || Math.hypot(e.pt.x - e.x, e.pt.y - e.y) < 1.2) e.pt = isW4() ? farPatrol4(e) : W3.patrol[e.x < MAP_W / 2 ? 1 : 0];
     tx = e.pt.x; ty = e.pt.y; f = flowTo(Math.floor(tx), Math.floor(ty)); sp = Math.min(1.5 + n * 0.006, 2.0);
   }
   if (e.spawn > 0) sp *= 0.3;
@@ -768,7 +770,7 @@ function updateWarlord(e, dt) {
 }
 // 列車上離你最遠的那一頭
 function warlordSpawn() {
-  const far = W3.patrol[G.p.x < MAP_W / 2 ? 1 : 0];
+  const far = isW4() ? farPatrol4(G.p) : W3.patrol[G.p.x < MAP_W / 2 ? 1 : 0];
   return { x: far.x, y: far.y };
 }
 
@@ -1134,8 +1136,15 @@ function endVictory3() {
   Sound.play('win');
   if (!TEST_MODE) try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }   // 測試版不碰正式版的存檔
   $('goTitle').textContent = '🚂 列車到站了';
-  $('goText').innerHTML = `天亮了，列車慢慢停進終點站……月台上空無一人，只有你一個。<br>你在第三世界撐過了 ${LAST_NIGHT} 夜！<br>你搜索了 ${G.stats.searched} 次，驅散了 ${G.stats.dissolved} 個怪物。<br>最好的燈泡：${bulbName(G.stats.bestTier)}`;
+  $('goText').innerHTML = `天亮了，列車慢慢停進終點站……月台上空無一人，只有你一個。<br>你在第三世界撐過了 ${LAST_NIGHT} 夜！<br>你搜索了 ${G.stats.searched} 次，驅散了 ${G.stats.dissolved} 個怪物。<br>最好的燈泡：${bulbName(G.stats.bestTier)}<br>🏬 車站對面有一間好大的家具賣場，招牌寫著「3008」……第四世界解鎖了！`;
   $('btnRetry').classList.add('hidden');
+  // 第四世界：背包、裝好的燈泡和燈具、硬幣、手電筒等級帶過去
+  unlockW4();
+  const inv = { ...G.inv }, put = (id, n = 1) => { inv[id] = (inv[id] || 0) + n; };
+  for (const o of [...G.sockets, ...G.lamps]) if (o.bulb) put('bulb' + o.bulb);
+  for (const l of G.lamps) put(lampItemId(l.type));
+  nextCarry = { inv, coins: G.coins, flashLv: G.p.flashLv, diff: G.diff, stats: G.stats };
+  $('btnNextWorld').classList.remove('hidden');
   $('gameover').classList.remove('hidden');
 }
 
