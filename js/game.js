@@ -263,7 +263,7 @@ function saveGame() {
     containers: G.containers, stats: G.stats,
     flowers: G.flowers.map(f => ({ x: f.x, y: f.y, lv: f.lv, pt: f.ptype || 'eye', g: Math.round(f.grow * 100) / 100 })),
     coins: G.coins, chests: G.chests, gift: G.gift, treasure: G.treasure, stock: G.stock,
-    pickups: G.pickups.map(pk => ({ x: pk.x, y: pk.y, id: pk.id, n: pk.n })), delivery: G.ev.deliveryAt,
+    pickups: G.pickups.map(pk => ({ x: pk.x, y: pk.y, id: pk.id, n: pk.n, z: pk.z || undefined, a: pk.a, s: pk.s, si: pk.si })),   // z、s：第四世界擺在架上的東西 delivery: G.ev.deliveryAt,
     // 第三世界
     fire: G.fire.queue.map(q => ({ id: q.id, left: Math.round(q.left) })), temp: Math.round(G.p.temp), baymaxGot: G.baymaxGot || 0,
     chests3: G.chests3.map(c => ({ x: c.x, y: c.y, lv: c.lv, open: !!c.open, out: !!c.out })),
@@ -301,6 +301,16 @@ function loadGame() {
   });
   G.lamps = (s.lamps || []).filter(l => walkable(l.x + 0.5, l.y + 0.5)).map(l => ({ kind: 'lamp', ...l, dying: 0, room: roomGrid[l.y][l.x] }));
   G.containers = s.containers || {};
+  if (G.mapReset4) {
+    // 第四世界的賣場改版了：放好的檯燈收回背包、櫃子裡自己放的東西放在入口旁邊的地上（不會不見）、掉在地上的東西重新排
+    for (const l of s.lamps || []) { if (l.bulb && BULBS[l.bulb]) G.inv['bulb' + l.bulb] = (G.inv['bulb' + l.bulb] || 0) + 1; const li = lampItemId(l.type); if (l.type !== 'desk' && li) G.inv[li] = (G.inv[li] || 0) + 1; }
+    s.lamps = []; s.treasure = null; G.lamps = [];
+    const keep = [];
+    for (const c of Object.values(G.containers)) for (const e of c.items || []) if (e.includes(':')) keep.push(e.split(':'));
+    s.pickups = keep.filter(([id]) => ITEMS[id]).map(([id, n], i) => ({ x: W4.start.x + 2 + (i % 4) * 0.5, y: W4.start.y - 2 - Math.floor(i / 4) * 0.5, id, n: +n || 1 }));
+    G.containers = {};
+    toast('🏬 3008 賣場變大了！你之前蓋的板子都疊在入口旁邊的地上，放好的檯燈收回背包了，要重新蓋家喔。', 'warn');
+  }
   for (const f of FURN) if (f.loot && !G.containers[f.id]) G.containers[f.id] = { items: [] };
   G.stats = Object.assign(G.stats, s.stats || {});
   G.flowers = (s.flowers || []).map(f => {
@@ -311,7 +321,7 @@ function loadGame() {
   });
   G.coins = s.coins || 0; G.chests = s.chests || {}; G.gift = s.gift || null;
   G.treasure = s.treasure && walkable(s.treasure.x, s.treasure.y) ? s.treasure : null;
-  G.pickups = (s.pickups || []).filter(pk => walkable(pk.x, pk.y)).map(pk => ({ ...pk, t: Math.random() * 6 }));
+  G.pickups = (s.pickups || []).filter(pk => ITEMS[pk.id] && ((pk.s && FURN_BY_ID[pk.s]) || walkable(pk.x, pk.y))).map(pk => ({ ...pk, t: Math.random() * 6, keep: 1 }));
   G.ev.deliveryAt = s.delivery === undefined ? -1 : s.delivery;
   if (s.stock && s.stock.length) G.stock = s.stock; else makeStock();
   // 第三世界：火爐、體溫、大白燈的數量、今天的寶箱（舊存檔沒有這些就用預設）
@@ -319,6 +329,7 @@ function loadGame() {
   G.p.temp = s.temp === undefined ? 100 : s.temp;
   G.baymaxGot = s.baymaxGot || 0;
   if (world === 3) loadDay3(s.chests3 || []);
+  if (world === 4 && !G.pickups.some(pk => pk.s)) stockShelves4(true);   // 架上還沒擺東西（舊存檔）
   return true;
 }
 
@@ -338,7 +349,7 @@ function rollItem(table, level, day) {
 function refillContainers(chance = 0.35) {
   const k = D().items;
   for (const f of FURN) {
-    if (!f.loot) continue;
+    if (!f.loot || (isW4() && DISPLAY4[f.type])) continue;   // 第四世界的架子：東西直接擺在架上（world4.js 的 stockShelves4）
     const c = G.containers[f.id];
     if (isW3() && (f.loot === 'fuel' || f.loot === 'coal' || f.loot === 'cushions')) { refillPile(f, c); continue; }   // 木堆、煤袋、椅墊每天補滿
     const food = f.loot === 'food'; // 冰箱、櫥櫃幾乎每天都會補滿食物
@@ -349,13 +360,14 @@ function refillContainers(chance = 0.35) {
 }
 // 名字和說明會跟著世界變（第二世界的花、樹、水燈泡）
 const bulbVariant = t => (isW3() ? BULBS_W3[t] : isW2() ? BULBS_W2[t] : null);
-const bulbName = t => (bulbVariant(t) ? bulbVariant(t).name : BULBS[t].name);
+// 第四世界沒有燈泡、直接就是檯燈（設計師：燈泡不要了，我要直接就是檯燈）：名字的「燈泡」換成「檯燈」
+const bulbName = t => { const n = bulbVariant(t) ? bulbVariant(t).name : BULBS[t].name; return isW4() ? n.replace('燈泡', '檯燈') : n; };
 function itemName(id) { const it = ITEMS[id]; return it.kind === 'bulb' ? bulbName(it.tier) : it.name; }
 function itemDesc(id) {
   const it = ITEMS[id];
   if (it.kind !== 'bulb') return it.desc + ((isW3() || isW4()) && it.warm ? `、體溫 +${it.warm}` : '');
   const t = it.tier, v = bulbVariant(t);
-  return `${RARITY[bulbRarity(t)].name}燈泡・` + (BULBS[t].special ? '特殊燈泡。' : `第 ${t} 級。`) + (v ? v.desc : BULBS[t].desc);
+  return `${RARITY[bulbRarity(t)].name}${isW4() ? '檯燈' : '燈泡'}・` + (BULBS[t].special ? '特殊燈泡。' : `第 ${t} 級。`) + (v ? v.desc : BULBS[t].desc);
 }
 // 燈泡的稀有度標籤（視窗、物品欄用）
 const rarityOfItem = id => (ITEMS[id] && ITEMS[id].kind === 'bulb' ? bulbRarity(ITEMS[id].tier) : null);
@@ -374,7 +386,7 @@ function nextCard() {
   if (t === undefined) return;
   const r = bulbRarity(t), el = document.createElement('div');
   el.className = 'bcard r-' + r;
-  el.innerHTML = `<div class="bc-ic">${bulbSVG(t)}</div><div class="bc-tx"><span class="rar r-${r}">${RARITY[r].name}燈泡</span>` +
+  el.innerHTML = `<div class="bc-ic">${bulbSVG(t)}</div><div class="bc-tx"><span class="rar r-${r}">${RARITY[r].name}${isW4() ? '檯燈' : '燈泡'}</span>` +
     `<b>${bulbName(t)}</b><small>${BULBS[t].special ? '特殊燈泡' : `第 ${t} 級`}</small></div>`;
   $('cards').appendChild(el);
   placeBelowToasts($('cards'));
@@ -730,7 +742,7 @@ function defeatMonster(t) {
     woman: '😢 血淚女消散了！', momo: '🐦 鳥腳女被打跑了！', crawler: '📺 爬行女被打倒了，電視也關掉了！', clown: '🤡 小丑被打倒了！', tall: '👁️ 你打倒了「它」！',
     sunflower: '🌻 向日葵眼枯萎了。', shroom: '🍄 千眼菇被打爛了！', grass: '🌿 草叢人被打倒了！', snail: '🐌 大嘴觸角蟲被打倒了！', girl: '👧 眼花女孩消散了！',
     kronos: '🍄 蕈裂的蘑菇傘碎了！掉了 2 塊木炭。', tyrant: '🪨 熔岩暴君碎成了一堆石頭！', warlord: '⚔️ 墮落戰神倒下了，斗篷散落一地。', taowu: '👁️ 你打倒了檮杌・九瞳！',
-    shake: '🥛 葵氏奶昔破掉了。', mimic: '🩸 紅涎偽人倒下了……那個聲音不再叫你了。', staff: '👔 店員倒下了，名牌掉在地上。', hubert: '🗿 Hubert 碎成了一堆灰色的塑膠！', ember: '👑 你打倒了燼皇！火燼熄滅了。',
+    shake: '🥛 葵氏奶昔破掉了。', mimic: '🩸 紅涎偽人倒下了……那個聲音不再叫你了。', staff: '👔 店員倒下了，名牌掉在地上。', hubert: '🕷️ Hubert 翻過來倒下了，八隻腳縮成一團！', ember: '👑 你打倒了燼皇！火燼熄滅了。',
   }[kind];
   if (msg && (BOSSES.includes(kind) || !G.ev['kill_' + kind])) { G.ev['kill_' + kind] = 1; toast(`${msg}（Lv.${t.lv}）`, 'good'); }
 }
@@ -1780,7 +1792,7 @@ const BESTIARY = [
   { world: 4, in: [4], name: '葵氏奶昔', grade: 'runner', night: INTRO4.shake, kind: 'shake', draw: thumbShake, desc: '一盒插著吸管的奶昔，紙盒上有一顆大眼睛。平常闔著眼躺在美食區和冰箱旁邊，看起來就是一盒奶昔；晚上你走到 3 格內，眼睛就睜開、一跳一跳地衝過來，每 4 秒從吸管噴一道酸掉的奶，糊得你看不清楚（跳起來可以躲）。很弱：手電筒照一下或平底鍋一敲就破，破掉的奶灑在地上會讓你滑一下。' },
   { world: 4, in: [4], name: '紅涎偽人', grade: 'general', night: INTRO4.mimic, kind: 'mimic', draw: thumbMimic, desc: '乾癟灰白、眼球凸出的人形，嘴巴一直流出紅色的涎液。牠會模仿朋友的聲音叫你過去；你躲在家裡時牠會來敲門：「開門……是我啊……」千萬不要開門，開了牠就撲進來。在外面看到你就四腳著地衝過來，走過的地方留下一攤會燙傷的紅涎。手電筒照牠的臉，牠會尖叫往後退；鹽巴傷害 2 倍。' },
   { world: 4, in: [4], name: 'SCP-3008-2', grade: 'king', night: INTRO4.staff, kind: 'staff', draw: thumbStaff, desc: '穿黃底紫條紋制服、戴著名牌的細長店員，臉是一張沒有表情的白臉。白天站在走道上一動也不動，頭會慢慢轉過來看你；天黑燈一熄，就在賣場裡巡邏，看到你就衝過來打你，看不到你 6 秒就回去巡邏，還會打你家的牆。很耐打，手電筒只有一半的傷害；最好的辦法是蓋一間好房子躲起來，或蹲下慢慢走（蹲下牠們要很近才看得到你）。' },
-  { world: 4, in: [4], name: 'Hubert', grade: 'judge', night: INTRO4.hubert, kind: 'hubert', draw: thumbHubert, desc: '灰色的塑膠展示假人，沒有五官的蛋形頭、關節有一圈一圈的接縫，拖著一根鐵管，浮在地上、底下透著紅光。牠專門拆房子：直接飄到你的家，用鐵管把板子一片一片敲爛（玻璃板子拆不了）。你在牠 6 格內被看到時，牠會把鐵管舉高 1 秒往地上一砸，紅色的震波往外擴散——跳起來就不會被震倒。手電筒對牠沒用，平底鍋只有一半；聖水槍 2 倍、鞭炮 1.5 倍。' },
+  { world: 4, in: [4], name: 'Hubert', grade: 'judge', night: INTRO4.hubert, kind: 'hubert', draw: thumbHubert, desc: '一隻黑色、胖胖的大蜘蛛：圓滾滾的大肚子上面一顆小圓頭、八隻粗粗的腳，一隻前腳抓著一根鐵管，底下透著紅光。牠專門拆房子：直接爬到你的家，用鐵管把板子一片一片敲爛（玻璃板子拆不了）。你在牠 6 格內被看到時，牠會把鐵管舉高 1 秒往地上一砸，紅色的震波往外擴散——跳起來就不會被震倒。手電筒對牠沒用，平底鍋只有一半；聖水槍 2 倍、鞭炮 1.5 倍。' },
   { world: 4, in: [4], name: '燼皇', grade: 'yama', night: INTRO4.ember, kind: 'ember', draw: thumbEmber, desc: '第四世界的大魔王，第一隻閻羅級的鬼，最後一夜一定會來。骷髏般的長身體，頭上一圈荊棘光環，背後張開燒著火的紅披風，腳邊一圈帶刺的紅玫瑰。每 14 秒下 3 秒「燼雨」，沒有屋頂遮著就會一直扣血，木頭板子會著火；飄過的地上長出帶刺的玫瑰藤。弱點是光環：抬頭用手電筒照著光環 3 秒，牠就跪下 8 秒，所有傷害 2.5 倍。火球對牠沒用，聖水槍 2 倍。' },
 ];
 // 這隻怪物會在哪些世界出現（圖鑑分頁用）
@@ -2240,7 +2252,8 @@ function updatePickups(dt) {
   for (const pk of G.pickups) {
     pk.t += dt;
     pk.age = (pk.age || 0) + dt;
-    if (pk.age > 120 && !pk.keep) { pk.got = true; continue; } // 放太久沒撿就消失（自己丟在地上的不會）
+    if (pk.age > 120 && !pk.keep && !isW4()) { pk.got = true; continue; } // 放太久沒撿就消失（自己丟在地上的、第四世界的不會）
+    if (isW4() && pk.id !== 'coin') continue;   // 第四世界的東西是真的東西：看著它按 E 才撿（world4.js 的 addTargets4），硬幣才自動撿
     if (pk.wait) { if (Math.hypot(pk.x - p.x, pk.y - p.y) > 1.3) pk.wait = false; continue; }   // 自己剛丟在地上的：走開再回來才撿
     if (Math.hypot(pk.x - p.x, pk.y - p.y) > 0.75) continue;
     if (!bagFits(pk.id)) { if (!pk.full) { pk.full = true; toast(`🎒 背包滿了（${BAG_SLOTS} 格），撿不起${itemName(pk.id)}。`, 'warn'); } continue; }
@@ -2985,7 +2998,7 @@ function getTarget() {
     if (f.move || f.type === 'plankpile') continue;   // 第四世界可以搬的家具、板材堆在 addTargets4
     if (f.id === 'tvcab' && ev.tvOn) cands.push({ d: d - 0.5, id: 'tvOff', label: '關掉電視', hold: 1, action: tvOff });
     else if (f.id === 'closet' && ev.closet > 0) cands.push({ d: d - 0.5, id: 'closetHold', label: '壓住衣櫃門', hold: 2, action: () => { ev.closet = 0; Sound.play('thump'); toast('你用力壓住衣櫃門……裡面安靜了。', 'good'); } });
-    else if (f.loot) cands.push({ d, id: 'search:' + f.id, label: `搜索 ${f.name}`, hold: 0.7, action: () => search(f) });
+    else if (f.loot && !(isW4() && DISPLAY4[f.type])) cands.push({ d, id: 'search:' + f.id, label: `搜索 ${f.name}`, hold: 0.7, action: () => search(f) });
     else if (f.type === 'phone' && ev.phone > 0) cands.push({ d: d - 0.5, id: 'phone', label: '接電話', hold: 0, action: answerPhone });
     else if (f.type === 'bed' && G.phase === 'day') {
       if (G.t < DAY_LEN - 25) cands.push({ d, id: 'bed', label: '睡到傍晚', sub: '按住 E', hold: 1.2, action: sleep });
@@ -3567,7 +3580,15 @@ function updatePrompt() {
 // ====================================================================
 // 介面
 // ====================================================================
+// 第四世界的檯燈圖示：燈罩下面亮著那一級燈泡的顏色
+function tierLampSVG(t) {
+  const c = BULBS[t].color, col = c === 'rainbow' ? '#ffd0ff' : `rgb(${c.join(',')})`;
+  return `<svg viewBox="0 0 36 36"><defs><radialGradient id="lg${t}"><stop offset="0" stop-color="${col}" stop-opacity=".9"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></radialGradient></defs>` +
+    `<circle cx="18" cy="17" r="12" fill="url(#lg${t})"/><path d="M10 6 L26 6 L30 16 L6 16 Z" fill="#efe6d2" stroke="#8a7a5a" stroke-width="1"/>` +
+    `<circle cx="18" cy="18" r="3.4" fill="${col}"/><rect x="17" y="18" width="2" height="11" fill="#b8a070"/><ellipse cx="18" cy="30.5" rx="7" ry="2.5" fill="#3a3c40"/></svg>`;
+}
 function bulbSVG(t) {
+  if (isW4() && mode === 'play') return tierLampSVG(t);   // 第四世界：燈泡就是檯燈
   const c = BULBS[t].color;
   const col = c === 'rainbow' ? `url(#rb${t})` : `rgb(${c.join(',')})`;
   const defs = `<defs><radialGradient id="gl${t}"><stop offset="0" stop-color="${c === 'rainbow' ? '#fff' : `rgb(${c.join(',')})`}" stop-opacity=".8"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>` +
@@ -3835,6 +3856,8 @@ addEventListener('keydown', e => {
   // 第四世界：拿著東西時 X／Y／Z 選軸、R 或 G 轉、T／B 遠近；C 蹲下（切換）、I 書包、P 記錄位置
   else if (isW4() && (code === 'KeyX' || code === 'KeyY' || code === 'KeyZ')) setAxis(code.slice(3).toLowerCase());
   else if (isW4() && (code === 'KeyG' || (code === 'KeyR' && handBig()))) rotateHand();
+  else if (isW4() && code === 'KeyV') cycleStep();
+  else if (isW4() && code === 'KeyH') whistle4();
   else if (isW4() && code === 'KeyT') nudgeDist(1);
   else if (isW4() && code === 'KeyB') nudgeDist(-1);
   else if (isW4() && code === 'KeyC') toggleCrouch4();

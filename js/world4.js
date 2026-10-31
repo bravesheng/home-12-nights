@@ -25,7 +25,15 @@ const farPatrol4 = e => W4.patrol.reduce((a, b) => (Math.hypot(b.x - e.x, b.y - 
 const WALL_T = 0.05;   // 牆的半個厚度（碰撞用）
 let moveWho = null;    // 現在正在移動的是誰（黑球鑽得過木頭、水泥、黃金、岩漿板子的縫）
 function initB4() {
-  G.b4 = { h: new Array((MAP_H + 1) * MAP_W).fill(null), v: new Array(MAP_H * (MAP_W + 1)).fill(null), roofs: new Map(), n: 0, ver: 1, list: [] };
+  G.b4 = { h: new Array((MAP_H + 1) * MAP_W).fill(null), v: new Array(MAP_H * (MAP_W + 1)).fill(null), roofs: new Map(), n: 0, ver: 1, list: [], cells: new Map() };
+}
+// 斜放的牆（設計師：XYZ 也要有分 15°、45°、90°）：不在格子的邊上，{ free: true, cx, cy, ang（弧度）}，一片 1 公尺長。
+// 碰撞照真的線段算；尋路、視線、光、「在家裡」把它穿過的格子當成有牆（G.b4.cells：格子 → 斜牆）
+const freeIn = (x, y) => { const l = G.b4.cells.get(x + ',' + y); return l ? l.find(wallClosed) || null : null; };
+function freeCells(w) {
+  const out = new Set(), [x0, y0, x1, y1] = wallEnds(w);
+  for (let k = 0; k <= 20; k++) out.add(Math.floor(x0 + (x1 - x0) * k / 20) + ',' + Math.floor(y0 + (y1 - y0) * k / 20));
+  return [...out];
 }
 const b4On = () => !!(G && G.b4 && curWorld === 4);
 function wallH(x, y) { const b = G.b4; return x >= 0 && x < MAP_W && y >= 0 && y <= MAP_H ? b.h[y * MAP_W + x] : null; }
@@ -45,13 +53,15 @@ const wallOpaque = w => wallClosed(w) && w.tier !== GLASS_TIER;
 const blocksMove = (w, who) => wallClosed(w) && !(who && who.kind === 'blob' && w.tier !== GLASS_TIER);
 function setWall(w) {
   const b = G.b4;
-  if (w.o === 'h') b.h[w.y * MAP_W + w.x] = w; else b.v[w.y * (MAP_W + 1) + w.x] = w;
+  if (w.free) { w.x = Math.floor(w.cx); w.y = Math.floor(w.cy); for (const k of freeCells(w)) { if (!b.cells.has(k)) b.cells.set(k, []); b.cells.get(k).push(w); } }
+  else if (w.o === 'h') b.h[w.y * MAP_W + w.x] = w; else b.v[w.y * (MAP_W + 1) + w.x] = w;
   b.list.push(w); b.n++;
   b4Changed();
 }
 function removeWall(w) {
   const b = G.b4;
-  if (w.o === 'h') { if (b.h[w.y * MAP_W + w.x] === w) b.h[w.y * MAP_W + w.x] = null; }
+  if (w.free) { for (const k of freeCells(w)) { const l = b.cells.get(k); if (l) { l.splice(l.indexOf(w) >>> 0, 1); if (!l.length) b.cells.delete(k); } } }
+  else if (w.o === 'h') { if (b.h[w.y * MAP_W + w.x] === w) b.h[w.y * MAP_W + w.x] = null; }
   else if (b.v[w.y * (MAP_W + 1) + w.x] === w) b.v[w.y * (MAP_W + 1) + w.x] = null;
   const i = b.list.indexOf(w);
   if (i >= 0) { b.list.splice(i, 1); b.n--; }
@@ -60,12 +70,12 @@ function removeWall(w) {
 // 牆、門、家具改變了：路線、光、「在家裡」都要重算
 function b4Changed() { G.b4.ver++; fixFlows.clear(); flow = null; encCache = null; }
 // 牆的兩端（地圖座標）
-const wallEnds = w => (w.o === 'h' ? [w.x, w.y, w.x + 1, w.y] : [w.x, w.y, w.x, w.y + 1]);
-// 點到牆的距離
+const wallEnds = w => (w.free ? [w.cx - Math.cos(w.ang) * 0.5, w.cy - Math.sin(w.ang) * 0.5, w.cx + Math.cos(w.ang) * 0.5, w.cy + Math.sin(w.ang) * 0.5] : w.o === 'h' ? [w.x, w.y, w.x + 1, w.y] : [w.x, w.y, w.x, w.y + 1]);
+// 點到牆（線段）的距離
 function distToWall(x, y, w) {
-  const [x0, y0, x1, y1] = wallEnds(w);
-  const nx = clamp(x, Math.min(x0, x1), Math.max(x0, x1)), ny = clamp(y, Math.min(y0, y1), Math.max(y0, y1));
-  return Math.hypot(x - nx, y - ny);
+  const [x0, y0, x1, y1] = wallEnds(w), dx = x1 - x0, dy = y1 - y0;
+  const k = clamp(((x - x0) * dx + (y - y0) * dy) / (dx * dx + dy * dy), 0, 1);
+  return Math.hypot(x - x0 - dx * k, y - y0 - dy * k);
 }
 // 碰撞：圓（x, y, r）有沒有撞到擋路的牆（game.js 的 hits 會呼叫）
 function hitsWall4(x, y, r) {
@@ -90,11 +100,16 @@ function hitsWall4(x, y, r) {
       if (dx * dx + dy * dy < r2) return true;
     }
   }
+  if (G.b4.cells.size) for (let Y = y0 - 1; Y <= y1 + 1; Y++) for (let X = x0 - 1; X <= x1 + 1; X++) {
+    const l = G.b4.cells.get(X + ',' + Y);
+    if (l) for (const w of l) if (blocksMove(w, who) && distToWall(x, y, w) < r + WALL_T) return true;
+  }
   return false;
 }
 // 視線：從格子 a 走到相鄰（或斜對角）的格子 b 有沒有被不透明的牆擋住（castRay 用；玻璃看得穿）
 function sightBlocked4(ax, ay, bx, by) {
   if (!G.b4.n) return false;
+  if (wallOpaque(freeIn(bx, by)) && !wallOpaque(freeIn(ax, ay))) return true;   // 走進有斜牆的格子
   if (ax === bx || ay === by) return wallOpaque(wallBetween(ax, ay, bx, by));
   // 斜著跨過一個角：兩條路都被擋住才算擋住
   const p1 = wallOpaque(wallBetween(ax, ay, bx, ay)) || wallOpaque(wallBetween(bx, ay, bx, by));
@@ -106,6 +121,7 @@ function moveBlocked4(x0, y0, x1, y1) {
   if (!b4On() || !G.b4.n) return false;
   const ax = Math.floor(x0), ay = Math.floor(y0), bx = Math.floor(x1), by = Math.floor(y1);
   if (ax === bx && ay === by) return false;
+  if (freeIn(bx, by) && !freeIn(ax, ay)) return true;
   if (ax !== bx && ay !== by) return wallClosed(wallBetween(ax, ay, bx, ay)) || wallClosed(wallBetween(ax, ay, ax, by));
   return wallClosed(wallBetween(ax, ay, bx, by));
 }
@@ -115,7 +131,7 @@ function moveBlocked4(x0, y0, x1, y1) {
 // 玻璃打不破（走不過去）。黑球（mode 'blob'）鑽得過木頭、水泥、黃金、岩漿板子的縫
 // ====================================================================
 function edgeCost4(ax, ay, bx, by, mode) {
-  const w = wallBetween(ax, ay, bx, by);
+  const w = wallBetween(ax, ay, bx, by) || (G.b4.cells.size ? freeIn(bx, by) : null);
   if (!wallClosed(w)) return 1;
   if (w.tier === GLASS_TIER) return Infinity;
   if (mode === 'blob') return 1;
@@ -150,7 +166,7 @@ function nextStep4(e, f, tx, ty) {
     if (v === Infinity || v === undefined) continue;
     const c = edgeCost4(tx, ty, nx, ny, e.kind === 'blob' ? 'blob' : '');
     if (c === Infinity) continue;
-    if (v + c < bv) { bv = v + c; best = [nx, ny]; bw = c > 1 ? wallBetween(tx, ty, nx, ny) : null; }
+    if (v + c < bv) { bv = v + c; best = [nx, ny]; bw = c > 1 ? wallBetween(tx, ty, nx, ny) || freeIn(nx, ny) : null; }
   }
   e.wallAhead = bw;
   return best;
@@ -175,7 +191,7 @@ function lightMask4(L) {
   mask[(ty - y0) * w + (tx - x0)] = 1;
   for (let i = 0; i < q.length; i++) {
     const [x, y] = q[i], st = steps[(y - y0) * w + (x - x0)];
-    if (isWall(x, y) && i > 0) continue;   // 光照到牆就停（牆本身會被照到，但不會穿過去）
+    if ((isWall(x, y) || (G.b4 && G.b4.cells.size && wallOpaque(freeIn(x, y)))) && i > 0) continue;   // 光照到牆（或斜牆）就停（牆本身會被照到，但不會穿過去）
     for (const [dx, dy] of DIRS4) {
       const nx = x + dx, ny = y + dy, k = (ny - y0) * w + (nx - x0);
       if (nx < x0 || ny < y0 || nx >= x0 + w || ny >= y0 + w || mask[k] || !inMap(nx, ny)) continue;
@@ -219,7 +235,7 @@ function enclosure4(tx, ty) {
     for (const [dx, dy] of DIRS4) {
       const nx = x + dx, ny = y + dy, k = nx + ',' + ny;
       if (seen.has(k) || !inMap(nx, ny) || isWall(nx, ny)) continue;
-      if (wallClosed(wallBetween(x, y, nx, ny))) continue;
+      if (wallClosed(wallBetween(x, y, nx, ny)) || freeIn(nx, ny)) continue;
       seen.add(k); q.push([nx, ny]);
       if (seen.size > ENC_MAX) { inside = false; break; }
     }
@@ -250,7 +266,14 @@ function plankIcon(tier, door) {
 const plankName = (tier, door) => (door ? (tier === 1 ? '木門' : PLANKS[tier].name.replace('板子', '門')) : PLANKS[tier].name);
 const handBig = () => !!(G.hand && G.hand.k !== 'item');
 const BLD_DIST = [0.8, 4];
-function bld() { return G.bld || (G.bld = { axis: 'y', rx: 0, ry: 0, rz: 0, dist: 1.6 }); }
+// 轉的角度（度）：rx、ry、rz 是繞 X／Y／Z 轉了幾度；step 是一次轉幾度（設計師：XYZ 也要有分 15°、45°、90°）
+function bld() { const b = G.bld || (G.bld = { axis: 'y', rx: 0, ry: 0, rz: 0, dist: 1.6, step: 90 }); if (!b.step || b.rx % 15) Object.assign(b, { step: 90, rx: 0, ry: 0, rz: 0 }); return b; }
+const ROT_STEPS = [90, 45, 15];
+function cycleStep() { if (!handBig()) return; const b = bld(); b.step = ROT_STEPS[(ROT_STEPS.indexOf(b.step) + 1) % ROT_STEPS.length]; Sound.play('click'); toast(`🔄 一次轉 ${b.step}°`); }
+// 板子倒下來的角度（0 是直立、90 是躺平）：繞 X 或 Z 轉，取比較大的那個
+const tiltOf = d => { const t = ((d % 180) + 180) % 180; return Math.min(t, 180 - t); };
+const plankTilt = b => Math.max(tiltOf(b.rx), tiltOf(b.rz));
+const asRoof = (h, b) => h.k === 'plank' && !h.door && plankTilt(b) >= 60;   // 倒到 60° 以上就是屋頂
 function holdThing(h) {
   G.hand = h;
   if (h.k === 'plank') markPlank(h.tier);   // 燈泡圖鑑也記板子
@@ -258,7 +281,7 @@ function holdThing(h) {
   invDirty = true;
   if (!G.ev.buildTip && h.k !== 'item') {
     G.ev.buildTip = 1;
-    toast(isTouch() ? '🧱 拿起來了！前面的預覽是綠色就放得下：「轉」轉方向（X／Y／Z 選軸，板子繞 X 或 Z 轉就躺平變屋頂）、「遠」「近」調位置、「放」放下。' : '🧱 拿起來了！前面的預覽是綠色就放得下：R 轉方向（X／Y／Z 選軸，板子繞 X 或 Z 轉就躺平變屋頂）、T／B 或滾輪調遠近、E 放下。', 'good');
+    toast(isTouch() ? '🧱 拿起來了！前面的預覽是綠色就放得下：「轉」轉方向（X／Y／Z 選軸，「角度」換一次轉 90°、45° 或 15°；板子繞 X 或 Z 倒下來就變屋頂）、「遠」「近」調位置、「放」放下。' : '🧱 拿起來了！前面的預覽是綠色就放得下：R 轉方向（X／Y／Z 選軸，V 換一次轉 90°、45° 或 15°；板子繞 X 或 Z 倒下來就變屋頂）、T／B 或滾輪調遠近、E 放下。', 'good');
   }
 }
 function setAxis(a) { if (!handBig()) return; bld().axis = a; Sound.play('click'); invDirty = true; }
@@ -266,7 +289,8 @@ function rotateHand() {
   if (!handBig()) return;
   const b = bld();
   if (G.hand.k === 'furn' && b.axis !== 'y') { toast('🛋️ 家具只能繞 Y 軸轉（不能倒放）。'); Sound.play('empty'); return; }
-  b['r' + b.axis] = (b['r' + b.axis] + 1) % 4;
+  if (G.hand.k === 'plank' && G.hand.door && b.axis !== 'y') { toast('🚪 門只能繞 Y 軸轉。'); Sound.play('empty'); return; }
+  b['r' + b.axis] = (b['r' + b.axis] + b.step) % 360;
   Sound.play('click');
 }
 function nudgeDist(k) { if (!handBig()) return; const b = bld(); b.dist = clamp(b.dist + k * 0.4, BLD_DIST[0], BLD_DIST[1]); }
@@ -279,21 +303,22 @@ function ghost4() {
   const p = G.p, b = bld(), fx = Math.cos(p.face), fy = Math.sin(p.face);
   const px = p.x + fx * b.dist, py = p.y + fy * b.dist;
   if (h.k === 'plank') {
-    if (!h.door && (b.rx % 2 || b.rz % 2)) {
-      // 躺平：放在那一格的上方當屋頂
+    if (asRoof(h, b)) {
+      // 躺平（倒到 60° 以上）：放在那一格的上方當屋頂；沒有完全躺平的話看起來斜斜的
       const x = Math.floor(px), y = Math.floor(py);
-      const g = { kind: 'roof', x, y, ok: true };
+      const g = { kind: 'roof', x, y, ok: true, tilt: 90 - plankTilt(b), tax: tiltOf(b.rx) >= tiltOf(b.rz) ? 'x' : 'z' };
       const r = inMap(x, y) ? roomGrid[y][x] : null;
       if (!inMap(x, y) || tiles[y][x] !== 1) { g.ok = false; g.why = '屋頂要放在地板上方'; }
       else if (r && r.ceil) { g.ok = false; g.why = '這裡本來就有天花板了'; }
       else if (G.b4.roofs.has(x + ',' + y)) { g.ok = false; g.why = '這裡已經有屋頂了'; }
       return g;
     }
-    // 直立的牆：一開始面對你（你往東西看，牆就是南北向）；繞 Y 轉 90 度換另一個方向
-    let o = Math.abs(fx) >= Math.abs(fy) ? 'v' : 'h';
-    if (b.ry % 2) o = o === 'v' ? 'h' : 'v';
+    // 直立的牆：一開始面對你（你往東西看，牆就是南北向）；繞 Y 轉 90 度換另一個方向，轉 15°、45° 就是斜放的牆
+    const ang = (Math.abs(fx) >= Math.abs(fy) ? 90 : 0) + b.ry, lean = plankTilt(b);
+    if (ang % 90) return ghostFree4(px, py, ang * Math.PI / 180, lean);
+    let o = (ang / 90) % 2 ? 'v' : 'h';
     const x = o === 'v' ? Math.round(px) : Math.floor(px), y = o === 'v' ? Math.floor(py) : Math.round(py);
-    const g = { kind: 'wall', o, x, y, ok: true };
+    const g = { kind: 'wall', o, x, y, ok: true, lean };
     const [ax, ay, bx, by] = o === 'v' ? [x - 1, y, x, y] : [x, y - 1, x, y];
     const fl = (tx, ty) => inMap(tx, ty) && tiles[ty][tx] !== 0;
     const fA = inMap(ax, ay) && furnGrid[ay][ax], fB = inMap(bx, by) && furnGrid[by][bx];
@@ -306,9 +331,10 @@ function ghost4() {
     return g;
   }
   // 家具：照轉的方向，整塊都要是空地
-  const f = h.f, rot = b.ry % 2, w = rot ? f.h0 : f.w0, hh = rot ? f.w0 : f.h0;
+  // 家具：佔的格子照最接近的 90 度算，多出來的角度（15°、45°）只是擺得斜斜的
+  const q = Math.round(b.ry / 90) % 4, f = h.f, rot = q % 2, w = rot ? f.h0 : f.w0, hh = rot ? f.w0 : f.h0;
   const x = Math.round(px - w / 2), y = Math.round(py - hh / 2);
-  const g = { kind: 'furn', x, y, w, h: hh, side: rotSide(f.side0, b.ry), ok: true };
+  const g = { kind: 'furn', x, y, w, h: hh, side: rotSide(f.side0, q), yaw: b.ry - q * 90, ok: true };
   const solidF = f.solid !== false;
   for (let ty = y; ty < y + hh && g.ok; ty++) for (let tx = x; tx < x + w; tx++) {
     if (!inMap(tx, ty) || tiles[ty][tx] !== 1 || (solidF && isSolid(tx, ty))) { g.ok = false; g.why = '要放在空的地板上'; break; }
@@ -324,25 +350,49 @@ function ghost4() {
   }
   return g;
 }
+// 斜放的牆的預覽：中心對齊半格，整片不能穿過牆、家具、別的板子，也不能卡到人
+function ghostFree4(px, py, ang, lean) {
+  const cx = Math.round(px * 2) / 2, cy = Math.round(py * 2) / 2, w = { free: true, cx, cy, ang };
+  const g = { kind: 'free', cx, cy, ang, lean, ok: true };
+  const bad = why => { g.ok = false; g.why = why; return g; };
+  const [x0, y0, x1, y1] = wallEnds(w);
+  let px0 = Math.floor(x0), py0 = Math.floor(y0);
+  for (let k = 0; k <= 20; k++) {
+    const sx = x0 + (x1 - x0) * k / 20, sy = y0 + (y1 - y0) * k / 20, tx = Math.floor(sx), ty = Math.floor(sy);
+    if (!inMap(tx, ty) || tiles[ty][tx] === 0) return bad('會穿過牆');
+    if (furnGrid[ty][tx]) return bad('會穿過家具');
+    if (tx !== px0 || ty !== py0) { if (wallClosed(wallBetween(px0, py0, tx, py0)) || wallClosed(wallBetween(tx, py0, tx, ty))) return bad('會碰到別的板子'); px0 = tx; py0 = ty; }
+  }
+  for (const k of freeCells(w)) for (const o of G.b4.cells.get(k) || []) if (Math.hypot(o.cx - cx, o.cy - cy) < 0.4 || segHit4(wallEnds(o), [x0, y0, x1, y1])) return bad('這裡已經有板子了');
+  if (distToWall(G.p.x, G.p.y, w) < PLAYER_R + WALL_T + 0.02) return bad('會卡到你自己，往後退一點（或按「遠」）');
+  if (G.enemies.some(e => !e.dead && distToWall(e.x, e.y, w) < ENEMY_R + WALL_T)) return bad('有東西擋在那裡');
+  return g;
+}
+// 兩條線段有沒有交叉
+function segHit4([a, b, c, d], [e, f, g, h]) {
+  const cr = (x1, y1, x2, y2, x3, y3) => (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1);
+  return cr(a, b, c, d, e, f) * cr(a, b, c, d, g, h) < 0 && cr(e, f, g, h, a, b) * cr(e, f, g, h, c, d) < 0;
+}
 // 放下手上的板子或家具
 function place4() {
   const h = G.hand;
   if (!h || h.k === 'item') return;
   const g = ghost4();
   if (!g || !g.ok) { toast('🧱 ' + ((g && g.why) || '這裡放不下') + '。'); Sound.play('empty'); return; }
-  if (g.kind === 'wall') {
-    setWall({ o: g.o, x: g.x, y: g.y, tier: h.tier, hp: h.hp ?? PLANKS[h.tier].hp, door: !!h.door, open: false });
+  if (g.kind === 'wall' || g.kind === 'free') {
+    const base = { tier: h.tier, hp: h.hp ?? PLANKS[h.tier].hp, door: !!h.door, open: false, lean: g.lean || 0 };
+    setWall(g.kind === 'free' ? { free: true, cx: g.cx, cy: g.cy, ang: g.ang, ...base } : { o: g.o, x: g.x, y: g.y, ...base });
     Sound.play('plank'); makeNoise(4);
     if (!G.home) { setHome4(true); }
     if (!G.ev.wallTip) { G.ev.wallTip = 1; toast('🧱 放好第一片牆了！怪物打得破板子（玻璃打不破）；圍起來的地方就是你的家。對著自己的板子按住 E 可以再拿起來。', 'good'); }
   } else if (g.kind === 'roof') {
-    G.b4.roofs.set(g.x + ',' + g.y, { x: g.x, y: g.y, tier: h.tier, hp: h.hp ?? PLANKS[h.tier].hp });
+    G.b4.roofs.set(g.x + ',' + g.y, { x: g.x, y: g.y, tier: h.tier, hp: h.hp ?? PLANKS[h.tier].hp, tilt: g.tilt || 0, tax: g.tax });
     G.b4.ver++;
     Sound.play('plank'); makeNoise(4);
     if (!G.ev.roofTip4) { G.ev.roofTip4 = 1; toast('🏠 屋頂放好了！站在屋頂底下，酸雨和燼皇的燼雨都淋不到你。', 'good'); }
   } else {
     const f = h.f;
-    Object.assign(f, { x: g.x, y: g.y, w: g.w, h: g.h, side: g.side });
+    Object.assign(f, { x: g.x, y: g.y, w: g.w, h: g.h, side: g.side, yaw: g.yaw || 0 });
     addFurn4(f);
     Sound.play('place'); makeNoise(3);
   }
@@ -374,7 +424,7 @@ function takeRoof4(r) {
   if (G.hand) { toast('✋ 手上已經拿著東西了。'); return; }
   G.b4.roofs.delete(r.x + ',' + r.y); G.b4.ver++;
   holdThing({ k: 'plank', tier: r.tier, hp: r.hp });
-  bld().rx = 1;   // 拿下來的屋頂還是躺平的
+  bld().rx = 90;   // 拿下來的屋頂還是躺平的
   Sound.play('pickup');
 }
 function takeFurn4(f) {
@@ -390,7 +440,9 @@ function facingWall4(maxD = 1.8) {
   const p = G.p, dx = Math.cos(p.face), dy = Math.sin(p.face);
   let px = Math.floor(p.x), py = Math.floor(p.y);
   for (let d = 0.1; d < maxD; d += 0.08) {
-    const tx = Math.floor(p.x + dx * d), ty = Math.floor(p.y + dy * d);
+    const sx = p.x + dx * d, sy = p.y + dy * d;
+    if (G.b4.cells.size) for (const w of G.b4.cells.get(Math.floor(sx) + ',' + Math.floor(sy)) || []) if (distToWall(sx, sy, w) < 0.12) return w;
+    const tx = Math.floor(sx), ty = Math.floor(sy);
     if (tx === px && ty === py) continue;
     if (tx !== px && ty !== py) {
       const w = wallBetween(px, py, tx, py) || wallBetween(tx, py, tx, ty);
@@ -447,15 +499,85 @@ function settleHand4() {
   const h = G.hand;
   if (h && h.k === 'item' && (bagUsed() < BAG_SLOTS || G.inv[h.id])) { G.hand = null; addItem(h.id, h.n); invDirty = true; }
 }
-// 選中的東西丟在地上（空出背包的格子）
-function dropSelected4() {
+// 選中的東西放在地上（空出背包的格子）：放在前面的地上，是真的東西，看著它按 E 就能再撿起來
+function dropSelected4(all = true) {
   const id = G.selId;
   if (!id || !G.inv[id]) return;
-  const n = G.inv[id];
+  const n = all ? G.inv[id] : 1, p = G.p;
   removeItem(id, n);
-  G.pickups.push({ x: G.p.x + Math.cos(G.p.face) * 0.6, y: G.p.y + Math.sin(G.p.face) * 0.6, id, n, t: 0, keep: 1, wait: 1 });
+  let x = p.x + Math.cos(p.face) * 0.7, y = p.y + Math.sin(p.face) * 0.7;
+  if (!walkable(x, y)) { x = p.x; y = p.y; }
+  G.pickups.push({ x, y, id, n, t: 0, keep: 1, a: p.face + Math.PI + rand(-0.3, 0.3) });
   Sound.play('place');
-  toast(`把${itemName(id)}${n > 1 ? ` ×${n}` : ''}丟在地上了。`);
+  toast(`把${itemName(id)}${n > 1 ? ` ×${n}` : ''}放在地上了（看著它按 E 可以再拿起來）。`);
+}
+
+// ====================================================================
+// 真的東西擺在架上（設計師：食物框上就是食物、東西就直接是實體，不要只能看光尋找）：
+// 倉儲貨架、雜貨架、燈具架、熱食櫃台、飲料機、冷藏櫃（DISPLAY4）的物資一個一個擺在架上的固定位置（shelfSlots4），
+// 看著它按 E 拿起來；每天早上補貨。擺在架上的東西是 G.pickups 裡有 s（架子的 id）、si（第幾個位置）、z（高度）的那些
+// ====================================================================
+function shelfSlots4(f) {
+  if (f._slots) return f._slots;
+  const side = f.side || 's', ns = side === 's' || side === 'n', len = ns ? f.w : f.h, dep = ns ? f.h : f.w;
+  const at = (u, v) => (side === 's' ? [f.x + u, f.y + f.h - v] : side === 'n' ? [f.x + u, f.y + v] : side === 'e' ? [f.x + f.w - v, f.y + u] : [f.x + v, f.y + u]);
+  const out = { s: Math.PI / 2, n: -Math.PI / 2, e: 0, w: Math.PI }[side];   // 正面朝外的方向
+  const slots = [];
+  const row = (h, v, gap, back = false) => {
+    const n = Math.max(1, Math.floor((len - 0.3) / gap));
+    for (let i = 0; i < n; i++) { const [x, y] = at(0.15 + (i + 0.5) * (len - 0.3) / n, v); slots.push({ x, y, h, a: back ? out + Math.PI : out }); }
+  };
+  switch (f.type) {
+    case 'goods4': for (const y of GOODS4_LEVELS.slice(1, 4)) { row(y + 0.025, 0.24, 0.42); row(y + 0.025, dep - 0.24, 0.42, true); } break;
+    case 'rack4': row(RACK4_LEVELS[1] + 0.13, 0.45, 0.6); break;
+    case 'lampshelf': for (const y of LAMPSHELF4_LEVELS) row(y + 0.03, dep - 0.27, 0.55); break;
+    case 'foodcounter': row(0.96, 0.42, 0.45); break;
+    case 'drink4': row(0.45, dep - 0.74, 0.3); break;
+    case 'coldcase': for (const y of [0.2, 0.62, 1.04, 1.46]) row(y + 0.02, dep - 0.45, 0.32); break;
+  }
+  return (f._slots = slots);
+}
+// 每天早上補貨：每個架子補到大約三～四成滿（第 1 天多一點）
+function stockShelves4(first) {
+  const on = new Map();
+  for (const pk of G.pickups) if (pk.s) { if (!on.has(pk.s)) on.set(pk.s, new Set()); on.get(pk.s).add(pk.si); }
+  for (const f of FURN) {
+    if (!DISPLAY4[f.type] || !f.loot) continue;
+    const slots = shelfSlots4(f), used = on.get(f.id) || new Set();
+    const target = Math.round(slots.length * (first ? 0.45 : 0.32) * Math.min(1.3, D().items));
+    const free = slots.map((_, i) => i).filter(i => !used.has(i));
+    for (let k = used.size; k < target && free.length; k++) {
+      const si = free.splice(Math.floor(Math.random() * free.length), 1)[0], sl = slots[si];
+      const id = rollItem(f.loot, f.room ? f.room.level : 1, G.day);
+      G.pickups.push({ x: sl.x, y: sl.y, z: sl.h, a: sl.a, id, n: LOOT_QTY[id] || 1, s: f.id, si, keep: 1, t: Math.random() * 6 });
+    }
+  }
+}
+// 看著的東西（地上或架上，2.2 公尺內，看得到的方向）：回傳 { pk, ang, d }
+function lookedPickup4() {
+  const p = G.p, eye = (p.crouch ? 0.95 : 1.5) + (p.z || 0);
+  const cp = Math.cos(p.pitch || 0), lx = Math.cos(p.face) * cp, ly = Math.sin(p.face) * cp, lz = Math.sin(p.pitch || 0);
+  let best = null;
+  for (const pk of G.pickups) {
+    if (pk.id === 'coin' && !pk.s) continue;   // 地上的硬幣走過去就撿
+    const dx = pk.x - p.x, dy = pk.y - p.y, dz = (pk.z || 0) + 0.1 - eye, d = Math.hypot(dx, dy, dz);
+    if (d > 2.3 || Math.hypot(dx, dy) > 2.0) continue;
+    const ang = Math.acos(clamp((dx * lx + dy * ly + dz * lz) / Math.max(d, 0.01), -1, 1));
+    if (ang > Math.max(0.16, 0.34 / d)) continue;
+    if (!best || ang + d * 0.05 < best.ang + best.d * 0.05) best = { pk, ang, d };
+  }
+  return best;
+}
+function takePickup4(pk) {
+  if (!G.pickups.includes(pk)) return;
+  if (!bagFits(pk.id)) { toast(`🎒 背包滿了（${BAG_SLOTS} 格），手上也拿著東西，拿不下${itemName(pk.id)}。`, 'warn'); Sound.play('empty'); return; }
+  G.pickups.splice(G.pickups.indexOf(pk), 1);
+  const got = gainItem(pk.id, pk.n);
+  if (!got.length) { G.pickups.push(pk); return; }
+  Sound.play('pickup');
+  if (pk.s) G.stats.searched++;
+  toast('拿到了' + got.map(([id, n]) => itemName(id) + (n > 1 ? ' ×' + n : '')).join('、'), 'item');
+  for (const [id] of got) if (ITEMS[id] && ITEMS[id].kind === 'bulb') showBulbCard(ITEMS[id].tier);
 }
 
 // ====================================================================
@@ -530,7 +652,7 @@ function homeDir4() {
 function addTargets4(cands) {
   const p = G.p;
   if (handBig()) {
-    const h = G.hand, g = ghost4(), name = h.k === 'plank' ? plankName(h.tier, h.door) + ((bld().rx % 2 || bld().rz % 2) && !h.door ? '（屋頂）' : '') : h.f.name;
+    const h = G.hand, g = ghost4(), name = h.k === 'plank' ? plankName(h.tier, h.door) + (asRoof(h, bld()) ? '（屋頂）' : '') : h.f.name;
     cands.push({ d: -9, id: 'place4', label: `放下${name}`, sub: g && g.ok ? '綠色的預覽就是放下的位置' : `❌ ${(g && g.why) || '這裡放不下'}`, hold: 0, action: place4 });
     return;
   }
@@ -552,6 +674,9 @@ function addTargets4(cands) {
     const rd = Math.hypot(l.x - p.x, l.y - p.y);
     if (look(l.x, l.y, rd, 1.3)) cands.push({ d: rd - 0.3, id: 'loose4', label: `撿起${plankName(l.tier, l.door)}`, sub: '板子不能放進背包，一次拿一片', hold: 0, action: () => takeLoose4(l) });
   }
+  // 看著的東西（架上或地上）：按 E 拿起來
+  const lp = lookedPickup4();
+  if (lp) cands.push({ d: lp.ang * 2 + lp.d * 0.15 - 0.8, id: 'pk4', label: `拿起${itemName(lp.pk.id)}${lp.pk.n > 1 ? ' ×' + lp.pk.n : ''}`, sub: bagFits(lp.pk.id) ? `🎒 ${bagUsed()}/${BAG_SLOTS}` : '🎒 背包滿了', hold: 0, action: () => takePickup4(lp.pk) });
   for (const f of FURN) {
     if (f.held) continue;
     const rd = rectDist(p.x, p.y, f);
@@ -581,7 +706,7 @@ function toggleDoor4(w) {
 }
 
 // ====================================================================
-// 燈泡全變檯燈：賣場沒有天花板燈座，選燈泡按 Q 就在前面放一盞檯燈並裝上
+// 燈泡全變檯燈：賣場沒有天花板燈座，物品欄裡的「燈泡」在第四世界就是一整盞檯燈，選它按 Q 就放在前面
 // ====================================================================
 function useBulb4(tier) {
   const fx = nearestFixture();
@@ -592,7 +717,7 @@ function useBulb4(tier) {
   G.lamps.push(o);
   removeItem('bulb' + tier);
   Sound.play('install');
-  toast(`💡 放了一盞檯燈，裝上${bulbName(tier)}。對著它按 E 可以收回來。`, 'good');
+  toast(`💡 放下了${bulbName(tier)}。對著它按 E 可以拿起來。`, 'good');
 }
 
 // ====================================================================
@@ -625,7 +750,7 @@ function addLights4(L) {
     if (w.tier !== LAVA_TIER || n >= 8) continue;
     n++;
     const [x0, y0, x1, y1] = wallEnds(w), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-    const nx = w.o === 'h' ? 0 : 0.3, ny = w.o === 'h' ? 0.3 : 0;
+    const nx = w.free ? -Math.sin(w.ang) * 0.3 : w.o === 'h' ? 0 : 0.3, ny = w.free ? Math.cos(w.ang) * 0.3 : w.o === 'h' ? 0.3 : 0;
     for (const s of [-1, 1]) L.push({ x: cx + nx * s, y: cy + ny * s, r: 1.9, tier: 0, room: null, f: 0.55 + 0.1 * Math.sin(G.time * 2 + w.x), color: [255, 110, 40], fire: true });
   }
 }
@@ -680,6 +805,7 @@ function startDay4(d) {
   G.cold = !!G.forceCold || COLD_DAYS_W4.includes(d);
   G.acid = null; G.acidT = 0;
   refillPiles4(d === 1);
+  stockShelves4(d === 1);
   // 偶爾出現的特別板材堆：岩漿（傳說）或玻璃（神話），只有 1 片
   if (d >= 3 && Math.random() < 0.4) {
     const sp = randomSpot4(14);
@@ -742,7 +868,7 @@ function dayTips4() {
   if (t > 28 && !ev.w4tip3) { ev.w4tip3 = 1; toast('🔄 拿著板子時：「轉」轉方向（X／Y／Z 選軸，繞 X 或 Z 轉就躺平變屋頂）、「遠」「近」調位置。把自己圍起來就是你的家！'); }
   if (t > 44 && !ev.w4tip4) { ev.w4tip4 = 1; toast('🎒 背包只有 16 格（一種東西一格），食物都要自己找：美食區在東南邊。板子和家具不能放進背包，一次搬一個。'); }
   if (t > 62 && !ev.w4tip5) { ev.w4tip5 = 1; toast('🛋️ 賣場的家具大部分可以搬回家（對著它按住 E）：火爐可以取暖、櫃子可以收納、家裡的家具越多越溫馨。'); }
-  if (t > 80 && !ev.w4tip6) { ev.w4tip6 = 1; toast('💡 這裡沒有天花板的燈座：選燈泡按 Q，就會在前面放一盞檯燈裝上去。'); }
+  if (t > 80 && !ev.w4tip6) { ev.w4tip6 = 1; toast('💡 燈具區的架子上有一盞一盞的檯燈（等級越高越亮）：拿起來，選它按 Q 就放在前面的地上；對著它按 E 再拿起來。'); }
   if (t > 100 && !ev.w4tip7) { ev.w4tip7 = 1; toast('🛒 神秘店員每天在不同的地方，要自己去找（聽鈴鐺聲）。📍 記錄位置可以把這裡記成你的家。'); }
 }
 function updateDay4(dt) {
@@ -762,6 +888,7 @@ function updateDay4(dt) {
 // 每一幀（白天晚上都會跑）：火爐、背包、酸雨、寒寂之境
 function update4(dt) {
   settleHand4();
+  G.whistleT = Math.max(0, (G.whistleT || 0) - dt); G.whistleCd = Math.max(0, (G.whistleCd || 0) - dt);
   updateFires4(dt);
   updateAcid4(dt);
   updateTemp4(dt);
@@ -816,7 +943,7 @@ function updateAcid4(dt) {
   // 沒有屋頂遮著的木頭板子會被腐蝕
   for (const w of [...G.b4.list]) {
     if (w.tier !== 1) continue;
-    const [x0, y0] = wallEnds(w), [ax, ay, bx, by] = w.o === 'v' ? [x0 - 1, y0, x0, y0] : [x0, y0 - 1, x0, y0];
+    const [x0, y0] = wallEnds(w), [ax, ay, bx, by] = w.free ? [w.x, w.y, w.x, w.y] : w.o === 'v' ? [x0 - 1, y0, x0, y0] : [x0, y0 - 1, x0, y0];
     if (G.b4.roofs.has(ax + ',' + ay) || G.b4.roofs.has(bx + ',' + by)) continue;
     w.hp -= 0.25 * dt;
     if (w.hp <= 0) breakWall4(w, null);
@@ -873,11 +1000,11 @@ function alerts4() {
   else if (!G.home && G.day <= 2) a.push('🧱 拿板子蓋一間房子吧（📍 記錄位置）');
   if (acidOn4()) a.push(sheltered4(p.x, p.y) ? '🌧️ 酸雨（你在屋頂底下）' : `🌧️ 酸雨！快躲到屋頂底下（${Math.ceil(G.acidT)} 秒）`);
   if (G.hand && G.hand.k === 'item') a.push(`✋ 手上拿著${itemName(G.hand.id)}（背包滿了）`);
-  else if (G.hand) { const g = ghost4(); a.push(g && g.ok ? '🧱 預覽是綠色：按 E（平板按「放」）放下' : `🧱 ${(g && g.why) || '這裡放不下'}`); }
+  else if (G.hand) { const g = ghost4(), b = bld(); a.push(g && g.ok ? '🧱 預覽是綠色：按 E（平板按「放」）放下' : `🧱 ${(g && g.why) || '這裡放不下'}`); a.push(`🔄 X ${b.rx}°　Y ${b.ry}°　Z ${b.rz}°（一次轉 ${b.step}°）`); }
   if (G.phase === 'day' && merchantHere() && G.merchantSeen) a.push('🛒 神秘店員還在（天黑前會離開）');
   if (G.phase === 'day' && G.t >= DAY_LEN - DUSK) a.push('📢 快打烊了，燈要熄了！');
   for (const e of G.enemies) {
-    if (e.kind === 'hubert' && !e.idle) a.push(e.home ? '🗿 Hubert 在拆你的家！' : '🗿 Hubert 在賣場裡（只拆房子，玻璃拆不了）');
+    if (e.kind === 'hubert' && !e.idle) a.push(e.home ? '🕷️ Hubert 在拆你的家！' : '🕷️ Hubert 在賣場裡（只拆房子，玻璃拆不了）');
     else if (e.kind === 'ember') a.push(e.kneel > 0 ? '👑 燼皇跪下了！傷害 2.5 倍' : '👑 燼皇來了（照牠頭上的光環；燼雨要躲屋頂）');
     else if (e.kind === 'mimic' && e.knock > 0) a.push('🚪 有人在敲你家的門……「開門，是我啊」（別開！）');
   }
@@ -894,6 +1021,8 @@ function hud4() {
   $('bagCount').classList.toggle('full', bagUsed() >= BAG_SLOTS);
   const ax = bld().axis;
   for (const b of document.querySelectorAll('#bbtns .bb[data-ax]')) b.classList.toggle('on', b.dataset.ax === ax);
+  const st = `${bld().step}°<small>角度</small>`;
+  if ($('bbStep') && $('bbStep').innerHTML !== st) $('bbStep').innerHTML = st;
   $('tcrouch').classList.toggle('on', !!G.p.crouch);
   $('trun').classList.toggle('on', !!G.p.autoRun);
   if (G.cold) setBar('tempFill', G.p.temp);
@@ -931,6 +1060,7 @@ function bindBuildButtons() {
       const k = b.dataset.k;
       if (b.dataset.ax) setAxis(b.dataset.ax);
       else if (k === 'rot') rotateHand();
+      else if (k === 'step') cycleStep();
       else if (k === 'far') nudgeDist(1);
       else if (k === 'near') nudgeDist(-1);
       else if (k === 'put') place4();
@@ -941,8 +1071,29 @@ function bindBuildButtons() {
   const tap = (id, fn) => $(id).addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Sound.init(); if (mode === 'play' && G && isW4()) fn(); });
   tap('thome', () => setHome4(false));
   tap('tbag', openBag4);
+  tap('twhistle', whistle4);
   tap('tcrouch', toggleCrouch4);
   tap('trun', () => { G.p.autoRun = !G.p.autoRun; Sound.play('click'); toast(G.p.autoRun ? '🏃 一直跑（會用體力）' : '🚶 用走的（輕推搖桿慢慢走、推到底跑）'); });
+}
+// 🎵 吹口哨（照 3008）：吹完 5 秒內，畫面上（不是小地圖）會在怪物的位置出現紅點、朋友（神秘店員）出現藍點，隔著牆也看得到；
+// 但怪物也聽得到口哨聲！
+const WHISTLE_T = 5, WHISTLE_CD = 8, WHISTLE_R = 45;
+function whistle4() {
+  if (!G || mode !== 'play' || !isW4()) return;
+  if ((G.whistleCd || 0) > 0) { toast(`🎵 喘口氣……${Math.ceil(G.whistleCd)} 秒後才能再吹。`); return; }
+  G.whistleT = WHISTLE_T; G.whistleCd = WHISTLE_CD;
+  Sound.play('whistle'); makeNoise(10);
+  const n = G.enemies.filter(e => !e.dead && Math.hypot(e.x - G.p.x, e.y - G.p.y) < WHISTLE_R).length;
+  toast(G.ev.whistleTip ? `🎵 嗶——！附近有 ${n} 個紅點。` : `🎵 你吹了一聲口哨：紅點是怪物（附近有 ${n} 個）、藍點是朋友（神秘店員）。小心，怪物也聽得到口哨聲！`, n ? 'warn' : 'good');
+  G.ev.whistleTip = 1;
+}
+// 口哨的點：[{ x, y, h, red }]（3D 畫面上畫）
+function whistleDots4() {
+  if (!(G.whistleT > 0)) return [];
+  const p = G.p, out = [];
+  for (const e of G.enemies) if (!e.dead && Math.hypot(e.x - p.x, e.y - p.y) < WHISTLE_R) out.push({ x: e.x, y: e.y, h: e.kind === 'shake' || e.kind === 'blob' ? 0.7 : 1.7, red: true });
+  if (merchantHere() && Math.hypot(MERCHANT_POS.x - p.x, MERCHANT_POS.y - p.y) < WHISTLE_R * 1.5) out.push({ x: MERCHANT_POS.x, y: MERCHANT_POS.y, h: 1.6, red: false });
+  return out;
 }
 function toggleCrouch4() {
   const p = G.p;
@@ -953,13 +1104,13 @@ function toggleCrouch4() {
 // 🎒 書包：看 16 格裡有什麼，可以把選中的東西丟在地上
 function openBag4() {
   openModal(`🎒 書包（${bagUsed()}/${BAG_SLOTS}）`, () => {
-    const cards = invList().map(id => `<div class="shopcard${id === G.selId ? ' sel' : ''}">${icBox(id)}<div class="nm">${itemName(id)}${G.inv[id] > 1 ? ' ×' + G.inv[id] : ''}</div>${rarityTag(id)}<div class="ds">${itemDesc(id)}</div><button data-act="drop:${id}">丟在地上</button></div>`).join('');
+    const cards = invList().map(id => `<div class="shopcard${id === G.selId ? ' sel' : ''}">${icBox(id)}<div class="nm">${itemName(id)}${G.inv[id] > 1 ? ' ×' + G.inv[id] : ''}</div>${rarityTag(id)}<div class="ds">${itemDesc(id)}</div>${G.inv[id] > 1 ? `<button data-act="one:${id}">放下 1 個</button>` : ''}<button data-act="drop:${id}">${G.inv[id] > 1 ? '全部放下' : '放在地上'}</button></div>`).join('');
     const hand = G.hand ? `<p class="hint">✋ 手上：${G.hand.k === 'item' ? itemName(G.hand.id) + '（背包滿了多拿的第 17 個）' : G.hand.k === 'plank' ? plankName(G.hand.tier, G.hand.door) : G.hand.f.name}</p>` : '';
-    return `<p class="hint">背包有 ${BAG_SLOTS} 格，一種東西一格（同樣的東西疊在一起）。板子和家具不能放進背包。</p>${hand}<div class="shop">${cards || '<p class="hint">背包是空的。</p>'}</div>`;
+    return `<p class="hint">背包有 ${BAG_SLOTS} 格，一種東西一格（同樣的東西疊在一起）。板子和家具不能放進背包。放在地上的東西是真的東西，看著它按 E 就能再拿起來。</p>${hand}<div class="shop">${cards || '<p class="hint">背包是空的。</p>'}</div>`;
   }, act => {
-    const id = act.split(':')[1];
+    const [a, id] = act.split(':');
     if (!G.inv[id]) return;
-    G.selId = id; dropSelected4();
+    G.selId = id; dropSelected4(a !== 'one');
   }, '關閉');
 }
 
@@ -969,27 +1120,34 @@ function openBag4() {
 function save4() {
   const b = G.b4;
   return {
-    walls: b.list.map(w => [w.o, w.x, w.y, w.tier, Math.round(Math.min(w.hp, 9999)), w.door ? 1 : 0, w.open ? 1 : 0]),
-    roofs: [...b.roofs.values()].map(r => [r.x, r.y, r.tier, Math.round(Math.min(r.hp, 9999))]),
-    furn: FURN.filter(f => f.move || f.type === 'plankpile' || f.fuel || f.on).map(f => ({ id: f.id, x: f.x, y: f.y, w: f.w, h: f.h, side: f.side, held: f.held ? 1 : 0, fuel: f.fuel, on: f.on ? 1 : 0, count: f.count, sp: f.special ? [f.tier] : undefined })),
+    // 斜放的牆：o 是 'f'，x、y 是中心，後面多存角度；最後一個是牆斜靠的角度（看起來的樣子）
+    walls: b.list.map(w => [w.free ? 'f' : w.o, w.free ? Math.round(w.cx * 100) / 100 : w.x, w.free ? Math.round(w.cy * 100) / 100 : w.y, w.tier, Math.round(Math.min(w.hp, 9999)), w.door ? 1 : 0, w.open ? 1 : 0, w.free ? Math.round(w.ang * 180 / Math.PI) : 0, w.lean || 0]),
+    roofs: [...b.roofs.values()].map(r => [r.x, r.y, r.tier, Math.round(Math.min(r.hp, 9999)), r.tilt || 0, r.tax || 'x']),
+    furn: FURN.filter(f => f.move || f.type === 'plankpile' || f.fuel || f.on).map(f => ({ id: f.id, x: f.x, y: f.y, w: f.w, h: f.h, side: f.side, yaw: f.yaw || undefined, held: f.held ? 1 : 0, fuel: f.fuel, on: f.on ? 1 : 0, count: f.count, sp: f.special ? [f.tier] : undefined })),
     hand: G.hand ? (G.hand.k === 'furn' ? { k: 'furn', id: G.hand.f.id } : G.hand) : null,
     home: G.home, loose: G.loose4.map(l => [Math.round(l.x * 10) / 10, Math.round(l.y * 10) / 10, l.tier, l.door ? 1 : 0]),
-    wx: G.wx4, merchant: { x: MERCHANT_POS.x, y: MERCHANT_POS.y },
+    wx: G.wx4, merchant: { x: MERCHANT_POS.x, y: MERCHANT_POS.y }, mv: W4_MAP_VER,
   };
 }
 function load4(s) {
   initB4();
   G.wx4 = s && s.wx ? s.wx : makeWeather4();
   if (!s) { refillPiles4(true); return; }
-  for (const [o, x, y, tier, hp, door, open] of s.walls || []) if (PLANKS[tier] && !wallAt(o, x, y)) setWall({ o, x, y, tier, hp: tier === GLASS_TIER ? Infinity : hp, door: !!door, open: !!open });
-  for (const [x, y, tier, hp] of s.roofs || []) if (PLANKS[tier]) G.b4.roofs.set(x + ',' + y, { x, y, tier, hp: tier === GLASS_TIER ? Infinity : hp });
+  if ((s.mv || 1) !== W4_MAP_VER) { migrate4(s); return; }
+  for (const [o, x, y, tier, hp, door, open, ad, lean] of s.walls || []) {
+    if (!PLANKS[tier]) continue;
+    const base = { tier, hp: tier === GLASS_TIER ? Infinity : hp, door: !!door, open: !!open, lean: lean || 0 };
+    if (o === 'f') setWall({ free: true, cx: x, cy: y, ang: (ad || 0) * Math.PI / 180, ...base });
+    else if (!wallAt(o, x, y)) setWall({ o, x, y, ...base });
+  }
+  for (const [x, y, tier, hp, tilt, tax] of s.roofs || []) if (PLANKS[tier]) G.b4.roofs.set(x + ',' + y, { x, y, tier, hp: tier === GLASS_TIER ? Infinity : hp, tilt: tilt || 0, tax: tax || 'x' });
   for (const sf of s.furn || []) {
     let f = FURN_BY_ID[sf.id];
     if (!f && sf.sp) { f = { id: sf.id, type: 'plankpile', name: '板材堆', w: 1, h: 1, tier: sf.sp[0], special: true }; FURN.push(f); FURN_BY_ID[f.id] = f; }
     if (!f) continue;
-    if (f.move || f.special) { liftFurn4(f); Object.assign(f, { x: sf.x, y: sf.y, w: sf.w || f.w, h: sf.h || f.h, side: sf.side || f.side }); if (!sf.held) addFurn4(f); }
+    if (f.move || f.special) { liftFurn4(f); Object.assign(f, { x: sf.x, y: sf.y, w: sf.w || f.w, h: sf.h || f.h, side: sf.side || f.side, yaw: sf.yaw || 0 }); if (!sf.held) addFurn4(f); }
     if (sf.fuel) f.fuel = sf.fuel.filter(q => ITEMS[q.id]);
-    if (sf.on) f.on = true;
+    if (sf.on !== undefined) f.on = !!sf.on;
     if (sf.count !== undefined) f.count = sf.count;
   }
   // 放回去的家具壓到別的東西就留在手上（不會不見）
@@ -1002,6 +1160,22 @@ function load4(s) {
   const wx = (G.wx4.acid || []).find(a => a.day === G.day);
   G.acid = wx ? { ...wx, started: false } : null;
   Object.assign(GIFT_POS, G.home || G.p);
+  spawnIdleStaff4();
+}
+// 舊的小賣場（2026/10/31 以前是 60×44）的存檔：蓋的牆和屋頂放不回新的地圖，板子全部疊在入口旁邊的地上，
+// 家要重新記；天數、背包、硬幣都照舊（燈和櫃子裡自己放的東西在 game.js 的 loadGame 收回來）
+function migrate4(s) {
+  const tiers = [...(s.walls || []).map(w => [w[3], w[5]]), ...(s.roofs || []).map(r => [r[2], 0]), ...(s.loose || []).map(l => [l[2], l[3]])];
+  if (s.hand && s.hand.k === 'plank') tiers.push([s.hand.tier, s.hand.door ? 1 : 0]);
+  else if (s.hand && s.hand.k === 'item' && ITEMS[s.hand.id]) G.hand = s.hand;
+  G.loose4 = tiers.filter(([t]) => PLANKS[t]).map(([tier, door], i) => ({ x: W4.start.x - 3 + (i % 8) * 0.8, y: W4.start.y - 2 - Math.floor(i / 8) * 0.8, tier, door: !!door, k: 'plank', a: Math.random() * 3 }));
+  refillPiles4(true);
+  Object.assign(G.p, W4.start);
+  G.home = null; G.mapReset4 = true;
+  G.cold = COLD_DAYS_W4.includes(G.day);
+  const wx = (G.wx4.acid || []).find(a => a.day === G.day);
+  G.acid = wx ? { ...wx, started: false } : null;
+  Object.assign(GIFT_POS, G.p);
   spawnIdleStaff4();
 }
 // 新遊戲：送 4 片木頭板子放在入口旁邊的地上
@@ -1033,7 +1207,7 @@ const GRADE4 = { shake: 'runner', mimic: 'general', staff: 'king', hubert: 'judg
 function monsterDmgMult4(t, src) {
   switch (t.kind) {
     case 'staff': return src === 'flash' ? 0.5 : 1;                                     // 手電筒只有一半
-    case 'hubert': return src === 'flash' ? 0 : src === 'pan' ? 0.5 : src === 'spray' ? 2 : src === 'bomb' ? 1.5 : 1;   // 塑膠假人：手電筒沒用
+    case 'hubert': return src === 'flash' ? 0 : src === 'pan' ? 0.5 : src === 'spray' ? 2 : src === 'bomb' ? 1.5 : 1;   // 黑色的硬殼把光吸掉：手電筒沒用
     case 'ember': {
       const k = t.kneel > 0 ? 2.5 : 1;
       return src === 'fire' || src === 'lava' ? 0 : src === 'bomb' ? 0.5 * k : src === 'spray' ? 2 * k : src === 'flash' ? 0.5 * k : k;
@@ -1246,11 +1420,11 @@ function friendCall4() {
   toast(`👥 你聽到朋友的聲音，從「${zoneName(m.x, m.y)}」那邊傳來：「喂——我在這裡！快過來！」……可是你在這裡沒有朋友。`, 'warn');
 }
 
-// ---------- Hubert：灰色的展示假人，專門拆房子。飄到你的家，用鐵管一下一下敲爛板子（玻璃除外）；你在 6 格內被看到時舉起鐵管往地上砸，震波擴散 4 格（跳起來就不會被震到） ----------
+// ---------- Hubert：黑色的胖蜘蛛（照設計圖），專門拆房子。爬到你的家，用鐵管一下一下敲爛板子（玻璃除外）；你在 6 格內被看到時舉起鐵管往地上砸，震波擴散 4 格（跳起來就不會被震到） ----------
 function updateHubert(e, dt) {
   const p = G.p, n = diffN(), d = Math.hypot(e.x - p.x, e.y - p.y);
   e.cd = Math.max(0, e.cd - dt); e.smashCd = Math.max(0, e.smashCd - dt); e.hum += dt;
-  if (inBeam(e) && !G.ev.hubertFlashTip && d < 9) { G.ev.hubertFlashTip = 1; toast('🗿 手電筒對 Hubert 沒用（牠是塑膠假人）！聖水槍傷害 2 倍、鞭炮也有效。', 'warn'); }
+  if (inBeam(e) && !G.ev.hubertFlashTip && d < 9) { G.ev.hubertFlashTip = 1; toast('🕷️ 手電筒對 Hubert 沒用（牠黑色的硬殼會把光吸掉）！聖水槍傷害 2 倍、鞭炮也有效。', 'warn'); }
   if (e.pose) return;
   // 判決：舉起鐵管（1 秒）往地上砸
   if (e.raise > 0) {
@@ -1258,7 +1432,7 @@ function updateHubert(e, dt) {
     if (e.raise <= 0) { G.waves4.push({ x: e.x, y: e.y, r: 0, max: 4, hit: false }); Sound.play('stompBig', nearVol(d) * 1.2); G.shake = Math.max(G.shake, 0.5); e.cd = 4.5; }
     return;
   }
-  if (d < 6 && e.cd <= 0 && e.spawn <= 0 && seesPlayer4(e, 6, 1.6)) { e.raise = 1.0; Sound.play('hubertRaise', nearVol(d)); if (!G.ev.hubertWaveTip) { G.ev.hubertWaveTip = 1; toast('🗿 Hubert 把鐵管舉高了……震波要來了，跳起來！', 'warn'); } return; }
+  if (d < 6 && e.cd <= 0 && e.spawn <= 0 && seesPlayer4(e, 6, 1.6)) { e.raise = 1.0; Sound.play('hubertRaise', nearVol(d)); if (!G.ev.hubertWaveTip) { G.ev.hubertWaveTip = 1; toast('🕷️ Hubert 把鐵管舉高了……震波要來了，跳起來！', 'warn'); } return; }
   // 拆房子：去你家，找最近的一片打得破的外牆
   const home = G.home && G.b4.n ? homeTarget4(e) : null;
   e.home = !!home;
@@ -1270,12 +1444,12 @@ function updateHubert(e, dt) {
         e.smashCd = 1.6; e.swing = 0.35;
         damageWall4(home, 40, e);
         Sound.play('clang', nearVol(d)); G.shake = Math.max(G.shake, d < 6 ? 0.2 : 0.05);
-        if (!G.ev.hubertHomeTip) { G.ev.hubertHomeTip = 1; toast('🗿 Hubert 在用鐵管拆你的家！一下就敲掉 40 點。玻璃板子牠拆不了。', 'warn'); }
+        if (!G.ev.hubertHomeTip) { G.ev.hubertHomeTip = 1; toast('🕷️ Hubert 在用鐵管拆你的家！一下就敲掉 40 點。玻璃板子牠拆不了。', 'warn'); }
       }
     }
   } else walkTo4(e, p.x, p.y, Math.min(1.4 + n * 0.005, 1.8) * (e.spawn > 0 ? 0.3 : 1), dt, flow);
   e.swing = Math.max(0, (e.swing || 0) - dt);
-  if (d < 1.0 && e.spawn <= 0 && p.inv <= 0 && !wallBetweenPts4(e.x, e.y, p.x, p.y)) { damage(20 + n * 0.15, 8); p.inv = 1.2; Sound.play('clang'); toast('🗿 Hubert 用鐵管把你打飛了！', 'warn'); const a = Math.atan2(p.y - e.y, p.x - e.x); move(p, Math.cos(a) * 1.2, Math.sin(a) * 1.2, PLAYER_R); }
+  if (d < 1.0 && e.spawn <= 0 && p.inv <= 0 && !wallBetweenPts4(e.x, e.y, p.x, p.y)) { damage(20 + n * 0.15, 8); p.inv = 1.2; Sound.play('clang'); toast('🕷️ Hubert 用鐵管把你打飛了！', 'warn'); const a = Math.atan2(p.y - e.y, p.x - e.x); move(p, Math.cos(a) * 1.2, Math.sin(a) * 1.2, PLAYER_R); }
 }
 // Hubert 要拆的牆：家附近、打得破、離牠最近的外牆
 function homeTarget4(e) {
@@ -1295,7 +1469,7 @@ function updateWaves4(dt) {
     const d = Math.hypot(p.x - w.x, p.y - w.y);
     if (!w.hit && Math.abs(d - w.r) < 0.45 && d < w.max) {
       w.hit = true;
-      if (p.z < 0.25 && p.inv <= 0) { damage(20 + diffN() * 0.1, 8); p.stunT = 0.7; p.inv = 1; toast('🗿 紅色的震波把你震倒了！看到 Hubert 舉起鐵管就跳起來。', 'warn'); }
+      if (p.z < 0.25 && p.inv <= 0) { damage(20 + diffN() * 0.1, 8); p.stunT = 0.7; p.inv = 1; toast('🕷️ 紅色的震波把你震倒了！看到 Hubert 舉起鐵管就跳起來。', 'warn'); }
       else if (p.z >= 0.25 && !G.ev.waveDodge) { G.ev.waveDodge = 1; toast('⤒ 跳起來躲過了震波！', 'good'); }
     }
   }
@@ -1364,7 +1538,7 @@ function spawnW4Monster(kind) {
   if (kind === 'shake') { e.spawn = 0; return; }   // 奶昔安安靜靜地躺在地上，不會有提示
   const tips = {
     mimic: ['🩸 你聽到有人在叫你的名字……那是朋友的聲音嗎？紅涎偽人會模仿朋友的聲音。躲在家裡的時候有人敲門，千萬不要開！', '🩸 那個「朋友」的聲音又出現了……'],
-    hubert: ['🗿 一個灰色的假人飄進了賣場，底下透著紅光……Hubert 專門拆房子，玻璃板子牠拆不了。看到牠舉起鐵管就跳起來。', '🗿 Hubert 又來拆房子了……'],
+    hubert: ['🕷️ 一隻黑色的大蜘蛛爬進了賣場，底下透著紅光……Hubert 專門拆房子，玻璃板子牠拆不了。看到牠舉起鐵管就跳起來。', '🕷️ Hubert 又來拆房子了……'],
     ember: ['👑 天花板開始落下火燼……燼皇降臨了。弱點是牠頭上的光環：抬頭用手電筒照著光環，牠就會跪下。燼雨來時躲到屋頂底下！', '👑 燼皇又來了……'],
   }[kind];
   if (tips) { toast(ev['tip_' + kind] ? tips[1] : tips[0], 'warn'); ev['tip_' + kind] = 1; }
@@ -1435,105 +1609,116 @@ function veins4(c, cx, cy, r0, r1, n, r) {
     c.stroke();
   }
 }
-// SCP-3008-2：骨白色、沒有表情的臉，深陷的黑眼窩、乾裂的紅嘴唇（設計圖畫的），沒有鼻子只有兩個小洞
+// SCP-3008-2（照設計圖）：白色的骷髏頭、兩個又大又圓的黑眼窩、鼻子兩個小洞、紅紅的嘴唇咧開一排牙齒
 function drawStaffFace(c, S) {
   const r = seeded(30082);
   c.save(); c.scale(S / 512, S / 512);
-  const g = c.createRadialGradient(256, 250, 40, 256, 270, 210); g.addColorStop(0, '#efe9dc'); g.addColorStop(0.7, '#d9d0bf'); g.addColorStop(1, '#a89e8c');
-  c.fillStyle = g; c.beginPath(); c.ellipse(256, 260, 160, 205, 0, 0, Math.PI * 2); c.fill();
-  for (let i = 0; i < 260; i++) { c.fillStyle = `rgba(${120 + r() * 60 | 0},${110 + r() * 50 | 0},${95 + r() * 40 | 0},${0.05 + r() * 0.1})`; c.beginPath(); c.arc(80 + r() * 352, 60 + r() * 400, 1 + r() * 5, 0, 7); c.fill(); }
-  for (const ex of [196, 316]) {
-    const eg = c.createRadialGradient(ex, 230, 6, ex, 230, 58); eg.addColorStop(0, '#050404'); eg.addColorStop(0.55, '#16120f'); eg.addColorStop(1, 'rgba(90,80,70,0)');
-    c.fillStyle = eg; c.beginPath(); c.ellipse(ex, 230, 56, 50, 0, 0, 7); c.fill();
+  const g = c.createRadialGradient(240, 220, 40, 256, 270, 220); g.addColorStop(0, '#fbf8f2'); g.addColorStop(0.7, '#ebe4d6'); g.addColorStop(1, '#bdb2a0');
+  c.fillStyle = g; c.beginPath(); c.ellipse(256, 250, 175, 215, 0, 0, Math.PI * 2); c.fill();
+  for (let i = 0; i < 220; i++) { c.fillStyle = `rgba(${120 + r() * 60 | 0},${110 + r() * 50 | 0},${95 + r() * 40 | 0},${0.04 + r() * 0.08})`; c.beginPath(); c.arc(90 + r() * 332, 50 + r() * 400, 1 + r() * 4, 0, 7); c.fill(); }
+  c.strokeStyle = 'rgba(110,95,80,.4)'; c.lineWidth = 1.5; for (let i = 0; i < 6; i++) { let x = 150 + r() * 210, y = 60 + r() * 80; c.beginPath(); c.moveTo(x, y); for (let k = 0; k < 4; k++) { x += (r() - 0.5) * 30; y += r() * 22; c.lineTo(x, y); } c.stroke(); }
+  // 又大又圓的黑眼窩
+  for (const ex of [184, 328]) {
+    const eg = c.createRadialGradient(ex, 214, 10, ex, 214, 74); eg.addColorStop(0, '#000'); eg.addColorStop(0.72, '#050404'); eg.addColorStop(0.86, '#3a3028'); eg.addColorStop(1, 'rgba(120,100,80,0)');
+    c.fillStyle = eg; c.beginPath(); c.ellipse(ex, 214, 70, 66, 0, 0, 7); c.fill();
   }
-  c.fillStyle = 'rgba(40,30,25,.8)'; for (const s of [-1, 1]) { c.beginPath(); c.ellipse(256 + s * 9, 312, 4, 10, s * 0.2, 0, 7); c.fill(); }
-  // 嘴唇：乾裂的紅色，微微張開一條黑縫
-  c.fillStyle = '#8e1c22'; c.beginPath(); c.moveTo(186, 372); c.quadraticCurveTo(256, 344, 326, 372); c.quadraticCurveTo(256, 410, 186, 372); c.fill();
-  c.fillStyle = '#1a0606'; c.beginPath(); c.moveTo(196, 373); c.quadraticCurveTo(256, 382, 316, 373); c.quadraticCurveTo(256, 388, 196, 373); c.fill();
-  c.strokeStyle = 'rgba(60,8,10,.7)'; c.lineWidth = 1.2; for (let i = 0; i < 16; i++) { const x = 200 + r() * 112; c.beginPath(); c.moveTo(x, 360 + r() * 8); c.lineTo(x + (r() - 0.5) * 6, 384 + r() * 8); c.stroke(); }
+  c.fillStyle = '#1a1210'; for (const s of [-1, 1]) { c.beginPath(); c.ellipse(256 + s * 11, 300, 7, 15, s * 0.25, 0, 7); c.fill(); }
+  // 紅色的嘴唇，咧開一排牙齒
+  c.fillStyle = '#d0202a'; c.beginPath(); c.moveTo(160, 360); c.quadraticCurveTo(256, 322, 352, 360); c.quadraticCurveTo(256, 432, 160, 360); c.fill();
+  c.fillStyle = '#2a0406'; c.beginPath(); c.moveTo(176, 362); c.quadraticCurveTo(256, 346, 336, 362); c.quadraticCurveTo(256, 404, 176, 362); c.fill();
+  c.fillStyle = '#efe6d2'; for (let x = 186; x < 328; x += 14) { const y0 = 356 - Math.sin((x - 176) / 160 * Math.PI) * 9; c.fillRect(x, y0, 11, 14); }
+  c.strokeStyle = 'rgba(90,8,12,.7)'; c.lineWidth = 1.4; for (let i = 0; i < 14; i++) { const x = 176 + r() * 160; c.beginPath(); c.moveTo(x, 342 + r() * 8); c.lineTo(x + (r() - 0.5) * 6, 352 + r() * 6); c.stroke(); }
   c.restore();
 }
-// 紅涎偽人：大頭、凸出布滿血絲的眼睛、張得很大的嘴，紅色的涎液一路流下去
+// 紅涎偽人（照設計圖）：灰白、龜裂的臉，兩隻瞪得很大的眼睛（一隻凸出來、眼眶一圈紅），黑黑的嘴；
+// 紅色的涎液從頭頂一道一道流過整張臉，從嘴巴一路往下流
 function drawMimicFace(c, S) {
   const r = seeded(4404);
   c.save(); c.scale(S / 512, S / 512); c.lineCap = 'round';
-  const g = c.createRadialGradient(256, 230, 40, 256, 250, 230); g.addColorStop(0, '#d8d2ca'); g.addColorStop(0.7, '#b0a79c'); g.addColorStop(1, '#6a625a');
-  c.fillStyle = g; c.beginPath(); c.ellipse(256, 240, 190, 220, 0, 0, Math.PI * 2); c.fill();
-  // 頭皮下的血管
-  c.strokeStyle = 'rgba(90,60,110,.35)'; for (let i = 0; i < 26; i++) { let x = 90 + r() * 330, y = 40 + r() * 380; c.lineWidth = 1 + r() * 2; c.beginPath(); c.moveTo(x, y); for (let k = 0; k < 4; k++) { x += (r() - 0.5) * 40; y += r() * 30; c.lineTo(x, y); } c.stroke(); }
-  // 凸出的眼睛
-  for (const [ex, ey, er] of [[180, 200, 58], [330, 196, 62]]) {
-    c.fillStyle = 'rgba(70,30,30,.55)'; c.beginPath(); c.ellipse(ex, ey + 6, er + 14, er + 8, 0, 0, 7); c.fill();
+  const g = c.createRadialGradient(256, 230, 40, 256, 250, 240); g.addColorStop(0, '#cfcac2'); g.addColorStop(0.7, '#aaa39a'); g.addColorStop(1, '#6a645c');
+  c.fillStyle = g; c.beginPath(); c.ellipse(256, 240, 195, 225, 0, 0, Math.PI * 2); c.fill();
+  // 龜裂的紋路
+  for (let i = 0; i < 40; i++) { let x = 90 + r() * 330, y = 40 + r() * 400; c.strokeStyle = `rgba(50,44,40,${0.35 + r() * 0.35})`; c.lineWidth = 0.8 + r() * 2; c.beginPath(); c.moveTo(x, y); for (let k = 0; k < 4; k++) { x += (r() - 0.5) * 50; y += (r() - 0.5) * 50; c.lineTo(x, y); } c.stroke(); }
+  // 瞪大的眼睛
+  for (const [ex, ey, er, ring] of [[176, 214, 52, true], [334, 210, 46, false]]) {
+    c.fillStyle = 'rgba(60,30,30,.6)'; c.beginPath(); c.ellipse(ex, ey + 4, er + 14, er + 10, 0, 0, 7); c.fill();
     const wg = c.createRadialGradient(ex - 12, ey - 14, 6, ex, ey, er); wg.addColorStop(0, '#fbf5ea'); wg.addColorStop(0.8, '#e6d6c6'); wg.addColorStop(1, '#c8a69a');
     c.fillStyle = wg; c.beginPath(); c.arc(ex, ey, er, 0, 7); c.fill();
-    veins4(c, ex, ey, er * 0.32, er * 0.98, 22, r);
-    c.fillStyle = '#5a4a2a'; c.beginPath(); c.arc(ex + 6, ey + 4, er * 0.22, 0, 7); c.fill();
-    c.fillStyle = '#0a0806'; c.beginPath(); c.arc(ex + 6, ey + 4, er * 0.1, 0, 7); c.fill();
-    c.fillStyle = 'rgba(255,255,255,.8)'; c.beginPath(); c.arc(ex - 14, ey - 18, er * 0.12, 0, 7); c.fill();
+    veins4(c, ex, ey, er * 0.35, er * 0.98, 18, r);
+    c.fillStyle = '#3a3026'; c.beginPath(); c.arc(ex + 4, ey + 2, er * 0.24, 0, 7); c.fill();
+    c.fillStyle = '#050403'; c.beginPath(); c.arc(ex + 4, ey + 2, er * 0.12, 0, 7); c.fill();
+    c.fillStyle = 'rgba(255,255,255,.8)'; c.beginPath(); c.arc(ex - 12, ey - 14, er * 0.1, 0, 7); c.fill();
+    if (ring) { c.strokeStyle = '#a01018'; c.lineWidth = 9; c.beginPath(); c.arc(ex, ey, er + 8, 0, 7); c.stroke(); }
   }
-  // 大嘴
-  c.fillStyle = '#2a0406'; c.beginPath(); c.ellipse(256, 352, 108, 70, 0, 0, Math.PI * 2); c.fill();
-  c.fillStyle = '#d8ccb0'; for (let x = 168; x < 344; x += 15) { c.beginPath(); c.moveTo(x, 300 + Math.abs(x - 256) * 0.18); c.lineTo(x + 7, 324 + r() * 10); c.lineTo(x + 13, 300 + Math.abs(x - 256) * 0.18); c.fill(); }
-  // 紅涎：濕亮的紅色，一條一條往下流
-  for (let i = 0; i < 9; i++) {
-    const x = 180 + i * 19 + (r() - 0.5) * 8, len = 90 + r() * 120;
-    const dg = c.createLinearGradient(0, 380, 0, 380 + len); dg.addColorStop(0, '#b0101a'); dg.addColorStop(1, '#6a0008');
-    c.strokeStyle = dg; c.lineWidth = 7 + r() * 9; c.beginPath(); c.moveTo(x, 372); c.bezierCurveTo(x + 4, 380 + len * 0.3, x - 6, 380 + len * 0.7, x + (r() - 0.5) * 10, 380 + len); c.stroke();
-    c.fillStyle = '#c0121c'; c.beginPath(); c.ellipse(x, 384 + len, 6, 10, 0, 0, 7); c.fill();
-    c.strokeStyle = 'rgba(255,200,200,.5)'; c.lineWidth = 2; c.beginPath(); c.moveTo(x - 2, 386); c.lineTo(x - 1, 380 + len * 0.6); c.stroke();
-  }
+  // 黑黑的嘴
+  c.fillStyle = '#1a0606'; c.beginPath(); c.ellipse(256, 352, 64, 50, 0, 0, Math.PI * 2); c.fill();
+  c.fillStyle = 'rgba(200,190,170,.8)'; for (let x = 206; x < 306; x += 13) { c.beginPath(); c.moveTo(x, 312); c.lineTo(x + 6, 330 + r() * 8); c.lineTo(x + 12, 312); c.fill(); }
+  // 紅色的涎液：從頭頂往下流過臉（一道一道），再從嘴巴往下流
+  const streak = (x, y0, len, w) => {
+    const dg = c.createLinearGradient(0, y0, 0, y0 + len); dg.addColorStop(0, '#c0101a'); dg.addColorStop(1, '#7a0008');
+    c.strokeStyle = dg; c.lineWidth = w; c.beginPath(); c.moveTo(x, y0); c.bezierCurveTo(x + (r() - 0.5) * 24, y0 + len * 0.35, x + (r() - 0.5) * 24, y0 + len * 0.7, x + (r() - 0.5) * 16, y0 + len); c.stroke();
+    c.fillStyle = '#c8121c'; c.beginPath(); c.ellipse(x, y0 + len + 4, w * 0.6, w * 0.9, 0, 0, 7); c.fill();
+    c.strokeStyle = 'rgba(255,190,190,.45)'; c.lineWidth = 2; c.beginPath(); c.moveTo(x - w * 0.25, y0 + 6); c.lineTo(x - w * 0.2, y0 + len * 0.6); c.stroke();
+  };
+  for (const [x, len] of [[120, 260], [150, 330], [196, 150], [236, 110], [300, 140], [352, 300], [390, 200]]) streak(x, 20 + r() * 30, len, 10 + r() * 10);
+  for (const [x, len] of [[232, 150], [258, 170], [282, 130]]) streak(x, 380, len, 12 + r() * 8);
   c.restore();
 }
-// 燼皇：陰影裡的骷髏長臉、兩點燒紅的眼睛、裂縫透出火光
+// 燼皇（照設計圖）：長長的、像剝了皮的蒼白臉，一條一條紅色的紋路，深深的眼窩裡兩點火光
 function drawEmberFace(c, S) {
   const r = seeded(5505);
   c.save(); c.scale(S / 512, S / 512); c.lineCap = 'round';
-  const g = c.createRadialGradient(256, 250, 30, 256, 270, 220); g.addColorStop(0, '#8a6a60'); g.addColorStop(0.6, '#4a3430'); g.addColorStop(1, '#1a0e0c');
-  c.fillStyle = g; c.beginPath(); c.ellipse(256, 270, 140, 215, 0, 0, Math.PI * 2); c.fill();
-  c.strokeStyle = '#ff7a20'; for (let i = 0; i < 14; i++) { let x = 150 + r() * 210, y = 120 + r() * 300; c.lineWidth = 1.5 + r() * 2; c.beginPath(); c.moveTo(x, y); for (let k = 0; k < 4; k++) { x += (r() - 0.5) * 34; y += (r() - 0.5) * 34; c.lineTo(x, y); } c.stroke(); }
-  for (const ex of [208, 304]) {
-    c.fillStyle = '#060202'; c.beginPath(); c.ellipse(ex, 240, 40, 30, 0, 0, 7); c.fill();
-    const eg = c.createRadialGradient(ex, 242, 1, ex, 242, 22); eg.addColorStop(0, '#fff2b0'); eg.addColorStop(0.4, '#ff8a20'); eg.addColorStop(1, 'rgba(255,60,10,0)');
-    c.fillStyle = eg; c.beginPath(); c.arc(ex, 242, 22, 0, 7); c.fill();
+  const g = c.createRadialGradient(256, 240, 30, 256, 270, 230); g.addColorStop(0, '#e2cfc6'); g.addColorStop(0.6, '#c49a90'); g.addColorStop(1, '#5a2a26');
+  c.fillStyle = g; c.beginPath(); c.ellipse(256, 270, 140, 225, 0, 0, Math.PI * 2); c.fill();
+  for (let i = 0; i < 26; i++) { const x = 140 + r() * 232; c.strokeStyle = `rgba(${150 + r() * 70 | 0},${10 + r() * 30 | 0},${20 + r() * 20 | 0},${0.45 + r() * 0.4})`; c.lineWidth = 2 + r() * 4; c.beginPath(); c.moveTo(x, 60 + r() * 60); c.bezierCurveTo(x + (r() - 0.5) * 30, 200, x + (r() - 0.5) * 30, 330, x + (r() - 0.5) * 20, 470); c.stroke(); }
+  for (const ex of [204, 308]) {
+    c.fillStyle = '#100404'; c.beginPath(); c.ellipse(ex, 236, 44, 34, 0, 0, 7); c.fill();
+    const eg = c.createRadialGradient(ex, 238, 1, ex, 238, 22); eg.addColorStop(0, '#fff2b0'); eg.addColorStop(0.4, '#ff5a20'); eg.addColorStop(1, 'rgba(255,40,10,0)');
+    c.fillStyle = eg; c.beginPath(); c.arc(ex, 238, 22, 0, 7); c.fill();
   }
-  c.fillStyle = '#120806'; c.beginPath(); c.moveTo(256, 290); c.lineTo(240, 330); c.lineTo(272, 330); c.fill();
-  c.fillStyle = '#1a0a08'; c.fillRect(196, 372, 120, 30);
-  c.fillStyle = '#cbb8a0'; for (let x = 200; x < 314; x += 13) c.fillRect(x, 372, 9, 22 + r() * 8);
+  c.fillStyle = '#2a0a08'; c.beginPath(); c.moveTo(256, 290); c.lineTo(240, 334); c.lineTo(272, 334); c.fill();
+  c.fillStyle = '#3a0a0a'; c.fillRect(200, 380, 112, 34);
+  c.fillStyle = '#e0d0c0'; for (let x = 204; x < 310; x += 12) c.fillRect(x, 380, 8, 24 + r() * 8);
   c.restore();
 }
-// 葵氏奶昔：紙盒正面（泛白的紙板、印刷的紅條紋、受潮的污漬、字），中間一顆真的大眼睛
+// 葵氏奶昔（照設計圖）：紙盒正面米白色、上下各兩條紅條紋，中間是一顆真的人眼：肉色的眼皮和眼窩、血絲、淡褐色的虹膜
 function drawShakeFront(c, S, open = 1) {
   const r = seeded(7707);
   c.save(); c.scale(S / 512, S / 512);
-  c.fillStyle = '#efe9dc'; c.fillRect(0, 0, 512, 512);
-  for (let i = 0; i < 400; i++) { c.fillStyle = `rgba(${150 + r() * 60 | 0},${140 + r() * 50 | 0},${110 + r() * 40 | 0},${0.04 + r() * 0.08})`; c.fillRect(r() * 512, r() * 512, 2 + r() * 6, 2 + r() * 6); }
-  c.fillStyle = '#c4242c'; for (const y of [24, 70, 430, 476]) c.fillRect(0, y, 512, 22);
-  c.fillStyle = '#9a1a20'; c.font = 'bold 44px sans-serif'; c.textAlign = 'center'; c.fillText('葵氏奶昔', 256, 150);
-  c.font = '22px sans-serif'; c.fillStyle = 'rgba(80,30,30,.7)'; c.fillText('鮮 奶 ・ 香 草 口 味', 256, 405);
-  for (let i = 0; i < 6; i++) { c.fillStyle = `rgba(150,120,70,${0.08 + r() * 0.1})`; c.beginPath(); c.ellipse(r() * 512, r() * 512, 20 + r() * 60, 10 + r() * 40, r() * 3, 0, 7); c.fill(); }
-  // 眼睛（open 0～1：0 是闔著的）
-  const ex = 256, ey = 280, rx = 120, ry = 92 * Math.max(0.06, open);
-  c.fillStyle = 'rgba(80,40,40,.45)'; c.beginPath(); c.ellipse(ex, ey + 4, rx + 16, 92 + 14, 0, 0, 7); c.fill();
+  c.fillStyle = '#f2ebe0'; c.fillRect(0, 0, 512, 512);
+  for (let i = 0; i < 500; i++) { c.fillStyle = `rgba(${150 + r() * 60 | 0},${140 + r() * 50 | 0},${110 + r() * 40 | 0},${0.03 + r() * 0.07})`; c.fillRect(r() * 512, r() * 512, 2 + r() * 6, 2 + r() * 6); }
+  c.fillStyle = '#d24a52'; for (const y of [28, 72, 420, 464]) c.fillRect(0, y, 512, 20);
+  for (let i = 0; i < 5; i++) { c.fillStyle = `rgba(150,120,70,${0.06 + r() * 0.08})`; c.beginPath(); c.ellipse(r() * 512, r() * 512, 20 + r() * 60, 10 + r() * 40, r() * 3, 0, 7); c.fill(); }
+  const ex = 256, ey = 262;
+  // 眼窩和眼皮（肉色、有陰影和皺紋）
+  const sk = c.createRadialGradient(ex, ey, 40, ex, ey, 170); sk.addColorStop(0, '#c8907c'); sk.addColorStop(0.6, '#e2b8a2'); sk.addColorStop(1, 'rgba(242,235,224,0)');
+  c.fillStyle = sk; c.beginPath(); c.ellipse(ex, ey, 175, 135, 0, 0, 7); c.fill();
+  c.strokeStyle = 'rgba(140,80,64,.45)'; c.lineWidth = 3; for (const k of [1.18, 1.3]) { c.beginPath(); c.ellipse(ex, ey - 6, 125 * k, 70 * k, 0, Math.PI * 1.08, Math.PI * 1.92); c.stroke(); }
+  const rx = 118, ry = 72 * Math.max(0.05, open);
   c.save(); c.beginPath(); c.ellipse(ex, ey, rx, ry, 0, 0, 7); c.clip();
-  const wg = c.createRadialGradient(ex - 20, ey - 20, 10, ex, ey, rx); wg.addColorStop(0, '#fffaf0'); wg.addColorStop(0.85, '#ecd9c8'); wg.addColorStop(1, '#c49488');
+  const wg = c.createRadialGradient(ex - 20, ey - 20, 10, ex, ey, rx); wg.addColorStop(0, '#fffaf2'); wg.addColorStop(0.8, '#efdccc'); wg.addColorStop(1, '#c8968a');
   c.fillStyle = wg; c.fillRect(ex - rx, ey - 100, rx * 2, 200);
-  veins4(c, ex, ey, 34, rx * 0.98, 30, r);
-  const ig = c.createRadialGradient(ex, ey, 6, ex, ey, 46); ig.addColorStop(0, '#2a1a08'); ig.addColorStop(0.5, '#6a4a1a'); ig.addColorStop(1, '#3a2a10');
-  c.fillStyle = ig; c.beginPath(); c.arc(ex, ey, 46, 0, 7); c.fill();
-  c.fillStyle = '#050302'; c.beginPath(); c.arc(ex, ey, 20, 0, 7); c.fill();
-  c.fillStyle = 'rgba(255,255,255,.85)'; c.beginPath(); c.arc(ex - 18, ey - 18, 9, 0, 7); c.fill();
+  veins4(c, ex, ey, 40, rx * 0.98, 34, r);
+  const ig = c.createRadialGradient(ex, ey, 8, ex, ey, 50); ig.addColorStop(0, '#2a2410'); ig.addColorStop(0.35, '#7a6a3a'); ig.addColorStop(0.8, '#5a6a4a'); ig.addColorStop(1, '#2a2a1a');
+  c.fillStyle = ig; c.beginPath(); c.arc(ex, ey, 50, 0, 7); c.fill();
+  c.strokeStyle = 'rgba(40,30,10,.5)'; c.lineWidth = 1.5; for (let i = 0; i < 40; i++) { const a = i / 40 * Math.PI * 2; c.beginPath(); c.moveTo(ex + Math.cos(a) * 22, ey + Math.sin(a) * 22); c.lineTo(ex + Math.cos(a) * 48, ey + Math.sin(a) * 48); c.stroke(); }
+  c.fillStyle = '#050302'; c.beginPath(); c.arc(ex, ey, 21, 0, 7); c.fill();
+  c.fillStyle = 'rgba(255,255,255,.9)'; c.beginPath(); c.arc(ex - 18, ey - 18, 9, 0, 7); c.fill();
+  c.fillStyle = 'rgba(90,40,30,.35)'; c.fillRect(ex - rx, ey - ry, rx * 2, ry * 0.25);   // 上眼皮的影子
   c.restore();
-  c.strokeStyle = '#6a3a34'; c.lineWidth = 6; c.beginPath(); c.ellipse(ex, ey, rx, ry, 0, 0, 7); c.stroke();
+  c.strokeStyle = '#8a4a3e'; c.lineWidth = 7; c.beginPath(); c.ellipse(ex, ey, rx, ry, 0, 0, 7); c.stroke();
+  c.strokeStyle = 'rgba(40,20,16,.8)'; c.lineWidth = 2; for (let i = 0; i < 14; i++) { const a = Math.PI * (1.12 + i * 0.055); c.beginPath(); c.moveTo(ex + Math.cos(a) * rx, ey + Math.sin(a) * ry); c.lineTo(ex + Math.cos(a) * (rx + 12), ey + Math.sin(a) * (ry + 16)); c.stroke(); }   // 睫毛
   c.restore();
 }
-// 神秘店員：帽兜裡一片黑，只看得到鋸齒狀的大嘴和兩點發亮的眼睛
+// 神秘店員（照設計圖）：帽兜裡一片黑，兩點發亮的黃眼睛，一張很大的鋸齒狀嘴巴（紅黑色的嘴裡、一排排尖牙）
 function drawClerkFace(c, S) {
   c.save(); c.scale(S / 512, S / 512);
   c.fillStyle = '#0a0806'; c.fillRect(0, 0, 512, 512);
-  for (const ex of [196, 316]) { const g = c.createRadialGradient(ex, 200, 1, ex, 200, 30); g.addColorStop(0, '#fff6c0'); g.addColorStop(0.35, '#ffd23a'); g.addColorStop(1, 'rgba(255,200,60,0)'); c.fillStyle = g; c.beginPath(); c.arc(ex, 200, 30, 0, 7); c.fill(); }
-  c.fillStyle = '#3a0a08'; c.beginPath(); c.ellipse(256, 340, 170, 80, 0, 0, Math.PI * 2); c.fill();
-  c.fillStyle = '#e8dcc0';
-  for (let x = 96; x < 416; x += 26) { c.beginPath(); c.moveTo(x, 300); c.lineTo(x + 13, 350); c.lineTo(x + 26, 300); c.fill(); c.beginPath(); c.moveTo(x + 6, 390); c.lineTo(x + 19, 336); c.lineTo(x + 32, 390); c.fill(); }
+  for (const ex of [190, 322]) { const g = c.createRadialGradient(ex, 170, 1, ex, 170, 34); g.addColorStop(0, '#fff6c0'); g.addColorStop(0.35, '#ffcc2a'); g.addColorStop(1, 'rgba(255,200,60,0)'); c.fillStyle = g; c.beginPath(); c.arc(ex, 170, 34, 0, 7); c.fill(); }
+  c.fillStyle = '#4a0a06'; c.beginPath(); c.moveTo(70, 250); c.quadraticCurveTo(256, 220, 442, 250); c.quadraticCurveTo(256, 500, 70, 250); c.fill();
+  c.fillStyle = '#e8d8a8';
+  for (let x = 80; x < 432; x += 30) { c.beginPath(); c.moveTo(x, 246); c.lineTo(x + 15, 320 + Math.sin(x) * 10); c.lineTo(x + 30, 246); c.fill(); }
+  for (let x = 110; x < 400; x += 30) { const yb = 250 + Math.sin((x - 70) / 372 * Math.PI) * 160; c.beginPath(); c.moveTo(x, yb); c.lineTo(x + 15, yb - 60); c.lineTo(x + 30, yb); c.fill(); }
   c.restore();
 }
 // 圖鑑的 2D 縮圖（WebGL 開不起來時用）
@@ -1548,21 +1733,27 @@ function thumbStaff(c, S) {
 function thumbShake(c, S) { c.save(); c.scale(S / 200, S / 200); c.translate(40, 20); drawShakeFront(c, 120); c.fillStyle = '#d9d0bf'; c.fillRect(30, -12, 60, 14); c.fillStyle = '#eee'; c.fillRect(56, -20, 6, 14); c.restore(); }
 function thumbMimic(c, S) { c.save(); c.scale(S / 200, S / 200); c.translate(10, 4); drawMimicFace(c, 180); c.restore(); }
 function thumbHubert(c, S) {
+  // 黑色的胖蜘蛛（照設計圖）：大圓肚子、小圓頭、八隻粗腳、抓著一根鐵管
   c.save(); c.scale(S / 200, S / 200);
-  const g = c.createRadialGradient(100, 160, 4, 100, 180, 50); g.addColorStop(0, 'rgba(255,40,30,.8)'); g.addColorStop(1, 'rgba(255,40,30,0)'); c.fillStyle = g; c.fillRect(40, 140, 120, 60);
-  const b = c.createRadialGradient(86, 100, 10, 100, 115, 60); b.addColorStop(0, '#d0d0d0'); b.addColorStop(1, '#6a6a6a');
-  c.fillStyle = b; c.beginPath(); c.arc(100, 115, 52, 0, 7); c.fill();
-  c.beginPath(); c.arc(100, 46, 24, 0, 7); c.fill();
-  c.fillStyle = '#8a8a8a'; c.fillRect(80, 160, 14, 22); c.fillRect(106, 160, 14, 22);
-  c.fillStyle = '#5a5a5e'; c.fillRect(150, 60, 14, 80);
+  const g = c.createRadialGradient(100, 170, 4, 100, 180, 60); g.addColorStop(0, 'rgba(255,40,30,.8)'); g.addColorStop(1, 'rgba(255,40,30,0)'); c.fillStyle = g; c.fillRect(30, 140, 140, 60);
+  c.strokeStyle = '#1a1a1e'; c.lineWidth = 11; c.lineCap = 'round';
+  for (const s of [-1, 1]) for (let k = 0; k < 4; k++) { c.beginPath(); c.moveTo(100 + s * 30, 120); c.lineTo(100 + s * (60 + k * 12), 88 + k * 6); c.lineTo(100 + s * (70 + k * 8), 180 - k * 4); c.stroke(); }
+  const b = c.createRadialGradient(84, 100, 6, 100, 118, 56); b.addColorStop(0, '#4a4a50'); b.addColorStop(1, '#0e0e10');
+  c.fillStyle = b; c.beginPath(); c.arc(100, 118, 52, 0, 7); c.fill();
+  c.beginPath(); c.arc(100, 52, 24, 0, 7); c.fill();
+  c.fillStyle = '#7a0a10'; for (const [x, y] of [[92, 54], [108, 54], [86, 47], [114, 47]]) { c.beginPath(); c.arc(x, y, 3, 0, 7); c.fill(); }
+  c.fillStyle = '#5a5d62'; c.fillRect(156, 70, 14, 84);
   c.restore();
 }
 function thumbEmber(c, S) {
+  // 燼皇（照設計圖）：張開的紅翅膀、下擺燒著火、紅色的光環、腳邊一圈紅玫瑰
   c.save(); c.scale(S / 200, S / 200);
-  c.fillStyle = '#9a1418'; c.beginPath(); c.moveTo(100, 50); c.lineTo(10, 150); c.lineTo(40, 196); c.lineTo(160, 196); c.lineTo(190, 150); c.closePath(); c.fill();
-  c.fillStyle = '#ff9a2a'; for (let x = 30; x < 180; x += 18) { c.beginPath(); c.moveTo(x, 196); c.lineTo(x + 9, 168); c.lineTo(x + 18, 196); c.fill(); }
-  c.strokeStyle = '#fff2c0'; c.lineWidth = 4; c.beginPath(); c.ellipse(100, 20, 34, 9, 0, 0, 7); c.stroke();
-  c.translate(64, 22); drawEmberFace(c, 72); c.restore();
+  c.fillStyle = '#b0101a'; c.beginPath(); c.moveTo(100, 60); c.lineTo(8, 40); c.lineTo(20, 190); c.lineTo(180, 190); c.lineTo(192, 40); c.closePath(); c.fill();
+  c.fillStyle = '#ff8a2a'; for (let x = 20; x < 180; x += 16) { c.beginPath(); c.moveTo(x, 190); c.lineTo(x + 8, 140 + (x % 3) * 10); c.lineTo(x + 16, 190); c.fill(); }
+  c.fillStyle = '#e2cfc6'; c.fillRect(92, 60, 16, 120);
+  c.strokeStyle = '#ff3a3a'; c.lineWidth = 4; c.beginPath(); c.ellipse(100, 14, 26, 8, 0, 0, 7); c.stroke();
+  c.fillStyle = '#c0101c'; for (let i = 0; i < 9; i++) { c.beginPath(); c.arc(40 + i * 15, 192, 4, 0, 7); c.fill(); }
+  c.translate(72, 18); drawEmberFace(c, 56); c.restore();
 }
 
 // ====================================================================
@@ -1721,11 +1912,22 @@ function openBulbBook(from) {
   $('bulbBook').classList.remove('hidden');
   showBulbPage('bulb');
 }
+// 手電筒卡片邊框閃的顏色（星晃照設計圖是黑和白）
+const flashCardCols = lv => (lv === FLASH_MAX ? ['#ffffff', '#141414'] : FLASH_TIERS[lv].beam.map(c => `rgb(${c.join(',')})`));
+function flashKeyframes4() {
+  if (document.getElementById('flashKF')) return;
+  let css = '';
+  for (let lv = 4; lv <= FLASH_MAX; lv++) {
+    const cols = flashCardCols(lv), n = cols.length;
+    css += `@keyframes flk${lv} {` + [...cols, cols[0]].map((c, i) => `${(i * 100 / n).toFixed(1)}% { border-color: ${c}; box-shadow: 0 0 12px ${c}; }`).join(' ') + '}\n';
+  }
+  const st = document.createElement('style'); st.id = 'flashKF'; st.textContent = css; document.head.appendChild(st);
+}
 function showBulbPage(tab) {
   for (const b of document.querySelectorAll('#bulbTabs button')) b.classList.toggle('on', b.dataset.t === tab);
-  const card = (got, rar, ic, name, lines) => {
+  const card = (got, rar, ic, name, lines, anim = '') => {
     const col = rar ? RARITY[rar].color : '#6a6478';
-    return `<div class="bcardx${got ? '' : ' unseen'}" style="--rc:${col}">${got ? ic : '<div class="ic q">？</div>'}<div class="tx"><b>${name}</b>` +
+    return `<div class="bcardx${got ? '' : ' unseen'}" style="--rc:${col}${got && anim ? `;animation:${anim}` : ''}">${got ? ic : '<div class="ic q">？</div>'}<div class="tx"><b>${name}</b>` +
       (rar ? `<span><span class="rar r-${rar}">${RARITY[rar].name}</span></span>` : '') + lines.map(l => `<span>${l}</span>`).join('') + '</div></div>';
   };
   let html = '', note = '';
@@ -1738,11 +1940,13 @@ function showBulbPage(tab) {
     }
   } else if (tab === 'flash') {
     note = '手電筒照著怪物會一直扣牠的血。第 1～3 級在前三個世界都拿得到；第 4～7 級是第四世界的（地圖大，光線更大），光會變色。撿到就自動換上。';
+    // 第 4～7 級的卡片邊框跟生物圖鑑的閻羅、酆都級一樣會閃：光有幾個顏色，邊框就在幾個顏色之間閃（星晃是黑和白）
+    flashKeyframes4();
     for (let lv = 1; lv <= FLASH_MAX; lv++) {
       const f = FLASH_TIERS[lv], cols = f.beam ? f.beam.map(c => `rgb(${c.join(',')})`) : [f.color, f.color];
       const ic = `<div class="ic"><div class="flashbeam" style="background:linear-gradient(90deg,#555 0 22%,${cols.join(',')})"></div></div>`;
       const rar = lv <= 1 ? 'common' : lv === 2 ? 'rare' : lv === 3 ? 'legend' : lv <= 5 ? 'epic' : lv === 6 ? 'legend' : 'mythic';
-      html += card(gotIt('flash', lv), rar, ic, f.name, [`第 ${lv} 級・傷害 ${f.dmg} 倍・照 ${f.range} 格`, f.desc || (lv === 1 ? '一開始就有的舊手電筒。' : lv === 2 ? '打怪物的傷害變 2 倍、照得更遠。' : '傷害 3 倍、照得最遠，光圈也更寬。'), lv >= 4 ? '<small>第四世界：神秘店員賣下一級、寶藏星星、很好的早晨禮物</small>' : '']);
+      html += card(gotIt('flash', lv), rar, ic, f.name, [`第 ${lv} 級・傷害 ${f.dmg} 倍・照 ${f.range} 格`, f.desc || (lv === 1 ? '一開始就有的舊手電筒。' : lv === 2 ? '打怪物的傷害變 2 倍、照得更遠。' : '傷害 3 倍、照得最遠，光圈也更寬。'), lv >= 4 ? '<small>第四世界：神秘店員賣下一級、寶藏星星、很好的早晨禮物</small>' : ''], f.beam ? `flk${lv} ${0.7 * flashCardCols(lv).length}s linear infinite` : '');
     }
   } else {
     note = '第四世界的房子要自己蓋：板子分五級，等級越高越耐打。板子不能放進背包，一次只能拿一片。木門可以開關。';

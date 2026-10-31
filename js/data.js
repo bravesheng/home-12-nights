@@ -4,7 +4,7 @@
 const TILE = 32;
 // 地圖大小：第一、二世界是 44×33 的房子；第三世界是一列 74 格長的列車（換世界時由 applyWorld 設定）
 let MAP_W = 44, MAP_H = 33;
-const MAP_SIZE = { 1: [44, 33], 2: [44, 33], 3: [74, 23], 4: [60, 44] };
+const MAP_SIZE = { 1: [44, 33], 2: [44, 33], 3: [74, 23], 4: [100, 76] }   // 第四世界的大小在下面的 W4W、W4H;
 // 白天和晚上多長（秒）：第四世界照設計師的要求，早上 5 分鐘、晚上 6 分鐘
 const DAY_SECS = { 1: 150, 2: 150, 3: 150, 4: 300 }, NIGHT_SECS = { 1: 150, 2: 150, 3: 150, 4: 360 };
 
@@ -175,7 +175,7 @@ const RARITY = {
 };
 const bulbRarity = t => (BULBS[t].special || t === FIRE_TIER ? 'legend' : t <= 5 ? 'rare' : 'epic');
 
-// 手電筒七個等級：1～3 級是前三個世界的；4～7 級是第四世界的（設計師：地圖大，手電筒要更大的光線），光會變色（beam 是光在這幾個顏色之間流動）
+// 手電筒七個等級（第 7 級叫「星晃」，設計師訂正）：1～3 級是前三個世界的；4～7 級是第四世界的（設計師：地圖大，手電筒要更大的光線），光會變色（beam 是光在這幾個顏色之間流動）
 const FLASH_TIERS = [null,
   { name: '破爛手電筒', short: '破爛', dmg: 1, range: 7.5, half: 0.42, color: '#b9b1a8' },
   { name: '稀有手電筒', short: '稀有', dmg: 2, range: 9, half: 0.42, color: '#4da3ff' },
@@ -183,7 +183,7 @@ const FLASH_TIERS = [null,
   { name: '極光手電筒', short: '極光', dmg: 4, range: 12, half: 0.56, color: '#2ed47a', beam: [[80, 255, 150], [70, 220, 255], [180, 130, 255]], desc: '綠色的光像極光一樣在綠、青、淡紫之間流動。' },
   { name: '寒河冷光', short: '寒河', dmg: 5, range: 13.5, half: 0.6, color: '#b05cff', beam: [[170, 90, 255], [255, 90, 220]], desc: '紫色的冷光，在紫和洋紅之間閃爍。' },
   { name: '光之巨劍', short: '巨劍', dmg: 6.5, range: 15, half: 0.36, color: '#ff7a2a', beam: [[255, 150, 50], [255, 70, 30]], desc: '窄而長的光，像一把燃燒的巨劍，在橘和紅之間變化。' },
-  { name: '星辰手電筒', short: '星辰', dmg: 8, range: 16, half: 0.66, color: '#ffffff', beam: [[255, 255, 255], [70, 50, 110]], stars: true, desc: '黑和白：在白光和暗紫黑之間交替，光裡有星星閃爍。' },
+  { name: '星晃手電筒', short: '星晃', dmg: 8, range: 16, half: 0.66, color: '#ffffff', beam: [[255, 255, 255], [70, 50, 110]], stars: true, desc: '黑和白：在白光和暗紫黑之間交替，光裡有星星閃爍。' },
 ];
 const FLASH_MAX = FLASH_TIERS.length - 1;
 
@@ -233,7 +233,7 @@ const ITEMS = {
   flash4:     { name: '極光手電筒', kind: 'upgrade', icon: '🌌', desc: '撿到就自動換上：第 4 級，傷害 4 倍、照 12 格，綠色的光像極光一樣流動。' },
   flash5:     { name: '寒河冷光',   kind: 'upgrade', icon: '❄️', desc: '撿到就自動換上：第 5 級，傷害 5 倍、照 13.5 格，紫色的冷光。' },
   flash6:     { name: '光之巨劍',   kind: 'upgrade', icon: '🗡️', desc: '撿到就自動換上：第 6 級，傷害 6.5 倍、照 15 格，窄而長的橘紅色光劍。' },
-  flash7:     { name: '星辰手電筒', kind: 'upgrade', icon: '✨', desc: '撿到就自動換上：第 7 級，傷害 8 倍、照 16 格最寬，黑白交替、光裡有星星。' },
+  flash7:     { name: '星晃手電筒', kind: 'upgrade', icon: '✨', desc: '撿到就自動換上：第 7 級，傷害 8 倍、照 16 格最寬，黑白交替、光裡有星星。' },
   amulet:     { name: '護身符', kind: 'charm',  icon: '📿', desc: '帶在身上就有效：被怪物抓到時只扣一半的血。' },
   bandage:  { name: '繃帶',   kind: 'food', icon: '🩹', hp: 25, desc: '生命 +25' },
   medkit:   { name: '急救箱', kind: 'food', icon: '💊', hp: 60, desc: '生命 +60' },
@@ -270,8 +270,8 @@ const LOOT = {
   // 第四世界：賣場的美食區、飲料機、雜貨架、燈具架、寢具和衣櫃、倉儲區的紙箱、玩具箱、浴室的櫃子
   food4:    { hotdog: 3, meatball: 3, pizza: 2, fries: 3, soda: 2, cake: 1.5, snack: 2, canned: 1, coin: 1 },
   drink4:   { soda: 5, milk: 2, cocoa: 2, coin: 1 },
-  store4:   { bulb: 3, battery: 3, candle: 1.5, coin: 3, chocolate: 1, snack: 1.5, marble: 1, firecracker: 0.6, key: 0.2, lamp_desk: 1, salt: 0.6 },
-  lamps4:   { lamp_desk: 4, lamp_floor: 2, bulb: 4, lamp_chand: 0.4, battery: 1.5 },
+  store4:   { bulb: 2.5, battery: 3, candle: 1.5, coin: 3, chocolate: 1, snack: 1.5, marble: 1, firecracker: 0.6, key: 0.2, salt: 0.6 },
+  lamps4:   { bulb: 8, battery: 1 },   // 第四世界沒有燈泡，「燈泡」就是一整盞檯燈（設計師：燈泡不要了，直接就是檯燈）
   clothes4: { battery: 2, candle: 1, coin: 3, bandage: 1, amulet: 0.2, marble: 1, slingshot: 0.3, cocoa: 1 },
   tools4:   { battery: 3, wood: 3, charcoal: 1.2, coin: 2, firecracker: 1.5, marble: 1, watergun: 0.3, strongflash: 0.2, holywater: 1, key: 0.3 },
   kids4:    { marble: 3, slingshot: 0.6, chocolate: 2, candle: 1, coin: 2, firecracker: 1, soda: 1 },
@@ -537,7 +537,7 @@ const BAYMAX_MAX = 2;   // 整個遊戲最多拿到幾顆大白燈
 // 樣品間是三面有牆、一面開向走道的展示間；柱子每隔幾格一根；主走道是十字形（x 29～30、y 21～22）
 // 房子要自己蓋：板子放在格子的邊上（world4.js）；家具大部分可以搬（FURN4 的 move）
 // ====================================================================
-const CEIL_W4 = 4.2;      // 賣場的天花板高度（小房間是一般的 2.7）
+const CEIL_W4 = 6.2;      // 賣場的天花板高度（設計師：天花板太低 → 6.2 公尺；小房間是一般的 2.7）
 const ROOF4_H = 2.6;      // 自己蓋的牆有多高、屋頂（躺平的板子）放多高
 // 板子五級（設計師：木頭、水泥、黃金、岩漿、玻璃；普通、稀有、史詩、傳奇、神話）。hp 是怪物要打多久才打得破（玻璃打不破）
 const PLANKS = [null,
@@ -548,6 +548,12 @@ const PLANKS = [null,
   { key: 'glass',  name: '玻璃板子', rar: 'mythic', hp: Infinity, price: 20, color: '#cfe8f0', desc: '透明的強化玻璃：看得清外面、光透得過去，怪物完全打不破。' },
 ];
 const PLANK_MAX = PLANKS.length - 1, GLASS_TIER = 5, LAVA_TIER = 4;
+// 貨架的高度和每一層的高度（3D 模型和 world4.js 擺真的東西的位置共用）：倉儲貨架 5.2 公尺（設計師：鐵架太矮了）
+const RACK4_H = 5.2, RACK4_LEVELS = [0.12, 1.3, 2.5, 3.7, 4.85];
+const GOODS4_H = 2.15, GOODS4_LEVELS = [0.12, 0.6, 1.08, 1.56, 2.0];
+const LAMPSHELF4_LEVELS = [0.1, 0.7, 1.3];
+// 真的東西擺在架子上（不是只有一團光，要一個一個拿）：這幾種架子的物資會變成擺在架上的東西（world4.js 的 stockShelves4）
+const DISPLAY4 = { rack4: 1, goods4: 1, lampshelf: 1, foodcounter: 1, drink4: 1, coldcase: 1 };
 const DOOR_HP = 40;   // 木門跟木頭板子一樣耐打
 // 家具：move 可以搬、store 可以收納（櫃子）、solid false 是踩得過去的（地毯、毯子）、fn 是有功能的家具
 const FURN4 = {
@@ -560,7 +566,7 @@ const FURN4 = {
   table4: { name: '桌子', move: true }, sideboard4: { name: '矮櫃', move: true, store: true }, cart4: { name: '購物車', move: true }, cabinet4: { name: '櫃子', move: true, store: true },
   // 搬不動的
   counter4: { name: '流理台' }, stove4: { name: '爐子' }, sink4: { name: '洗手台' }, fridge4: { name: '冰箱' }, bathtub4: { name: '浴缸' }, toilet4: { name: '馬桶' },
-  rack4: { name: '倉儲貨架' }, goods4: { name: '雜貨架' }, lampshelf: { name: '燈具架' }, bedding4: { name: '寢具架' }, crate4: { name: '紙箱' },
+  rack4: { name: '倉儲貨架' }, tvwall4: { name: '電視展示牆' }, goods4: { name: '雜貨架' }, lampshelf: { name: '燈具架' }, bedding4: { name: '寢具架' }, crate4: { name: '紙箱' },
   plankpile: { name: '板材堆' }, foodcounter: { name: '熱食櫃台' }, drink4: { name: '飲料機' }, coldcase: { name: '冷藏櫃' },
   locker4: { name: '員工置物櫃' }, vending4: { name: '販賣機' }, bagrack: { name: '提袋架' }, infodesk: { name: '服務台' },
   breaker: { name: '電箱' }, workbench: { name: '工作台' }, gacha: { name: '扭蛋機' },
@@ -576,11 +582,14 @@ const W4_ROOMS_TMPL = {
   kitchen: { name: '廚房樣品間', wall: '#e6e1d3', floor: 'tile2', items: [['counter4', 0, 0, 3, 1, 'f', 'food4'], ['stove4', 3, 0, 1, 1, 'f'], ['sink4', 4, 0, 1, 1, 'f'], ['fridge4', 5, 0, 1, 1, 'f', 'food4'], ['table4', 2, 2, 2, 1], ['chair4', 1, 2, 1, 1, 'r'], ['chair4', 4, 2, 1, 1, 'l']] },
   dining: { name: '餐廳樣品間', wall: '#d8b9b0', floor: 'oak4', items: [['sideboard4', 1, 0, 3, 1, 'f', 'store4'], ['chair4', 2, 1, 1, 1, 'f'], ['table4', 1, 2, 3, 1], ['chair4', 0, 2, 1, 1, 'r'], ['chair4', 4, 2, 1, 1, 'l'], ['chair4', 2, 3, 1, 1, 'b'], ['plant4', 5, 0, 1, 1]] },
 };
+// 賣場的大小和十字主走道的位置（設計師：地圖太小，一下就走到邊邊了 → 100×76，大約是原本的三倍大）
+const W4W = 100, W4H = 76, W4AX = 49, W4AY = 37;   // 主走道：x 49～50（南北向）、y 37～38（東西向）
+const W4_MAP_VER = 2;   // 賣場的格局改版就加 1：舊存檔蓋的房子沒辦法放回新的地圖（見 world4.js 的 load4）
 const W4MAP = (() => {
   const rooms = [
-    { id: 'store', name: '賣場', x: 1, y: 1, w: 58, h: 42, floor: 'store4', level: 1 },
-    { id: 'restroom', name: '洗手間', x: 1, y: 37, w: 6, h: 6, floor: 'tile', level: 1, dayDark: 0.2, ceil: true },
-    { id: 'staff', name: '員工專用區', x: 53, y: 37, w: 6, h: 6, floor: 'concrete', level: 2, dayDark: 0.35, ceil: true },
+    { id: 'store', name: '賣場', x: 1, y: 1, w: W4W - 2, h: W4H - 2, floor: 'store4', level: 1 },
+    { id: 'restroom', name: '洗手間', x: 1, y: 69, w: 6, h: 6, floor: 'tile', level: 1, dayDark: 0.2, ceil: true },
+    { id: 'staff', name: '員工專用區', x: 93, y: 69, w: 6, h: 6, floor: 'concrete', level: 2, dayDark: 0.35, ceil: true },
   ];
   const wallSet = new Set(), furn = [], zones = [], floors = [], doors = [], cubes = [];
   const W = (x, y) => wallSet.add(x + ',' + y);
@@ -599,10 +608,10 @@ const W4MAP = (() => {
   };
   const Z = (name, x, y, w, h, o = {}) => zones.push({ name, x, y, w, h, ...o });
   // 小房間：洗手間（西南角）、員工專用區（東南角，晚上店員從這裡走出來）
-  hline(1, 7, 36); vline(7, 36, 42); doors.push({ x: 7, y: 39 });
-  hline(52, 58, 36); vline(52, 36, 42); doors.push({ x: 52, y: 39, staff: true });
+  hline(1, 7, 68); vline(7, 68, 74); doors.push({ x: 7, y: 71 });
+  hline(92, 98, 68); vline(92, 68, 74); doors.push({ x: 92, y: 71, staff: true });
   // 入口的玻璃自動門（打不開，門外只有白霧）：敲門事件、破關動畫用的「前門」
-  doors.push({ x: 29, y: 43, front: true });
+  doors.push({ x: W4AX, y: W4H - 1, front: true });
   // 樣品間：interior 是 (x0, y0) 開始 w×h 的格子，open 是開口朝哪邊（s 南、n 北），另外三面是牆
   const cube = (kind, x0, y0, open, w = 6, h = 5) => {
     const t = W4_ROOMS_TMPL[kind], xl = x0 - 1, xr = x0 + w, yt = y0 - 1, yb = y0 + h;
@@ -620,77 +629,96 @@ const W4MAP = (() => {
       F(type, x0 + u, y, fw, fh, o);
     }
   };
-  // 西北：自助倉儲區（一排一排的高貨架）旁邊兩間；東北：兩排樣品間；西南：兩排；東南：一排
-  cube('kitchen', 15, 1, 's'); cube('dining', 22, 1, 's');
-  cube('living', 32, 1, 's'); cube('bedroom', 39, 1, 's'); cube('kids', 46, 1, 's'); cube('hearth', 53, 1, 's');
-  cube('study', 32, 9, 'n'); cube('bath', 39, 9, 'n'); cube('bedroom', 46, 9, 'n');
-  cube('living', 2, 23, 'n'); cube('kitchen', 9, 23, 'n'); cube('bedroom', 16, 23, 'n');
-  cube('kids', 2, 29, 's'); cube('dining', 9, 29, 's'); cube('study', 16, 29, 's');
-  cube('bedroom', 32, 23, 'n'); cube('hearth', 39, 23, 'n'); cube('kitchen', 46, 23, 'n'); cube('bath', 53, 23, 'n');
+  const row = (kinds, x0, y0, open) => kinds.forEach((k, i) => cube(k, x0 + i * 7, y0, open));
+  // 西北的北邊兩間；東北兩排（中間隔一條 3 格寬的走道）；西南四排（兩排背靠背一組）
+  row(['kitchen', 'dining'], 32, 1, 's');
+  row(['living', 'bedroom', 'kids', 'hearth', 'study', 'bath'], 52, 1, 's');
+  row(['study', 'bath', 'bedroom', 'living', 'kitchen', 'kids'], 52, 9, 'n');
+  row(['living', 'kitchen', 'bedroom', 'dining', 'kids', 'study'], 2, 40, 'n');
+  row(['kids', 'dining', 'study', 'living', 'hearth', 'bath'], 2, 46, 's');
+  row(['bedroom', 'kitchen', 'living', 'bath', 'hearth', 'study'], 2, 54, 'n');
+  row(['dining', 'bedroom', 'kids', 'living', 'kitchen', 'bedroom'], 2, 60, 's');
   // 第一間廚房的流理台：第 1 天一定有平底鍋（game.js 的 newGame 用 kdrawer 這個 id）
   furn.find(f => f.type === 'counter4').id = 'kdrawer';
-  // 自助倉儲區：4 公尺高的鐵貨架（堆滿紙箱），走道上有板材堆
-  Z('自助倉儲區', 1, 1, 13, 20);
-  for (const x of [2, 6, 10]) { F('rack4', x, 2, 2, 6, { side: 'e', loot: 'tools4' }); F('rack4', x, 11, 2, 6, { side: 'w', loot: 'store4' }); }
-  // 板材堆：木頭最多，水泥、黃金少（每天早上補一點；岩漿、玻璃要靠神秘店員、禮物和偶爾出現的特別板材堆）
-  for (const [x, y, tier] of [[4, 3, 1], [8, 5, 1], [12, 3, 1], [4, 13, 1], [8, 12, 2], [12, 14, 1], [1, 9, 1], [5, 19, 1], [9, 19, 2], [13, 18, 3], [27, 9, 1], [24, 19, 1]]) F('plankpile', x, y, 1, 1, { tier });
-  for (const [x, y] of [[1, 1], [13, 1], [1, 20], [9, 9], [13, 10]]) F('crate4', x, y, 1, 1, { loot: 'tools4' });
-  // 樣品間前面的雜貨區（雙面的貨架）
-  Z('雜貨區', 15, 7, 14, 14);
-  for (const [x, y] of [[16, 10], [22, 10], [16, 15], [22, 15]]) F('goods4', x, y, 4, 1, { side: 's', loot: 'store4' });
-  F('table4', 17, 18, 2, 1); F('chair4', 16, 18, 1, 1, { side: 'e' }); F('chair4', 19, 18, 1, 1, { side: 'w' });
-  // 東北的開放展示區：燈具區、布料寢具區、沙發區、床墊區
-  Z('燈具區', 31, 15, 7, 6);
-  for (const [x, y] of [[32, 16], [35, 16], [32, 19], [35, 19]]) F('lampshelf', x, y, 2, 1, { side: 's', loot: 'lamps4' });
-  Z('布料寢具區', 38, 15, 9, 6);
-  F('bedding4', 39, 16, 2, 1, { side: 's', loot: 'clothes4' }); F('bedding4', 43, 16, 2, 1, { side: 's', loot: 'clothes4' });
-  F('blanket4', 39, 18, 2, 2); F('blanket4', 43, 18, 2, 2);
-  Z('沙發區', 47, 15, 12, 6);
-  F('sofa4', 49, 16, 3, 1, { side: 's' }); F('coffee4', 50, 18, 1, 1); F('armchair', 48, 18, 1, 1, { side: 'e' }); F('armchair', 52, 18, 1, 1, { side: 'w' });
-  F('sofa4', 54, 19, 3, 1, { side: 'n' }); F('plant4', 57, 16, 1, 1);
-  Z('床墊區', 53, 7, 6, 8);
-  F('bed4', 55, 8, 2, 2, { side: 'w' }); F('bed4', 55, 12, 2, 2, { side: 'w' }); F('nightstand4', 57, 10, 1, 1, { side: 'w', loot: 'clothes4' });
-  // 西南：樣品間旁邊的貨架、入口
-  Z('雜貨區', 23, 23, 6, 14);
-  F('goods4', 24, 24, 1, 4, { side: 'e', loot: 'store4' }); F('goods4', 24, 30, 1, 4, { side: 'e', loot: 'store4' });
-  Z('入口', 23, 37, 17, 6);
-  F('cart4', 24, 41, 1, 1); F('cart4', 25, 41, 1, 1); F('cart4', 26, 40, 1, 1);
-  F('bagrack', 33, 42, 2, 1, { side: 'n', loot: 'store4' }); F('infodesk', 36, 38, 2, 1, { side: 's', loot: 'store4' });
-  F('gacha', 38, 42, 1, 1, { id: 'gacha' });
-  // 東南：餐桌展示、美食區（食物主要在這裡）
-  Z('餐桌區', 31, 29, 9, 8);
-  for (const y of [31, 34]) { F('table4', 33, y, 2, 1); F('chair4', 32, y, 1, 1, { side: 'e' }); F('chair4', 35, y, 1, 1, { side: 'w' }); }
-  F('cabinet4', 38, 30, 1, 1, { side: 'w', loot: 'store4' });
-  Z('美食區', 40, 29, 12, 14);
-  F('foodcounter', 41, 42, 4, 1, { side: 'n', loot: 'food4' }); F('drink4', 46, 42, 1, 1, { side: 'n', loot: 'drink4' }); F('drink4', 47, 42, 1, 1, { side: 'n', loot: 'drink4' });
-  F('coldcase', 49, 42, 2, 1, { side: 'n', loot: 'food4' });
-  for (const [x, y] of [[42, 32], [47, 32], [42, 36], [47, 36]]) { F('table4', x, y, 2, 1); F('chair4', x - 1, y, 1, 1, { side: 'e' }); F('chair4', x + 2, y, 1, 1, { side: 'w' }); }
+  // 自助倉儲區（照 3008）：一排一排 5 公尺高的鐵貨架，中間的走道 4 格寬（設計師：兩個貨櫃間隔太小了、要可以跑跳）；
+  // 貨架上堆滿紙箱，貨架旁邊靠著板子、架著梯子
+  Z('自助倉儲區', 1, 1, 30, 36);
+  const racks = [];
+  for (const x of [3, 9, 15, 21, 27]) for (const y of [3, 14, 25]) racks.push(F('rack4', x, y, 2, 8, { side: (x / 6 | 0) % 2 ? 'w' : 'e', loot: 'tools4' }));
+  // 板材堆：靠在貨架的頭尾（木頭最多，水泥、黃金少；岩漿、玻璃要靠神秘店員、禮物和偶爾出現的特別板材堆）
+  const tiers = [1, 1, 2, 1, 1, 3, 1, 2, 1, 1, 1, 2, 1, 1, 1];
+  racks.forEach((r, i) => F('plankpile', r.x + (i % 2), i % 3 === 1 ? r.y + r.h : r.y - 1, 1, 1, { tier: tiers[i], lean: i % 3 === 1 ? 'n' : 's' }));
+  for (const [x, y] of [[5, 8], [17, 19], [23, 30], [11, 30], [29, 19]]) F('ladder4', x, y, 1, 1, { side: 'w' });
+  for (const [x, y] of [[1, 1], [30, 1], [1, 35], [7, 12], [19, 23], [30, 34], [13, 34]]) F('crate4', x, y, 1, 1, { loot: 'tools4' });
+  // 西北的雜貨區：一排一排雙面的貨架（上面是真的商品，可以一個一個拿）
+  Z('雜貨區', 31, 7, 18, 30);
+  for (const y of [10, 15, 20, 25, 30]) for (const x of [33, 41]) F('goods4', x, y, 5, 1, { side: 's', loot: y % 10 ? 'food4' : 'store4' });
+  // 東北的開放展示區：燈具區、電器區（電視）、布料寢具區、沙發區、床墊區
+  Z('燈具區', 51, 16, 11, 9);
+  for (const [x, y] of [[53, 18], [57, 18], [53, 22], [57, 22]]) F('lampshelf', x, y, 3, 1, { side: 's', loot: 'lamps4' });
+  Z('電器區', 63, 16, 12, 9);
+  for (const y of [18, 22]) F('tvwall4', 64, y, 4, 1, { side: 's' });
+  for (const [x, y] of [[70, 18], [72, 18], [70, 22], [72, 22]]) F('tv4', x, y, 1, 1, { side: 's', on: true });   // 展示機白天開著
+  Z('布料寢具區', 75, 16, 12, 9);
+  for (const x of [77, 81]) F('bedding4', x, 18, 3, 1, { side: 's', loot: 'clothes4' });
+  F('blanket4', 77, 21, 2, 2); F('blanket4', 81, 21, 2, 2);
+  Z('沙發區', 51, 27, 24, 10);
+  for (const x of [53, 61, 69]) { F('sofa4', x, 28, 3, 1, { side: 's' }); F('coffee4', x + 1, 30, 1, 1); F('armchair', x - 1, 30, 1, 1, { side: 'e' }); F('armchair', x + 3, 30, 1, 1, { side: 'w' }); }
+  F('sofa4', 56, 34, 3, 1, { side: 'n' }); F('sofa4', 64, 34, 3, 1, { side: 'n' }); F('plant4', 73, 28, 1, 1); F('plant4', 51, 35, 1, 1);
+  Z('床墊區', 76, 27, 23, 10);
+  for (const x of [77, 82, 87, 92]) { F('bed4', x, 28, 2, 2, { side: 's' }); F('bed4', x, 33, 2, 2, { side: 'n' }); }
+  F('nightstand4', 79, 28, 1, 1, { side: 's', loot: 'clothes4' }); F('nightstand4', 94, 33, 1, 1, { side: 'n', loot: 'clothes4' });
+  Z('書櫃區', 88, 16, 11, 9);
+  for (const x of [89, 92, 95]) F('bookcase4', x, 17, 2, 1, { side: 's', loot: 'store4' });
+  F('desk4', 90, 21, 2, 1, { side: 's' }); F('chair4', 90, 22, 1, 1, { side: 'n' }); F('ladder4', 97, 21, 1, 1, { side: 'w' });
+  // 西南：樣品間旁邊的貨架
+  Z('雜貨區', 44, 39, 5, 28);
+  for (const y of [41, 47, 55, 61]) F('goods4', 46, y, 1, 4, { side: 'e', loot: 'food4' });
+  // 東南：餐桌展示、美食區（食物主要在這裡）、冷凍食品區
+  Z('餐桌區', 51, 39, 14, 14);
+  for (const [x, y] of [[53, 41], [59, 41], [53, 46], [59, 46], [53, 50], [59, 50]]) { F('table4', x, y, 2, 1); F('chair4', x - 1, y, 1, 1, { side: 'e' }); F('chair4', x + 2, y, 1, 1, { side: 'w' }); }
+  F('cabinet4', 64, 40, 1, 1, { side: 'w', loot: 'store4' }); F('sideboard4', 56, 52, 3, 1, { side: 'n', loot: 'store4' });
+  Z('美食區', 66, 39, 24, 28);
+  F('foodcounter', 67, 39, 4, 1, { side: 's', loot: 'food4' }); F('drink4', 72, 39, 1, 1, { side: 's', loot: 'drink4' }); F('drink4', 73, 39, 1, 1, { side: 's', loot: 'drink4' });
+  F('coldcase', 75, 39, 2, 1, { side: 's', loot: 'food4' }); F('foodcounter', 78, 39, 4, 1, { side: 's', loot: 'food4' }); F('coldcase', 83, 39, 2, 1, { side: 's', loot: 'food4' });
+  F('drink4', 86, 39, 1, 1, { side: 's', loot: 'drink4' });
+  for (let y = 44; y <= 62; y += 6) for (let x = 68; x <= 84; x += 6) { F('table4', x, y, 2, 1); F('chair4', x - 1, y, 1, 1, { side: 'e' }); F('chair4', x + 2, y, 1, 1, { side: 'w' }); }
+  Z('冷凍食品區', 90, 39, 9, 29);
+  for (const y of [41, 46, 51, 56, 61]) F('coldcase', 97, y, 1, 3, { side: 'w', loot: 'food4' });
+  for (const y of [43, 53]) F('goods4', 92, y, 1, 4, { side: 'e', loot: 'food4' });
+  // 入口（南邊中間）：購物車、提袋架、服務台、扭蛋機
+  Z('入口', 40, 66, 21, 9);
+  F('cart4', 41, 72, 1, 1); F('cart4', 42, 72, 1, 1); F('cart4', 43, 71, 1, 1); F('cart4', 57, 72, 1, 1);
+  F('bagrack', 53, 73, 2, 1, { side: 'n', loot: 'store4' }); F('infodesk', 55, 68, 2, 1, { side: 's', loot: 'store4' });
+  F('gacha', 58, 73, 1, 1, { id: 'gacha' });
+  Z('收銀區', 8, 66, 32, 9);
+  for (const x of [12, 18, 24, 30]) F('counter4', x, 70, 3, 1, { side: 's' });
   // 洗手間、員工專用區（電箱、工作台、置物櫃、販賣機）
-  Z('洗手間', 1, 37, 6, 6);
-  F('toilet4', 1, 42, 1, 1, { side: 'n' }); F('toilet4', 3, 42, 1, 1, { side: 'n' }); F('sink4', 2, 37, 1, 1, { side: 's' }); F('sink4', 4, 37, 1, 1, { side: 's' });
-  F('cabinet4', 6, 42, 1, 1, { side: 'n', loot: 'med4' });
-  Z('員工專用區', 53, 37, 6, 6);
-  F('breaker', 58, 37, 1, 1, { id: 'breaker', side: 'w' }); F('workbench', 54, 37, 2, 1, { id: 'workbench', side: 's' });
-  F('locker4', 53, 42, 2, 1, { side: 'n', loot: 'clothes4' }); F('vending4', 58, 42, 1, 1, { side: 'n', loot: 'food4' });
-  F('table4', 55, 40, 2, 1);
-  Z('主走道', 29, 1, 2, 42, { aisle: true }); Z('主走道', 1, 21, 58, 2, { aisle: true });
-  floors.push({ x: 29, y: 1, w: 2, h: 42, floor: 'aisle4' }, { x: 1, y: 21, w: 28, h: 2, floor: 'aisle4' }, { x: 31, y: 21, w: 28, h: 2, floor: 'aisle4' });
+  Z('洗手間', 1, 69, 6, 6);
+  F('toilet4', 1, 74, 1, 1, { side: 'n' }); F('toilet4', 3, 74, 1, 1, { side: 'n' }); F('sink4', 2, 69, 1, 1, { side: 's' }); F('sink4', 4, 69, 1, 1, { side: 's' });
+  F('cabinet4', 6, 74, 1, 1, { side: 'n', loot: 'med4' });
+  Z('員工專用區', 93, 69, 6, 6);
+  F('breaker', 98, 69, 1, 1, { id: 'breaker', side: 'w' }); F('workbench', 94, 69, 2, 1, { id: 'workbench', side: 's' });
+  F('locker4', 93, 74, 2, 1, { side: 'n', loot: 'clothes4' }); F('vending4', 98, 74, 1, 1, { side: 'n', loot: 'food4' });
+  F('table4', 95, 72, 2, 1);
+  Z('主走道', W4AX, 1, 2, W4H - 2, { aisle: true }); Z('主走道', 1, W4AY, W4W - 2, 2, { aisle: true });
+  floors.push({ x: W4AX, y: 1, w: 2, h: W4H - 2, floor: 'aisle4' }, { x: 1, y: W4AY, w: W4AX - 1, h: 2, floor: 'aisle4' }, { x: W4AX + 2, y: W4AY, w: W4W - W4AX - 3, h: 2, floor: 'aisle4' });
   // 柱子（3008 那種方形的灰色水泥柱）：放在空地上，旁邊不能是牆或家具，也不能在主走道上
-  const freeAt = (x, y) => !wallSet.has(x + ',' + y) && !used.has(x + ',' + y) && x > 0 && y > 0 && x < 59 && y < 43 && x !== 29 && x !== 30 && y !== 21 && y !== 22 && !doors.some(d => d.x === x && d.y === y);
-  for (const x of [18, 26, 35, 43, 50, 57]) for (const y of [13, 18, 26, 31, 39]) {
+  const freeAt = (x, y) => !wallSet.has(x + ',' + y) && !used.has(x + ',' + y) && x > 0 && y > 0 && x < W4W - 1 && y < W4H - 1 && x !== W4AX && x !== W4AX + 1 && y !== W4AY && y !== W4AY + 1 && !doors.some(d => d.x === x && d.y === y);
+  for (let x = 6; x < W4W - 2; x += 8) for (let y = 6; y < W4H - 2; y += 8) {
     let ok = true;
     for (let dy = -1; dy <= 1 && ok; dy++) for (let dx = -1; dx <= 1; dx++) if (!freeAt(x + dx, y + dy)) { ok = false; break; }
-    if (ok && !(x >= 24 && x <= 36 && y >= 37)) W(x, y);   // 入口前面留空
+    if (ok && !(x >= W4AX - 6 && x <= W4AX + 7 && y >= W4H - 9)) W(x, y);   // 入口前面留空
   }
   const walls = [...wallSet].map(k => k.split(',').map(Number));
   return { rooms, walls, doors, furn, zones, floors, cubes };
 })();
 // 第四世界的固定位置：起點（入口，面向北邊）、晚上店員從員工專用區走出來的地方、墮落戰神在主走道巡邏的四個端點
 const W4 = {
-  start: { x: 29.5, y: 40.5, face: -Math.PI / 2 },
-  staffOut: { x: 51.5, y: 39.5 },
-  patrol: [{ x: 29.5, y: 1.5 }, { x: 29.5, y: 41.5 }, { x: 1.5, y: 21.5 }, { x: 58.5, y: 21.5 }],
-  starterPlanks: [[27.5, 38.5], [28, 38.5], [31.5, 38.5], [32, 38.5]],   // 新遊戲送的 4 片木頭板子（放在入口旁邊的地上）
+  start: { x: W4AX + 0.5, y: W4H - 3.5, face: -Math.PI / 2 },
+  staffOut: { x: 91.5, y: 71.5 },
+  patrol: [{ x: W4AX + 0.5, y: 1.5 }, { x: W4AX + 0.5, y: W4H - 2.5 }, { x: 1.5, y: W4AY + 0.5 }, { x: W4W - 1.5, y: W4AY + 0.5 }],
+  starterPlanks: [[W4AX - 1.5, W4H - 5.5], [W4AX - 1, W4H - 5.5], [W4AX + 2.5, W4H - 5.5], [W4AX + 3, W4H - 5.5]],   // 新遊戲送的 4 片木頭板子（放在入口旁邊的地上）
 };
 // 天氣：紅月（2 天）、寒寂之境（4 天）、酸雨（每局隨機 2～3 次，開新遊戲時排好）
 const RED_MOON_W4 = [5, 11], COLD_DAYS_W4 = [3, 6, 9, 12];

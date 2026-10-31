@@ -690,21 +690,41 @@ await scenario('cut2', '第二到第三世界的過場動畫（?cut=2）：月�
   await shot('3-day1');
 });
 
-await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：賣場、撿板子蓋牆圍成家、屋頂、檯燈的光不穿牆、搬家具、背包 16 格、火爐、存檔讀檔', {}, async ({ page, shot, check }) => {
+await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：100×76 的大賣場、架上真的東西（拿起、放下再撿回來）、撿板子蓋牆圍成家、屋頂、斜放 45° 的牆、檯燈的光不穿牆、搬家具、背包 16 格、火爐、存檔讀檔、舊存檔', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=4&kit=1', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
   await sleep(2000);
   const s = await state(page);
   check(s.hud && s.day === 1 && s.phase === 'day', `要在第四世界第 1 天早上（現在：${s.label}）`);
   const info = await page.evaluate(() => ({ world: curWorld, w: MAP_W, h: MAP_H, loose: G.loose4.length, day: DAY_LEN, night: NIGHT_LEN, bag: bagUsed(), piles: FURN.filter(f => f.type === 'plankpile' && f.count > 0).length, staff: G.enemies.filter(e => e.kind === 'staff' && e.idle).length }));
-  check(info.world === 4 && info.w === 60 && info.h === 44, `第四世界的地圖要是 60×44（世界 ${info.world}、${info.w}×${info.h}）`);
+  check(info.world === 4 && info.w === 100 && info.h === 76, `第四世界的地圖要是 100×76（世界 ${info.world}、${info.w}×${info.h}）`);
   check(info.day === 300 && info.night === 360, `白天 5 分鐘、晚上 6 分鐘（${info.day}／${info.night} 秒）`);
   check(info.loose >= 4 && info.piles >= 10, `入口旁邊的地上要有板子、倉儲區要有板材堆（地上 ${info.loose} 片、板材堆 ${info.piles} 堆）`);
   check(info.bag <= 16, `kit 帶的東西不能超過背包 16 格（${info.bag} 格）`);
   check(info.staff >= 2, `白天賣場裡要站著不動的店員（${info.staff} 隻）`);
-  await page.evaluate(() => { G.t = 100; Object.assign(G.p, { x: 29.5, y: 30.5, face: -Math.PI / 2, pitch: 0 }); });
+  await page.evaluate(() => { G.t = 100; Object.assign(G.p, { x: 49.5, y: 61.5, face: -Math.PI / 2, pitch: 0 }); });
   await sleep(1500);
   await shot('1-store');
+  // 架上真的東西（設計師：東西就直接是實體）：看著它按 E 拿起來；放在地上之後還能再撿回來；第四世界的燈泡叫「檯燈」
+  const items = await page.evaluate(() => {
+    const shelf = G.pickups.filter(pk => pk.s).length;
+    const pk = G.pickups.find(p => p.s && FURN_BY_ID[p.s].type === 'goods4' && p.z < 1.2 && p.id !== 'coin');
+    Object.assign(G.p, { x: pk.x + Math.cos(pk.a), y: pk.y + Math.sin(pk.a), face: pk.a + Math.PI, pitch: Math.atan2(pk.z + 0.1 - 1.5, 1) });
+    const t = getTarget(), id = pk.id, n0 = G.inv[id] || 0;
+    if (t && t.action) t.action();
+    const took = (G.inv[id] || 0) > n0 || (G.hand && G.hand.id === id);
+    // 放在地上，再看著它撿回來
+    G.hand = null; G.inv[id] = Math.max(G.inv[id] || 0, 1); G.selId = id;
+    const c0 = G.inv[id]; dropSelected4(false);
+    const dropped = G.pickups.find(p => p.id === id && !p.s && Math.hypot(p.x - G.p.x, p.y - G.p.y) < 1.2);
+    Object.assign(G.p, { pitch: -Math.atan2(1.4, 0.7) });
+    const lp = lookedPickup4(); if (lp) takePickup4(lp.pk);
+    return { shelf, label: t && t.label, took, dropped: !!dropped, back: (G.inv[id] || 0) === c0, lamp: bulbName(1), flash7: FLASH_TIERS[7].name };
+  });
+  check(items.shelf > 60, `架子上要擺著真的東西（${items.shelf} 個）`);
+  check(items.took && items.label && items.label.startsWith('拿起'), `看著架上的東西按 E 要拿起來（「${items.label}」）`);
+  check(items.dropped && items.back, `放在地上的東西要能再撿回來（放下 ${items.dropped}、撿回 ${items.back}）`);
+  check(items.lamp.includes('檯燈') && items.flash7.startsWith('星晃'), `第四世界的燈泡叫檯燈、第 7 級手電筒叫星晃（${items.lamp}、${items.flash7}）`);
   // 撿地上的板子（E 的互動）→ 預覽是綠色 → 放下變成一面牆；第一次放牆會自動記成家
   const first = await page.evaluate(() => {
     const l = G.loose4[0];
@@ -712,14 +732,14 @@ await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：賣場、撿�
     const t = getTarget();
     if (t && t.action) t.action();
     const held = G.hand && G.hand.k === 'plank';
-    Object.assign(G.p, { x: 34.5, y: 40.5, face: 0, pitch: 0 }); G.bld.dist = 1.1;
+    Object.assign(G.p, { x: 54.5, y: 71.5, face: 0, pitch: 0 }); G.bld.dist = 1.1;
     const g = ghost4(), n0 = G.b4.n;
     place4();
     return { label: t && t.label, held, ok: g && g.ok, kind: g && g.kind, placed: G.b4.n - n0, home: !!G.home, hand: G.hand };
   });
   check(first.held && first.label && first.label.includes('板子'), `對著地上的板子按 E 要拿起來（互動「${first.label}」）`);
   check(first.ok && first.kind === 'wall' && first.placed === 1 && first.home && !first.hand, `拿著板子按 E 要放下一面牆、記成家（預覽 ${first.kind}/${first.ok}、放了 ${first.placed} 片、家 ${first.home}）`);
-  // 用板子圍出 2×2 的家（x 31～32、y 38～39）：一面玻璃、一扇木門，上面蓋 4 片屋頂
+  // 用板子圍出 2×2 的家（x 51～52、y 69～70）：一面玻璃、一扇木門，上面蓋 4 片屋頂（屋頂是繞 X 轉 90°）
   const house = await page.evaluate(() => {
     const out = [];
     const put = (tier, door, pos, rx = 0) => {
@@ -731,10 +751,10 @@ await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：賣場、撿�
     };
     const tiers = [1, 2, 3, 4, 1, 2, 5, 3];
     let i = 0;
-    for (const x of [31, 32]) { put(tiers[i++], false, { x: x + 0.5, y: 38 - 1.1, face: Math.PI / 2 }); put(tiers[i++], x === 32, { x: x + 0.5, y: 40 - 1.1, face: Math.PI / 2 }); }
-    for (const y of [38, 39]) { put(tiers[i++], false, { x: 31 - 1.1, y: y + 0.5, face: 0 }); put(tiers[i++], false, { x: 33 - 1.1, y: y + 0.5, face: 0 }); }
-    for (const x of [31, 32]) for (const y of [38, 39]) put(1, false, { x: x + 0.5, y: y + 1.6, face: -Math.PI / 2 }, 1);
-    Object.assign(G.p, { x: 31.6, y: 38.6, face: 0 });
+    for (const x of [51, 52]) { put(tiers[i++], false, { x: x + 0.5, y: 69 - 1.1, face: Math.PI / 2 }); put(tiers[i++], x === 52, { x: x + 0.5, y: 71 - 1.1, face: Math.PI / 2 }); }
+    for (const y of [69, 70]) { put(tiers[i++], false, { x: 51 - 1.1, y: y + 0.5, face: 0 }); put(tiers[i++], false, { x: 53 - 1.1, y: y + 0.5, face: 0 }); }
+    for (const x of [51, 52]) for (const y of [69, 70]) put(1, false, { x: x + 0.5, y: y + 1.6, face: -Math.PI / 2 }, 90);
+    Object.assign(G.p, { x: 51.6, y: 69.6, face: 0 });
     return { bad: out.filter(Boolean), walls: G.b4.n, roofs: G.b4.roofs.size, home: atHome4(), cover: sheltered4(G.p.x, G.p.y) };
   });
   check(house.bad.length === 0, '每片板子都要放得下：' + house.bad.join('；'));
@@ -742,26 +762,26 @@ await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：賣場、撿�
   check(house.home && house.cover, `站在圍起來、有屋頂的地方要算「在家裡」、淋不到雨（在家 ${house.home}、遮著 ${house.cover}）`);
   // 檯燈：選燈泡按 Q 會在前面放一盞檯燈；家裡的燈不會穿過牆照到外面（玻璃透光）
   const lamp = await page.evaluate(() => {
-    Object.assign(G.p, { x: 31.5, y: 39.6, face: -Math.PI / 2 }); G.selId = 'bulb5';
+    Object.assign(G.p, { x: 51.5, y: 70.6, face: -Math.PI / 2 }); G.selId = 'bulb5';
     const n0 = G.lamps.length; useSelected(); buildLights();
     const L = G.lamps[G.lamps.length - 1];
-    return { placed: G.lamps.length - n0, free: !!(L && L.free), inside: lightAt4(32.5, 38.5, 0), outsideWood: lightAt4(33.5, 38.5, 0), outsideGlass: lightAt4(30.5, 39.5, 0) };
+    return { placed: G.lamps.length - n0, free: !!(L && L.free), inside: lightAt4(52.5, 69.5, 0), outsideWood: lightAt4(53.5, 69.5, 0), outsideGlass: lightAt4(50.5, 70.5, 0) };
   });
   check(lamp.placed === 1 && lamp.free, `選燈泡按 Q 要放一盞檯燈（放了 ${lamp.placed} 盞）`);
   check(lamp.inside > 0.1 && lamp.outsideWood === 0 && lamp.outsideGlass > 0, `家裡的燈不能穿過牆照到外面，玻璃要透光（裡面 ${lamp.inside.toFixed(2)}、木牆外 ${lamp.outsideWood.toFixed(2)}、玻璃外 ${lamp.outsideGlass.toFixed(2)}）`);
-  await page.evaluate(() => { Object.assign(G.p, { x: 32.5, y: 35.6, face: Math.PI / 2 + 0.25, pitch: -0.05 }); });
+  await page.evaluate(() => { Object.assign(G.p, { x: 52.5, y: 66.6, face: Math.PI / 2 + 0.25, pitch: -0.05 }); });
   await sleep(1500);
   await shot('2-house');
   // 搬家具：按住 E 拿起椅子，放在別的地方（3D 模型跟著重建）
   const chair = await page.evaluate(() => {
-    const f = FURN.find(f => f.type === 'chair4' && f.x === 32 && f.y === 31);
+    const f = FURN.find(f => f.type === 'chair4' && !(zoneAt(f.x, f.y) || {}).cube);
     takeFurn4(f);
     const held = G.hand && G.hand.f === f;
-    Object.assign(G.p, { x: 35.5, y: 40.5, face: 0 }); G.bld.dist = 1.4;
+    Object.assign(G.p, { x: 56.5, y: 70.5, face: 0 }); G.bld.dist = 1.4;
     const g = ghost4(); place4();
     return { held, ok: g && g.ok, x: f.x, y: f.y, solid: solid[f.y][f.x], hand: G.hand };
   });
-  check(chair.held && chair.ok && chair.x === 36 && chair.y === 40 && chair.solid && !chair.hand, `椅子要能搬到別的地方（拿起 ${chair.held}、放在 ${chair.x},${chair.y}）`);
+  check(chair.held && chair.ok && chair.x === 57 && chair.y === 70 && chair.solid && !chair.hand, `椅子要能搬到別的地方（拿起 ${chair.held}、放在 ${chair.x},${chair.y}）`);
   // 背包 16 格：滿了以後新的東西只能拿在手上（第 17 個）；手上拿著板子就拿不了
   const bag = await page.evaluate(() => {
     const extra = Object.keys(ITEMS).filter(id => !G.inv[id] && ITEMS[id].kind === 'food');
@@ -786,13 +806,34 @@ await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：賣場、撿�
   const sv = await page.evaluate(() => {
     const data = JSON.parse(JSON.stringify(save4()));
     load4(data);
-    const f = FURN.find(f => f.type === 'chair4' && f.x === 36 && f.y === 40);
+    const f = FURN.find(f => f.type === 'chair4' && f.x === 57 && f.y === 70);
     return { walls: G.b4.n, roofs: G.b4.roofs.size, chair: !!f, home: !!G.home, glass: G.b4.list.some(w => w.tier === 5 && w.hp === Infinity), door: G.b4.list.some(w => w.door) };
   });
   check(sv.walls === 9 && sv.roofs === 4 && sv.chair && sv.home && sv.glass && sv.door, `存檔讀回來牆、屋頂、家具、家都要在（${JSON.stringify(sv)}）`);
+  // 斜放的牆（XYZ 也要有分 15°、45°、90°）：一次轉 45°，放下去是斜的、擋得住人，存檔讀回來還是斜的；吹口哨會看到紅點
+  const free = await page.evaluate(() => {
+    holdThing({ k: 'plank', tier: 1 });
+    Object.assign(G.p, { x: 49.5, y: 64.5, face: -Math.PI / 2, pitch: 0 }); Object.assign(G.bld, { dist: 1.5, step: 45, axis: 'y' });
+    rotateHand();
+    const g = ghost4(); place4();
+    const w = G.b4.list.find(w => w.free);
+    const hit = w ? hitsWall4(w.cx, w.cy, PLAYER_R) : false;
+    const back = w ? (load4(JSON.parse(JSON.stringify(save4()))), G.b4.list.some(x => x.free && Math.abs(x.ang - w.ang) < 0.01)) : false;
+    const e = spawnEnemy('mimic', { x: 49.5, y: 55.5 }); if (e) e.spawn = 0;
+    whistle4();
+    return { kind: g && g.kind, ok: g && g.ok, deg: w ? Math.round(w.ang * 180 / Math.PI) : null, hit, back, dots: whistleDots4().filter(d => d.red).length };
+  });
+  check(free.kind === 'free' && free.ok && free.deg % 90 !== 0 && free.hit && free.back, `一次轉 45° 要放得下斜的牆、擋得住人、存檔讀回來（${JSON.stringify(free)}）`);
+  check(free.dots > 0, `吹口哨要看到怪物的紅點（${free.dots} 個）`);
+  // 舊的小賣場存檔（60×44）：蓋的板子要堆在入口旁邊、家要重記，不能壞掉
+  const old = await page.evaluate(() => {
+    load4({ walls: [['h', 31, 38, 1, 40, 0, 0], ['v', 31, 38, 2, 100, 0, 0]], roofs: [[31, 38, 1, 40]], home: { x: 31.5, y: 38.5 }, loose: [[30, 39, 3, 0]], furn: [] });
+    return { walls: G.b4.n, loose: G.loose4.length, home: G.home, x: G.p.x, y: G.p.y, ok: walkable(G.p.x, G.p.y) };
+  });
+  check(old.walls === 0 && old.loose === 4 && !old.home && old.ok, `舊的小賣場存檔：板子要堆在入口旁邊、家要重記（${JSON.stringify(old)}）`);
 });
 
-await scenario('w4night', '第四世界的晚上（?world=4&night=2&kit=1）：燈熄了、店員巡邏、怪物打破木牆、玻璃打不破；5 隻新怪物和神秘店員排一排（手電筒第 7 級星辰）', {}, async ({ page, shot, check }) => {
+await scenario('w4night', '第四世界的晚上（?world=4&night=2&kit=1）：燈熄了、店員巡邏、怪物打破木牆、玻璃打不破；照設計圖重做的 5 隻新怪物和神秘店員排一排（手電筒第 7 級星晃）', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=4&night=2&kit=1', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
   await page.evaluate(() => { G.t = DAY_LEN - 0.05; });
@@ -804,10 +845,10 @@ await scenario('w4night', '第四世界的晚上（?world=4&night=2&kit=1）：�
   // 擋路的木牆：店員走不過去就會打，打到破掉；玻璃牆打不破，路線會繞開
   const bash = await page.evaluate(() => {
     G.enemies = []; G.ev.schedule = [];
-    Object.assign(G.p, { x: 30.5, y: 33.5, face: -Math.PI / 2, inv: 999, hp: 100 });
+    Object.assign(G.p, { x: 50.5, y: 45.5, face: -Math.PI / 2, inv: 999, hp: 100 });
     // 把玩家圍在主走道的一格裡（四面木頭板子），店員從北邊過來
-    for (const [o, x, y] of [['h', 30, 33], ['h', 30, 34], ['v', 30, 33], ['v', 31, 33]]) setWall({ o, x, y, tier: 1, hp: 40, door: false, open: false });
-    const e = Object.assign(spawnEnemy('staff', { x: 30.5, y: 29.5 }), { spawn: 0, state: 'chase', idle: false, lx: G.p.x, ly: G.p.y });
+    for (const [o, x, y] of [['h', 50, 45], ['h', 50, 46], ['v', 50, 45], ['v', 51, 45]]) setWall({ o, x, y, tier: 1, hp: 40, door: false, open: false });
+    const e = Object.assign(spawnEnemy('staff', { x: 50.5, y: 41.5 }), { spawn: 0, state: 'chase', idle: false, lx: G.p.x, ly: G.p.y });
     const hp0 = G.b4.list.map(w => w.hp).reduce((a, b) => a + b, 0);
     for (let i = 0; i < 400 && G.b4.n === 4; i++) { updateEnemies(0.05); }
     const hp1 = G.b4.list.map(w => w.hp).reduce((a, b) => a + b, 0);
@@ -816,21 +857,21 @@ await scenario('w4night', '第四世界的晚上（?world=4&night=2&kit=1）：�
   check(bash.broke || bash.hp1 < bash.hp0, `店員要打擋路的木牆（耐打 ${bash.hp0} → ${bash.hp1}、打破 ${bash.broke}）`);
   const glass = await page.evaluate(() => {
     for (const w of [...G.b4.list]) removeWall(w);
-    const gw = { o: 'h', x: 30, y: 33, tier: 5, hp: Infinity, door: false, open: false };
+    const gw = { o: 'h', x: 50, y: 45, tier: 5, hp: Infinity, door: false, open: false };
     setWall(gw);
-    const e = G.enemies[0] || spawnEnemy('staff', { x: 30.5, y: 31.5 });
-    e.wallAhead = gw; Object.assign(e, { x: 30.5, y: 32.7 });
+    const e = G.enemies[0] || spawnEnemy('staff', { x: 50.5, y: 43.5 });
+    e.wallAhead = gw; Object.assign(e, { x: 50.5, y: 44.7 });
     for (let i = 0; i < 60; i++) bash4(e, 0.1);
-    return { hp: gw.hp, cost: edgeCost4(30, 32, 30, 33, '') };
+    return { hp: gw.hp, cost: edgeCost4(50, 44, 50, 45, '') };
   });
   check(glass.hp === Infinity && glass.cost === Infinity, `玻璃牆要打不破、尋路不能穿過（耐打 ${glass.hp}、通過代價 ${glass.cost}）`);
   // 怪物排一排：玩家站在主走道上往北看
   const lineup = await page.evaluate(() => {
     for (const w of [...G.b4.list]) removeWall(w);
     G.enemies = []; G.ev.schedule = [];
-    Object.assign(G.p, { x: 29.8, y: 27.5, face: -Math.PI / 2, pitch: 0.1, inv: 999, flashLv: 7, bat: 100 });
+    Object.assign(G.p, { x: 49.9, y: 52.5, face: -Math.PI / 2, pitch: 0.12, inv: 999, flashLv: 7, bat: 100 });
     const put = (kind, x, y, extra) => Object.assign(spawnEnemy(kind, { x, y }), { spawn: 0, pose: true, face: Math.PI / 2, state: 'idle' }, extra);
-    put('staff', 27.5, 23.5); put('shake', 28.9, 23.0, { awake: true }); put('mimic', 30.2, 23.4); put('hubert', 31.6, 23.2); put('ember', 30.0, 20.5);
+    put('staff', 47.6, 47.5); put('shake', 48.9, 47.3, { awake: true }); put('mimic', 50.4, 47.5); put('hubert', 52.2, 47.2); put('ember', 49.9, 44.0);
     G.t = Math.max(G.t, 1); G.stock = G.stock && G.stock.length ? G.stock : [['battery', 3]];
     return G.enemies.length;
   });
@@ -845,7 +886,7 @@ await scenario('w4night', '第四世界的晚上（?world=4&night=2&kit=1）：�
   check((await state(page)).flash === true, '按 F 要打開手電筒');
   await shot('2-lineup-flash7');
   // 神秘店員：白天在賣場的某個地方（黃色雨衣、帽兜裡兩點眼睛）
-  await page.evaluate(() => { G.phase = 'day'; G.t = 100; G.enemies = []; Object.assign(MERCHANT_POS, { x: 29.5, y: 24.5 }); Object.assign(G.p, { x: 29.6, y: 27.2, face: -Math.PI / 2, pitch: 0.05, flash: false }); });
+  await page.evaluate(() => { G.phase = 'day'; G.t = 100; G.enemies = []; Object.assign(MERCHANT_POS, { x: 49.9, y: 47.6 }); Object.assign(G.p, { x: 49.9, y: 50.3, face: -Math.PI / 2, pitch: 0.05, flash: false }); });
   await sleep(1800);
   await shot('3-clerk');
 });
@@ -854,7 +895,7 @@ await scenario('w4wx', '第四世界的天氣（寒寂之境下雪、酸雨、�
   await page.goto(BASE + '?world=4&night=3&kit=1&cold', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
   await sleep(1500);
-  const cold = await page.evaluate(() => { G.phase = 'day'; G.t = 100; Object.assign(G.p, { x: 29.5, y: 30.5, face: -Math.PI / 2, pitch: 0.2 }); const t0 = G.p.temp; for (let i = 0; i < 40; i++) updateTemp4(0.25); return { cold: G.cold, t0, t1: G.p.temp }; });
+  const cold = await page.evaluate(() => { G.phase = 'day'; G.t = 100; Object.assign(G.p, { x: 49.5, y: 61.5, face: -Math.PI / 2, pitch: 0.2 }); const t0 = G.p.temp; for (let i = 0; i < 40; i++) updateTemp4(0.25); return { cold: G.cold, t0, t1: G.p.temp }; });
   await sleep(1500);
   cold.bar = await page.evaluate(() => !document.getElementById('tempBar').classList.contains('hidden'));
   check(cold.cold && cold.t1 < cold.t0 && cold.bar, `寒寂之境：體溫要往下掉、要顯示體溫條（${cold.t0} → ${cold.t1}、體溫條 ${cold.bar}）`);
@@ -863,10 +904,10 @@ await scenario('w4wx', '第四世界的天氣（寒寂之境下雪、酸雨、�
   const acid = await page.evaluate(() => {
     G.cold = false;
     G.acid = { day: G.day, night: false, at: 0, dur: 90, started: true, warned: true }; G.acidT = 90;
-    Object.assign(G.p, { x: 29.5, y: 30.5, hp: 100, inv: 0 });
+    Object.assign(G.p, { x: 49.5, y: 61.5, hp: 100, inv: 0 });
     for (let i = 0; i < 20; i++) updateAcid4(0.1);
     const hpOut = G.p.hp;
-    G.b4.roofs.set('29,30', { x: 29, y: 30, tier: 1, hp: 40 }); G.b4.ver++;
+    G.b4.roofs.set('49,61', { x: 49, y: 61, tier: 1, hp: 40 }); G.b4.ver++;
     G.p.hp = 100;
     for (let i = 0; i < 20; i++) updateAcid4(0.1);
     return { on: acidOn4(), hpOut, hpIn: G.p.hp };
@@ -891,6 +932,10 @@ await scenario('w4wx', '第四世界的天氣（寒寂之境下雪、酸雨、�
     if (t === 'flash') await shot('4-bulbbook-flash');
   }
   check(bb.bulb === 15 && bb.flash === 7 && bb.plank === 5, `燈泡圖鑑要有 15 種燈泡、7 級手電筒、5 級板子（${JSON.stringify(bb)}）`);
+  // 手電筒 4～7 級的卡片邊框會閃（跟生物圖鑑的閻羅、酆都級一樣）
+  await page.click('#bulbTabs button[data-t="flash"]');
+  const blink = await page.evaluate(() => { for (let lv = 4; lv <= 7; lv++) markFlash(lv); showBulbPage('flash'); return [...document.querySelectorAll('#bulbList .bcardx')].filter(el => el.style.animation.includes('flk')).length; });
+  check(blink === 4, `手電筒第 4～7 級的卡片邊框要會閃（${blink} 張）`);
   // 生物圖鑑的第四世界：見過之後是 3D 模型
   await page.goto(BASE, { waitUntil: 'load' });
   await page.waitForSelector('#btnBook');
