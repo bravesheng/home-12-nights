@@ -1,6 +1,6 @@
 'use strict';
 // ===== 第三世界：末班列車 =====
-// 地圖是一列長長的列車（機車室 → 普通車廂 → 餐車 → 景觀車廂 → 臥鋪車廂），北邊是走得到的車頂，南邊是車站（露天的月台和候車室）。
+// 地圖是一列長長的列車（機車室 → 普通車廂 → 餐車 → 景觀車廂），北邊是走得到的車頂，南邊是車站（露天的月台和候車室）。
 // 白天列車停在車站，從三節車廂的車門下車找物資和寶箱；晚上列車開走，車站鎖起來，
 // 要把木柴、木炭丟進機車室的火爐讓列車一直開。火熄了列車停下來，車外的東西就會擠進來。
 // 這個檔案在 game.js 之前載入，函式裡用到的 G、toast、move… 都是遊戲跑起來之後才呼叫。
@@ -42,7 +42,8 @@ function startDay3(d) {
   Object.assign(G.ev, { whistled: false, lockWarned: false, clackT: 0, fireLow: 0 });
   placeChests3();
   toast(`🚉 列車停靠在「${curStation()}」。白天車站的門開著，下車去找物資和寶箱吧。`, 'good');
-  if (G.cold) toast('❄️ 寒寂之境：今天整天下雪、零下 100 度。體溫歸零就會死，常回火爐旁邊取暖！', 'warn');
+  if (G.cold) toast('❄️ 寒寂之境：今天整天下雪、零下 100 度。體溫歸零就會死，常回火爐旁邊取暖！手上拿著蠟燭也會暖和一點。', 'warn');
+  toast(`🧳 神秘商人在${RN('platform')}上，${RN('lounge')}車門下車的正前方（小地圖上的紫色圓點）。`);
   const left = LAST_NIGHT - d;
   if (left > 0 && d > 1) toast(`🎯 距離終點站還有 ${left} 站。今天的目標：找夠今晚的燃料（${NIGHT_LEN} 秒），天黑前回到車上。`);
 }
@@ -62,9 +63,10 @@ function dayTips3() {
   if (t > 13 && !ev.w3tip2) { ev.w3tip2 = 1; toast(`🪵 晚上要把木柴、木炭丟進車頭${RN('engine')}的火爐，列車才會一直開。${RN('platform')}的木堆每天都有木柴。`); }
   if (t > 25 && !ev.w3tip3) { ev.w3tip3 = 1; toast('🚪 天黑前 20 秒會聽到汽笛，天黑前 3 秒車站的門就會鎖上，一定要先回到車上！', 'warn'); }
   if (t > 37 && !ev.tipPan && !G.inv.pan) { ev.tipPan = 1; toast(`🍳 ${RN('dining')}的抽屜裡好像有一個平底鍋，可以拿來打怪物！`); }
-  if (t > 50 && !ev.w3tip4) { ev.w3tip4 = 1; toast(`🪙 神秘商人在${RN('platform')}，幸運機在${RN('waiting')}，修車工具台在${RN('engine')}。`); }
+  if (t > 50 && !ev.w3tip4) { ev.w3tip4 = 1; toast(`🪙 神秘商人在${RN('platform')}（${RN('lounge')}車門外），幸運機在${RN('waiting')}，修車工具台在${RN('engine')}。`); }
   if (t > 64 && !ev.w3tip5) { ev.w3tip5 = 1; toast('💡 這裡的藍鑽、紅鑽、紫鑽燈泡，變成了黃銅、鍍金、水晶吊燈燈泡。'); }
-  if (t > 78 && !ev.w3tip6) { ev.w3tip6 = 1; toast(`🪜 ${RN('coach')}、${RN('lounge')}、${RN('sleeper')}裡有爬梯可以爬上車頂：風很大，但大部分的怪物上不來。`); }
+  if (t > 78 && !ev.w3tip6) { ev.w3tip6 = 1; toast(`🪜 ${RN('coach')}和${RN('lounge')}裡有爬梯可以爬上車頂：風很大，但大部分的怪物上不來。`); }
+  if (t > 100 && !ev.w3tip8) { ev.w3tip8 = 1; toast('🪑 對著座位、椅子按 E 可以坐下，對著床可以躺下；按跳可以跳上桌子、椅子、床，甚至乘客的頭上。'); }
   if (t > 92 && !ev.w3tip7) { ev.w3tip7 = 1; toast(`🚂 狀態列最上面的 🎯 是今天的目標。${RN('engine')}的駕駛台可以拉汽笛（很吵）。`); }
 }
 // 白天：汽笛、鎖門、月台上飄過的蒸汽
@@ -105,6 +107,8 @@ function updateNight3(dt) {
   updateFire3(dt);
   if (mode !== 'play') return;
   if (ev.paxTurn) { ev.paxTurn.t += dt; if (ev.paxTurn.t > 16) ev.paxTurn = null; }
+  // 晚上座位上的乘客看到你，頭會慢慢轉過來一直盯著你（3D 畫面在 render3d.js 的 updatePassengers）
+  if (tr.t > 4 && !ev.stareTip && !onRoof(G.p.x, G.p.y)) { ev.stareTip = 1; Sound.play('whisper'); toast('👤 ……座位上的乘客，頭一個一個慢慢轉了過來，盯著你。', 'warn'); }
   ev.whistleCd = Math.max(0, (ev.whistleCd || 0) - dt);
   dustMotes(dt);
   roofFx(dt);
@@ -126,7 +130,7 @@ function scheduleNight3(add, again, night, n, hz) {
 }
 
 // ====================================================================
-// 車頂：從行李車、景觀車廂、盥洗室的爬梯上去，對著車頂的艙口爬回來（直接換位置；車頂比車廂地板高，3D 畫面照 floorH 擺）。
+// 車頂：從普通車廂、景觀車廂的爬梯上去，對著車頂的艙口爬回來（直接換位置；車頂比車廂地板高，3D 畫面照 floorH 擺）。
 // 風很大：風聲、迎面飛過的光點、鏡頭多晃一點；寒寂之境時體溫掉得最快。大部分的怪物爬不上來，檮杌會跳上來
 // ====================================================================
 const ladders = () => FURN.filter(f => f.type === 'ladder');
@@ -190,7 +194,7 @@ function alerts3() {
   for (const e of G.enemies) {
     if (e.kind === 'kronos') a.push('🍄 蕈裂在列車上（怕光，不敢靠近火爐）');
     else if (e.kind === 'tyrant') a.push(e.cooled > 0 ? '🪨 熔岩暴君冷卻了！快用平底鍋敲' : '🪨 熔岩暴君在列車上（聖水槍冷卻再敲）');
-    else if (e.kind === 'warlord') a.push('⚔️ 墮落戰神在走道裡（從背後打、躲進包廂關門）');
+    else if (e.kind === 'warlord') a.push('⚔️ 墮落戰神在走道裡（從背後打、躲進機車室關門）');
     else if (e.kind === 'taowu') a.push(e.blind > 0 ? '👁️ 檮杌瞎了！傷害 3 倍' : `👁️ 檮杌・九瞳在列車上（眼睛 ${e.eyes.filter(x => x.shut).length}/9）`);
   }
   if (G.phase === 'night') {
@@ -200,6 +204,7 @@ function alerts3() {
     else if (fuelLeft() < 20) a.push(`🔥 火快熄了（剩 ${Math.round(fuelLeft())} 秒）`);
   }
   if (onRoof(G.p.x, G.p.y)) a.push('🌬️ 你在車頂（對著艙口按住 E 爬回車廂）');
+  if (G.cold && candleHeld()) a.push('🕯️ 蠟燭讓你暖和一點');
   return a;
 }
 // 狀態列：🔥 火力（火還能燒幾秒，低於 20 秒會閃）、🌡️ 體溫（只有寒寂之境顯示）
@@ -246,13 +251,13 @@ function addTargets3(cands) {
     if (f.type === 'ladder') cands.push({ d: rd - 0.2, id: 'ladder:' + f.id, label: '爬上車頂', sub: '按住 E', hold: 0.8, action: () => climbRoof(f) });
     else cands.push({ d: rd - 0.4, id: 'hatch:' + f.id, label: '爬回車廂', sub: '按住 E', hold: 0.8, action: () => climbDown(f) });
   }
-  // 包廂的門可以關（墮落戰神進不來）：對著門按 E。車站的門和車廂之間連結處的門不行
+  // 機車室的門可以關（墮落戰神進不來）：對著門按 E。車站的門和車廂之間連結處的門不行
   for (const d of DOORS) {
     if (d.front || d.station || d.vest || d.locked) continue;
     const cx = d.x + 0.5, cy = d.y + 0.5, rd = Math.hypot(cx - p.x, cy - p.y);
     if (rd > 1.4 || rd < 0.55 || lookAngle(cx, cy) > 0.9) continue;
-    if (d.closed) cands.push({ d: rd + 0.4, id: `door:${d.x},${d.y}`, label: '打開包廂門', hold: 0, action: () => { setDoor(d, false); Sound.play('click'); } });
-    else cands.push({ d: rd + 0.4, id: `door:${d.x},${d.y}`, label: '關上包廂門', sub: '關上的門擋得住怪物（檮杌除外）', hold: 0, action: () => closeDoor3(d) });
+    if (d.closed) cands.push({ d: rd + 0.4, id: `door:${d.x},${d.y}`, label: '打開機車室的門', hold: 0, action: () => { setDoor(d, false); Sound.play('click'); } });
+    else cands.push({ d: rd + 0.4, id: `door:${d.x},${d.y}`, label: '關上機車室的門', sub: '關上的門擋得住怪物（檮杌除外）', hold: 0, action: () => closeDoor3(d) });
   }
 }
 function pullWhistle() {
@@ -442,9 +447,10 @@ function chestLoot(lv) {
   const legend = [FIRE_TIER, ANGEL_TIER, HEAL_TIER, SLIME_TIER];
   if (lv === 1) {
     items.push(['wood', randi(2, 3)], [pick(['snack', 'battery', 'candle', 'chocolate']), 1]);
+    if (Math.random() < 0.6) items.push(['battery', 1]);   // 設計師說電池太少
     if (Math.random() < 0.7) items.push([bulb(1, 4), 1]);
   } else if (lv === 2) {
-    items.push(['charcoal', randi(1, 2)], [pick(['canned', 'marble', 'firecracker', 'cocoa']), 1], [bulb(4, 7), 1]);
+    items.push(['charcoal', randi(1, 2)], [pick(['canned', 'marble', 'firecracker', 'cocoa']), 1], [bulb(4, 7), 1], ['battery', randi(1, 2)]);
     if (Math.random() < 0.2) items.push(['key', 1]);
   } else if (lv === 3) {
     items.push(['charcoal', randi(2, 3)], [Math.random() < 0.3 ? bulb(8, 9) : bulb(6, 9), 1], [pick(['salt', 'holywater', 'strongflash', 'amulet', 'medkit']), 1]);
@@ -504,10 +510,13 @@ function chestMonster(c) {
 
 // ====================================================================
 // 寒寂之境（第 3、7、10、12 天）：整天下雪、零下 100 度，多了「體溫」。體溫歸零就死。
-// 每秒掉：車頂 3、車站（室外）2、列車上 0.8；機車室火爐有燒 +3；大白燈 3 格內 +5、被大白抱住 +10；熔岩暴君身邊 3 格 +4
+// 每秒掉：車頂 3、車站（室外）2、列車上 0.8；機車室火爐有燒 +3；大白燈 3 格內 +5、被大白抱住 +10；熔岩暴君身邊 3 格 +4；手上拿著蠟燭掉的只剩四分之一
 // 大白燈（第 15 級）：燈下站著一個大白，走到它面前它會抱住你（被打只扣一半的血）。不管有沒有下雪都會回體溫
 // ====================================================================
 const BAYMAX_WARM_R = 3, BAYMAX_HUG_R = 1.0;
+// 手上拿著蠟燭（物品列選中蠟燭）：寒寂之境時體溫掉得慢很多，3D 畫面的手上也會拿著一根點著的蠟燭
+const CANDLE_HAND_SECS = 90;
+const candleHeld = () => !!(G && G.selId === 'candle' && G.inv.candle > 0 && mode === 'play');
 function nearestBaymax() {
   const p = G.p, tx = Math.floor(p.x), ty = Math.floor(p.y);
   if (!inMap(tx, ty)) return null;
@@ -538,6 +547,14 @@ function updateWarmth3(dt) {
   const r = roomAt(p.x, p.y), outside = isStationRoom(r) || !!(r && r.roof);
   let rate = r && r.roof ? -3 : isStationRoom(r) ? -2 : -0.8;   // 車頂風最大，掉得最快
   if (r && r.id === 'engine' && G.fire.queue.length) rate = 3;
+  // 手上拿著點著的蠟燭（物品列選中蠟燭）：體溫掉得慢很多（只剩四分之一）；拿著的時候每 90 秒燒完一根
+  const candle = candleHeld();
+  if (candle) {
+    if (rate < 0) rate *= 0.25;
+    p.candleT = (p.candleT || 0) + dt;
+    if (!G.ev.candleTip) { G.ev.candleTip = 1; toast('🕯️ 蠟燭讓你暖和一點：拿在手上，體溫掉得慢很多（每 90 秒燒完一根）。', 'good'); }
+    if (p.candleT >= CANDLE_HAND_SECS) { p.candleT = 0; removeItem('candle'); invDirty = true; toast(G.inv.candle ? `🕯️ 手上的蠟燭燒完了，換上新的一根（還有 ${G.inv.candle} 根）。` : '🕯️ 手上的蠟燭燒完了……', 'warn'); }
+  }
   if (nb) rate += hugging ? 10 : nb.d < BAYMAX_WARM_R ? 5 : 0;
   for (const e of G.enemies) if (e.kind === 'tyrant' && !e.dead && Math.hypot(e.x - p.x, e.y - p.y) < 3) rate += 4;
   p.temp = clamp(p.temp + rate * dt, 0, 100);
@@ -700,8 +717,8 @@ function updateLava(dt) {
   }
 }
 
-// ---------- 墮落戰神：只在車廂的走道裡走（不進包廂、不上車頂、不去車站）。看到你就衝過來，2 格內橫掃一劍（打飛、眩暈）；
-// 你躲進包廂就在門外等 10 秒，然後繼續從列車的一頭巡邏到另一頭 ----------
+// ---------- 墮落戰神：只在車廂的走道裡走（不進機車室、不上車頂、不去車站）。看到你就衝過來，2 格內橫掃一劍（打飛、眩暈）；
+// 你躲進機車室就在門外等 10 秒，然後繼續從列車的一頭巡邏到另一頭 ----------
 function inHall(x, y) {
   if (isW4()) return inAisle4(x, y) && !isSolid(Math.floor(x), Math.floor(y));   // 第四世界：只在主走道上巡邏
   const tx = Math.floor(x), ty = Math.floor(y);
@@ -731,7 +748,7 @@ function updateWarlord(e, dt) {
         damage(24 + n * 0.15, 12); p.inv = 1.5; p.stunT = 0.8;
         const a = Math.atan2(p.y - e.y, p.x - e.x); move(p, Math.cos(a) * 2.5, Math.sin(a) * 2.5, PLAYER_R);
         G.shake = 0.8;
-        toast('⚔️ 墮落戰神一劍把你打飛撞牆！看到牠舉劍就趕快退開，或躲進包廂關上門。', 'warn');
+        toast('⚔️ 墮落戰神一劍把你打飛撞牆！看到牠舉劍就趕快退開，或躲進機車室關上門。', 'warn');
       }
       e.cd = 1.2;
     }
@@ -741,13 +758,14 @@ function updateWarlord(e, dt) {
   if (playerInHall && los) {
     // 看到你就衝過來
     tx = p.x; ty = p.y; f = flow; sp = Math.min(4.0 + n * 0.01, 4.8); e.state = 'charge'; e.waitT = 0;
-    if (!G.ev.warlordChargeTip) { G.ev.warlordChargeTip = 1; toast('⚔️ 墮落戰神看到你了，牠衝過來了！牠不會進包廂。', 'warn'); }
+    if (!G.ev.warlordChargeTip) { G.ev.warlordChargeTip = 1; toast('⚔️ 墮落戰神看到你了，牠衝過來了！牠不會進機車室。', 'warn'); }
   } else if (e.state === 'charge' || e.state === 'wait') {
     if (e.state === 'charge') {
-      // 你不見了：躲進包廂的話就在包廂門外的走道上等 10 秒；爬上車頂、下車的話就在原地等
+      // 你不見了：躲進機車室的話就在門外的走道上等 10 秒；爬上車頂、下車的話就在原地等
       e.state = 'wait'; e.waitT = 10;
       const pr = roomAt(p.x, p.y), door = pr && pr.comp ? compDoorOf(pr) : null;
-      if (door) { e.wx = door.x + 0.5; e.wy = door.y - 0.5; } else { e.wx = e.x; e.wy = e.y; }
+      const out = door && [[0, -1], [0, 1], [1, 0], [-1, 0]].map(([dx, dy]) => ({ x: door.x + dx + 0.5, y: door.y + dy + 0.5 })).find(q => inHall(q.x, q.y));
+      if (out) { e.wx = out.x; e.wy = out.y; } else { e.wx = e.x; e.wy = e.y; }
     }
     e.waitT -= dt;
     tx = e.wx; ty = e.wy; f = flowTo(Math.floor(tx), Math.floor(ty)); sp = 2.2;
@@ -836,8 +854,8 @@ function updateTaowu(e, dt) {
   const ox = e.x, oy = e.y;
   move(e, dir.x * sp * dt, dir.y * sp * dt, ENEMY_R);
   if (Math.hypot(e.x - ox, e.y - oy) > 0.001) e.face = Math.atan2(e.y - oy, e.x - ox);
-  // 撞壞關上的包廂門
-  for (const dr of DOORS) if (dr.closed && !dr.locked && Math.hypot(dr.x + 0.5 - e.x, dr.y + 0.5 - e.y) < 1.3) { setDoor(dr, false); Sound.play('doorSlam'); G.shake = Math.max(G.shake, 0.4); toast('💥 檮杌撞壞了包廂的門！', 'warn'); }
+  // 撞開關上的門（機車室的門）
+  for (const dr of DOORS) if (dr.closed && !dr.locked && Math.hypot(dr.x + 0.5 - e.x, dr.y + 0.5 - e.y) < 1.3) { setDoor(dr, false); Sound.play('doorSlam'); G.shake = Math.max(G.shake, 0.4); toast('💥 檮杌撞開了關上的門！', 'warn'); }
   if (e.stepT > 0.5 && d < 14) { e.stepT = 0; Sound.play('thump', nearVol(d) * 0.5); }
   if (d < 1.6 && e.cd <= 0 && e.spawn <= 0 && e.blind <= 0 && e.pounce <= 0) { e.pounce = 0.45; e.pounceA = Math.atan2(p.y - e.y, p.x - e.x); e.cd = 2.5; Sound.play('swish'); }
 }
@@ -863,7 +881,7 @@ function spawnW3Monster(kind) {
   const tips = {
     kronos: ['🍄 一個戴著裂開蘑菇傘的矮人一跛一跛地走進了列車……克羅諾斯・蕈裂！牠的長矛會讓夜晚的時鐘倒退，用手電筒照牠的蘑菇傘，有燒的火爐牠不敢靠近。', '🍄 咯咯咯……蕈裂又來了。'],
     tyrant: ['🪨 地板在震動……熔岩暴君上車了！手電筒對牠沒用，用聖水槍冷卻牠再用平底鍋敲，鞭炮也有效。牠跺腳時跳起來就不會被震倒。', '🪨 地板又在震了……熔岩暴君來了。'],
-    warlord: ['⚔️ 走道那頭傳來鐵甲和劍磨地的聲音……墮落戰神！牠只在走道裡走，看到你就衝過來。從背後打傷害 3 倍，躲進包廂關上門牠就進不來。', '⚔️ 劍磨地的聲音又出現了……墮落戰神在走道裡。'],
+    warlord: ['⚔️ 走道那頭傳來鐵甲和劍磨地的聲音……墮落戰神！牠只在走道裡走，看到你就衝過來。從背後打傷害 3 倍，躲進機車室關上門牠就進不來。', '⚔️ 劍磨地的聲音又出現了……墮落戰神在走道裡。'],
     taowu: ['🐾 一聲咆哮混著無數人的低語……檮杌・九瞳！牠知道你在哪裡。用手電筒把牠臉上的九顆眼睛一顆一顆照到閉上，牠就瞎了。', '🐾 檮杌・九瞳又來了……'],
   }[kind];
   Sound.play({ kronos: 'kcackle', tyrant: 'stompBig', warlord: 'swordDrag', taowu: 'roar' }[kind], 0.7);

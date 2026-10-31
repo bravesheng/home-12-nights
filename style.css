@@ -414,6 +414,7 @@ body:not(.w4) .w4only { display: none !important; }
 .tb.sm.on { background: rgba(126, 224, 129, .3); border-color: #7ee081; }
 #thome { position: absolute; right: 92px; top: 170px; }
 #tbag { position: absolute; right: 164px; top: 170px; }
+#twhistle { position: absolute; right: 236px; top: 170px; }
 #w4btns { position: absolute; right: 20px; bottom: 252px; display: flex; gap: 10px; align-items: flex-end; }
 #bbtns { display: none; grid-template-columns: repeat(4, 62px); gap: 8px; }
 body.holding #bbtns { display: grid; }
@@ -438,8 +439,9 @@ body.touch.phone .tb.sm { width: 44px; height: 44px; font-size: 16px; }
 body.touch.phone .tb.sm small { font-size: 8px; }
 body.touch.phone #thome { top: 56px; right: 8px; }
 body.touch.phone #tbag { top: 104px; right: 8px; }
+body.touch.phone #twhistle { top: 152px; right: 8px; }
 body.touch.phone #w4btns { right: 12px; bottom: 172px; gap: 6px; }
-body.touch.phone #bbtns { grid-template-columns: repeat(7, 40px); gap: 5px; }
+body.touch.phone #bbtns { grid-template-columns: repeat(8, 40px); gap: 5px; }
 body.touch.phone .bb { width: 40px; height: 40px; font-size: 14px; border-radius: 10px; }
 body.touch.phone .bb small { font-size: 8px; }
 @media (orientation: portrait) { body.touch.phone #w4btns { bottom: 262px; } }
