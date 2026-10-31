@@ -7,11 +7,11 @@ import * as THREE from '../lib/three.module.js';
 const WALL_H = 2.7, EYE = 1.55, LMS = 4;
 // 第二世界的天花板比較高（設計師要求：溜滑梯要能玩，站在溜滑梯的平台上才不會撞到天花板）
 const CEIL_W2 = 4.6;
-const ceilH = () => (isW2() ? CEIL_W2 : isW4() ? CEIL_W4 : WALL_H);   // 第四世界的賣場天花板 6.2 公尺
+const ceilH = () => (isW2() ? CEIL_W2 : isW3() ? CEIL_W3 : isW4() ? CEIL_W4 : WALL_H);   // 第三世界的車廂 3.3 公尺、第四世界的賣場 6.2 公尺
 let LMW = 0, LMH = 0;   // 光照貼圖的大小（跟著地圖走，見 allocLM）
 const SRGB = THREE.SRGBColorSpace;
 
-let renderer, scene, camera, spot, viewFlash, lensMat, placeGhost, strongRing;
+let renderer, scene, camera, spot, viewFlash, lensMat, placeGhost, strongRing, handCandle = null, poseDrop = 0;
 const uni = { uLM: { value: null }, uLMSize: { value: new THREE.Vector2(MAP_W, MAP_H) }, uAmb: { value: 0.012 } };
 let lmBytes, lmAcc, texRoom, texDoor, lmTex;
 // 光照貼圖的大小跟著地圖走（第三世界的地圖是一列長長的列車）：第一次和換世界時配置
@@ -799,8 +799,8 @@ function buildHouse() {
     for (const r of ROOMS) {
       if (r.roof || r.open) continue;   // 車頂和露天的月台沒有天花板，看得到藍天白雲
       const g = new THREE.PlaneGeometry(r.w, r.h); scaleUV(g, r.w / 2, r.h / 2);
-      const m = new THREE.Mesh(g, cm); m.userData.ownGeo = true; m.rotation.x = Math.PI / 2; m.position.set(r.x + r.w / 2, WALL_H, r.y + r.h / 2); houseGroup.add(m);
-      if (r.station) { const tp = new THREE.Mesh(g, top); tp.rotation.x = -Math.PI / 2; tp.position.set(r.x + r.w / 2, WALL_H + 0.03, r.y + r.h / 2); houseGroup.add(tp); }
+      const m = new THREE.Mesh(g, cm); m.userData.ownGeo = true; m.rotation.x = Math.PI / 2; m.position.set(r.x + r.w / 2, CEIL_W3, r.y + r.h / 2); houseGroup.add(m);
+      if (r.station) { const tp = new THREE.Mesh(g, top); tp.rotation.x = -Math.PI / 2; tp.position.set(r.x + r.w / 2, CEIL_W3 + 0.03, r.y + r.h / 2); houseGroup.add(tp); }
     }
   } else {
     const ceil = new THREE.Mesh(new THREE.PlaneGeometry(MAP_W, MAP_H), cm);
@@ -1827,7 +1827,7 @@ function syncFixtures(t) {
     for (const [o, f] of fixMap) {
       if (o.type !== 'socket' && o.type !== 'chand') continue;
       const a = sw * (o.type === 'chand' ? 1.5 : 1);
-      f.g.rotation.z = a; f.g.position.x = o.x + 0.5 + Math.sin(a) * WALL_H; f.g.position.y = floorH(o.x + 0.5, o.y + 0.5) + WALL_H * (1 - Math.cos(a));
+      f.g.rotation.z = a; f.g.position.x = o.x + 0.5 + Math.sin(a) * CEIL_W3; f.g.position.y = floorH(o.x + 0.5, o.y + 0.5) + CEIL_W3 * (1 - Math.cos(a));
     }
   }
 }
@@ -4329,6 +4329,32 @@ function buildFlashlight() {
   scene.add(placeGhost);
 }
 let bobPh = 0, bobAmt = 0, baseFov = 72, crouchK = 0;
+// 手上拿著的蠟燭（物品列選中蠟燭時，左手拿著一根點著的蠟燭：銅燭台、白蠟、會晃的火焰和光暈）；寒寂之境時拿著它體溫掉得慢
+function syncHandCandle(t) {
+  const show = mode === 'play' && G && G.selId === 'candle' && G.inv.candle > 0 && !(isW4() && G.hand && G.hand.k !== 'item');
+  if (!handCandle && !show) return;
+  if (!handCandle) {
+    handCandle = new THREE.Group(); camera.add(handCandle);
+    handCandle.position.set(-0.19, -0.2, -0.42); handCandle.rotation.set(0.12, 0.25, 0.05);
+    const skin = lm('#c99a7a'), brass = lm('#8a6a2a');
+    sph(handCandle, 0.045, 0, -0.03, 0.01, skin, 1.1, 0.75, 1, 10);                        // 握著燭台的手
+    for (let i = 0; i < 4; i++) sph(handCandle, 0.014, -0.03 + i * 0.02, -0.005, -0.035, skin, 1, 1, 1, 6);   // 手指
+    cyl(handCandle, 0.05, 0.035, 0.012, 0, 0.0, 0, brass, 14);                            // 燭台的盤子
+    cyl(handCandle, 0.016, 0.016, 0.13, 0, 0.012, 0, lm('#efe6cf'), 10);                 // 白蠟燭
+    sph(handCandle, 0.006, 0.012, 0.13, 0.01, lm('#f4ecd8'), 1, 2.2, 1, 5);               // 流下來的蠟
+    cyl(handCandle, 0.0018, 0.0018, 0.014, 0, 0.142, 0, lm('#1a1410'), 4);                // 燭芯
+    const flame = new THREE.Mesh(geo('handFlame', () => new THREE.ConeGeometry(0.011, 0.04, 8)), ownBasic({ color: 0xffc860, fog: false }));
+    flame.position.set(0, 0.172, 0); handCandle.add(flame); handCandle.userData.flame = flame;
+    const glow = ownSprite(glowTex, 0xffa040); glow.position.set(0, 0.17, 0); glow.scale.setScalar(0.16); handCandle.add(glow); handCandle.userData.glow = glow;
+  }
+  handCandle.visible = show;
+  if (!show) return;
+  const { flame, glow } = handCandle.userData;
+  flame.scale.set(1, 0.85 + 0.3 * Math.abs(Math.sin(t * 13)) * Math.abs(Math.sin(t * 5.3)), 1);
+  flame.rotation.z = Math.sin(t * 3.1) * 0.12;
+  glow.material.opacity = 0.55 + 0.25 * Math.sin(t * 9);
+  handCandle.position.y = -0.2 + Math.abs(Math.sin(bobPh * 0.5)) * 0.008 * bobAmt;
+}
 const yawOf = f => Math.atan2(-Math.cos(f), -Math.sin(f));
 function updateCamera(dt, t) {
   let x, y, z, face, pitch, roll = 0;
@@ -4342,11 +4368,12 @@ function updateCamera(dt, t) {
     x = c.x; z = c.y; y = EYE + (c.h || 0) + floorH(c.x, c.y) + Math.sin(t * 2.2) * 0.01; face = c.face; pitch = c.pitch;
   } else {
     const p = G.p;
-    const moving = (p.moved || 0) > 0.001 && !(p.z > 0);
+    const moving = (p.moved || 0) > 0.001 && !p.air;
     bobPh += moving ? (p.moved || 0) * 6.5 : 0;
     bobAmt += ((moving ? 1 : 0) - bobAmt) * Math.min(1, dt * 8);
     crouchK += ((isW4() && p.crouch ? 1 : 0) - crouchK) * Math.min(1, dt * 10);   // 第四世界可以蹲下
-    x = p.x; z = p.y; y = EYE + (p.z || 0) + floorH(p.x, p.y) + Math.sin(bobPh) * 0.035 * bobAmt - crouchK * 0.6;   // 車頂比較高
+    poseDrop += ((p.camDrop || 0) - poseDrop) * Math.min(1, dt * 8);             // 坐下、躺下：鏡頭慢慢降下去
+    x = p.x; z = p.y; y = EYE + (p.z || 0) + floorH(p.x, p.y) + Math.sin(bobPh) * 0.035 * bobAmt - crouchK * 0.6 - poseDrop;   // 車頂比較高；站在家具上 p.z 就是家具的高度
     face = p.face; pitch = p.pitch;
     // 被草叢人抓住：鏡頭往下看、抖動
     if (p.grabbed) { pitch -= 0.1; y -= 0.12; x += (Math.random() - 0.5) * 0.02; }
@@ -4366,6 +4393,7 @@ function updateCamera(dt, t) {
   const fov = baseFov - stare * 8 + Math.sin(t * 1.9) * 4 * dizzy;
   if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
   viewFlash.visible = mode !== 'title' && mode !== 'cutscene';
+  syncHandCandle(t);
   const on = mode !== 'title' && mode !== 'cutscene' && flashOn();
   let k = on ? 1 : 0;
   if (on && G.p.bat < 15 && Math.random() < 0.15) k = 0.3;
@@ -4628,7 +4656,7 @@ function wallPiece(g, x0, x1, y0, y1, z0, z1, mat) {
     for (let i = 0; i < P.count; i++) {
       if (Math.abs(N.getY(i)) > 0.5) continue;
       const x = P.getX(i) + (x0 + x1) / 2, y = P.getY(i) + (y0 + y1) / 2, z = P.getZ(i) + (z0 + z1) / 2, nx = N.getX(i), nz = N.getZ(i);
-      U.setXY(i, Math.abs(nz) > 0.5 ? (nz > 0 ? x : 1 - x) : (nx > 0 ? 1 - z : z), y / WALL_H);
+      U.setXY(i, Math.abs(nz) > 0.5 ? (nz > 0 ? x : 1 - x) : (nx > 0 ? 1 - z : z), y / CEIL_W3);
     }
     return b;
   });
@@ -4670,33 +4698,33 @@ function buildTrainWalls(list) {
   const mtx = new THREE.Matrix4();
   const inst = (tiles, mat) => {
     if (!tiles.length) return;
-    const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1, WALL_H, 1), mat, tiles.length);
+    const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1, CEIL_W3, 1), mat, tiles.length);
     im.userData.ownGeo = true;
-    tiles.forEach(([x, y], i) => { mtx.makeTranslation(x + 0.5, WALL_H / 2, y + 0.5); im.setMatrixAt(i, mtx); });
+    tiles.forEach(([x, y], i) => { mtx.makeTranslation(x + 0.5, CEIL_W3 / 2, y + 0.5); im.setMatrixAt(i, mtx); });
     im.castShadow = true; im.receiveShadow = true; im.computeBoundingSphere();
     houseGroup.add(im);
   };
   for (const k in groups) inst(groups[k], matOf(k));
-  // 窗戶：牆上真的開一個洞（窗台到 0.95、窗楣 2.0 以上、兩邊留窗框），黃銅窗框、髒玻璃；外面是會捲動的風景（窗戶都在東西向的牆上）
-  const brass = lm('#6e5726');
+  // 窗戶：牆上真的開一個洞（窗台到 0.9、窗楣 2.35 以上、兩邊留窗框），黃銅窗框、髒玻璃；外面是會捲動的風景（窗戶都在東西向的牆上）
+  const brass = lm('#6e5726'), W0 = 0.9, W1 = 2.35;
   panes3 = [];
   for (const w of W3_WINDOWS) {
     const { x, y } = w, g = new THREE.Group(); g.position.set(x, 0, y); houseGroup.add(g);
     const m = matOf(kindOf(x, y));
-    wallPiece(g, 0, 1, 0, 0.95, 0, 1, m); wallPiece(g, 0, 1, 2.0, WALL_H, 0, 1, m);
-    wallPiece(g, 0, 0.15, 0.95, 2.0, 0, 1, m); wallPiece(g, 0.85, 1, 0.95, 2.0, 0, 1, m);
+    wallPiece(g, 0, 1, 0, W0, 0, 1, m); wallPiece(g, 0, 1, W1, CEIL_W3, 0, 1, m);
+    wallPiece(g, 0, 0.15, W0, W1, 0, 1, m); wallPiece(g, 0.85, 1, W0, W1, 0, 1, m);
     const fr = (a0, a1, b0, b1) => box(g, a0, a1, b0, b1, 0.47, 0.53, brass, false);
-    fr(0.12, 0.88, 0.93, 0.98); fr(0.12, 0.88, 1.98, 2.03); fr(0.12, 0.17, 0.95, 2.0); fr(0.83, 0.88, 0.95, 2.0); fr(0.485, 0.515, 0.95, 2.0);
+    fr(0.12, 0.88, W0 - 0.02, W0 + 0.03); fr(0.12, 0.88, W1 - 0.02, W1 + 0.03); fr(0.12, 0.17, W0, W1); fr(0.83, 0.88, W0, W1); fr(0.485, 0.515, W0, W1);
     const pm = ownBasic({ map: glassTex, transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide, fog: false, color: 0xffffff });
-    const pane = new THREE.Mesh(geo('pane3', () => new THREE.PlaneGeometry(0.7, 1.05)), pm);
-    pane.position.set(0.5, 1.475, 0.5);
+    const pane = new THREE.Mesh(geo('pane3', () => new THREE.PlaneGeometry(0.7, W1 - W0)), pm);
+    pane.position.set(0.5, (W0 + W1) / 2, 0.5);
     g.add(pane); panes3.push(pm);
     // 列車的窗戶：車廂那一側掛著暗紅絨布的窗簾，列車開的時候會微微飄（用頭髮的做法）
     if (w.train) {
       const cm = hairMat(velvetTex, 0.55), S = [];
       for (const side of [-1, 1]) for (let k = 0; k < 3; k++) {
         const u = 0.5 + side * (0.42 + k * 0.05), zz = 1.04 + k * 0.01;
-        S.push({ a: [u, 2.15, zz], b: [u + side * 0.02, 1.5, zz + 0.02], c: [u + side * 0.05, 0.75, zz + 0.03], w: 0.09, f: 0, ph: k + side * 2, tp: 0.1 });
+        S.push({ a: [u, 2.5, zz], b: [u + side * 0.02, 1.7, zz + 0.02], c: [u + side * 0.05, 0.8, zz + 0.03], w: 0.09, f: 0, ph: k + side * 2, tp: 0.1 });
       }
       const cur = new THREE.Mesh(hairGeo(`curtain${x},${y}`, S), cm);
       if (w.dir === 's') { cur.position.z = 1; cur.scale.z = -1; }   // 南牆的窗：窗簾翻到北邊（車廂裡）
@@ -5663,20 +5691,38 @@ function paxState(px, st) {
     s.attr.needsUpdate = true;
   }
 }
-// 每一幀：過場動畫時活著；「乘客轉頭」事件讓某個乘客的頭慢慢抬起來轉向你、睜開眼睛
-function updatePassengers() {
+// 每一幀：過場動畫時活著；「乘客轉頭」事件讓某個乘客的頭慢慢抬起來轉向你、睜開眼睛。
+// 晚上（設計師：「晚上詭異點，每個人看到我都會一直盯著，頭會轉」）：看得到你的乘客全部慢慢把頭轉過來盯著你，
+// 轉得比正常人能轉的角度還多（快要轉到背後），眼睛睜開；你走開、看不到你了，頭才慢慢轉回去垂下來
+const PAX_STARE_R = 9, PAX_TWIST = 2.3;
+let paxSeeT = 0;
+function updatePassengers(dt = 0.016) {
   const alive = !!(mode === 'cutscene' && CUT && CUT.kind === 2 && CUT.alive);
   const pt = G.ev && G.ev.paxTurn;
+  const night = !alive && mode === 'play' && G.phase === 'night' && isW3() && !onRoof(G.p.x, G.p.y);
+  paxSeeT -= dt;
+  const recheck = paxSeeT <= 0;   // 看不看得到你：每 0.25 秒算一次就好（平板上省一點）
+  if (recheck) paxSeeT = 0.25;
   for (const f of FURN) {
     const r = furn3d[f.id];
     if (!r || !r.pax) continue;
     for (const px of r.pax) {
-      const turn = !alive && pt && pt.id === f.id && px === r.pax[0] ? clamp(Math.min(pt.t / 3, (16 - pt.t) / 2), 0, 1) : 0;
+      if (recheck) {
+        px.sees = false;
+        if (night) {
+          px.g.getWorldPosition(_pw);
+          const dx = G.p.x - _pw.x, dy = G.p.y - _pw.z, d = Math.hypot(dx, dy);
+          px.sees = d < PAX_STARE_R && (d < 1.2 || castRay(_pw.x, _pw.z, Math.atan2(dy, dx), d) >= d - 0.6);
+        }
+      }
+      px.stareK = clamp((px.stareK || 0) + (px.sees ? dt * 0.45 : -dt * 0.3), 0, 1);   // 轉過來很慢（2 秒多），轉回去更慢
+      const ev = !alive && pt && pt.id === f.id && px === r.pax[0] ? clamp(Math.min(pt.t / 3, (16 - pt.t) / 2), 0, 1) : 0;
+      const turn = Math.max(ev, px.stareK), twist = px.stareK > ev ? PAX_TWIST : 1.4;
       const st = alive ? 'alive' : turn > 0.3 ? 'stare' : 'dead';
       if (st !== px.state) paxState(px, st);
       if (turn > 0) {
         camera.getWorldPosition(_pw); px.piv.worldToLocal(_pw);
-        px.yaw.rotation.y = clamp(Math.atan2(_pw.x, _pw.z), -1.4, 1.4) * turn;
+        px.yaw.rotation.y = clamp(Math.atan2(_pw.x, _pw.z), -twist, twist) * turn;
       } else px.yaw.rotation.y = 0;
       const ps = alive ? px.alivePose : px.deadPose, k = 1 - turn;
       px.pose.rotation.set(ps.x * k, ps.y * k, ps.z * k);
@@ -5789,8 +5835,8 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
       for (const y of [0.2, 1.1]) fb(g, f, side, 0.15, len - 0.15, y, y + 0.05, -0.01, 0.01, brass2, false);
       r.top = 1.3;
       return true;
-    case 'dining': { // 餐桌：白桌布、銀器、燭台；兩端各一張絨布椅，坐著面對面死去的乘客（腿伸到桌子底下，手放在桌上）
-      const t0 = 0.55, t1 = W - 0.55, cz = D / 2;
+    case 'dining': { // 餐桌：白桌布、銀器、燭台；兩端各一張絨布椅，坐著面對面死去的乘客（腿伸到桌子底下，手放在桌上）。三格長的餐桌：兩端的格子是椅子、中間是桌子
+      const t0 = W >= 3 ? 0.8 : 0.55, t1 = W - t0, cz = D / 2;
       box(g, t0, t1, 0.72, 0.76, 0.15, D - 0.15, walnut2);
       box(g, t0 - 0.02, t1 + 0.02, 0.76, 0.775, 0.12, D - 0.12, ivory, false);
       for (const z of [0.115, D - 0.125]) box(g, t0 - 0.02, t1 + 0.02, 0.6, 0.775, z, z + 0.01, ivory, false);   // 垂下來的桌布
@@ -5866,7 +5912,7 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
       const dark = lm('#2a2a2e');
       box(g, 0.1, W - 0.1, 0, 1.5, 0.1, D - 0.1, iron);
       box(g, 0.05, W - 0.05, 1.5, 1.6, 0.05, D - 0.05, dark);
-      cyl(g, 0.3, 0.3, 0.6, W / 2, 1.6, D / 2, iron, 14); cyl(g, 0.12, 0.12, WALL_H - 2.2, W / 2, 2.2, D / 2, dark, 8);
+      cyl(g, 0.3, 0.3, 0.6, W / 2, 1.6, D / 2, iron, 14); cyl(g, 0.12, 0.12, CEIL_W3 - 2.2, W / 2, 2.2, D / 2, dark, 8);
       for (const [u, v] of [[0.3, 0.2], [len - 0.3, 0.2], [0.3, D - 0.3], [len - 0.3, D - 0.3]]) { const [x, z] = fpos(f, side, u, v); for (let i = 0; i < 5; i++) sph(g, 0.03, x, 0.3 + i * 0.28, z, dark, 1, 1, 1, 5); }
       const [dx, dz] = fpos(f, side, len / 2, 0.02);
       const door = new THREE.Group(); door.position.set(dx, 0.75, dz); door.rotation.y = faceOf(side); g.add(door);
@@ -5967,20 +6013,25 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
       r.top = 1.55;
       return true;
     }
-    case 'seats': { // 普通車廂的座位：每一格一組兩人座（暗紅絨布、胡桃木扶手），椅背朝車尾、面向車頭；牆那一側的上方是黃銅行李架
+    case 'seats': { // 普通車廂的座位：一格一個座位（暗紅絨布、胡桃木扶手），一組有靠窗和靠走道兩排，椅背朝車尾、面向車頭；牆那一側的上方是黃銅行李架
       const vel = velvet();
-      for (let i = 0; i < W; i++) {
-        const x0 = i + 0.08, x1 = i + 0.92;
-        box(g, x0, x1, 0, 0.44, 0.12, D - 0.12, walnut);
-        box(g, x0 + 0.02, x1 - 0.02, 0.44, 0.52, 0.14, D - 0.14, vel);
-        box(g, x1 - 0.16, x1 - 0.02, 0.52, 1.12, 0.14, D - 0.14, vel);
-        box(g, x1 - 0.18, x1 - 0.16, 0.5, 1.14, 0.12, D - 0.12, walnut2, false);
-        fb(g, f, side, i + 0.1, i + 0.9, 0.52, 0.64, 0.02, 0.1, walnut2);   // 走道側的扶手
+      for (let j = 0; j < D; j++) for (let i = 0; i < W; i++) {
+        const x0 = i + 0.08, x1 = i + 0.92, z0 = j + 0.06, z1 = j + 0.94;
+        box(g, x0, x1, 0, 0.44, z0, z1, walnut);
+        box(g, x0 + 0.02, x1 - 0.02, 0.44, 0.52, z0 + 0.02, z1 - 0.02, vel);
+        box(g, x1 - 0.16, x1 - 0.02, 0.52, 1.12, z0 + 0.02, z1 - 0.02, vel);
+        box(g, x1 - 0.18, x1 - 0.16, 0.5, 1.14, z0, z1, walnut2, false);
       }
-      fb(g, f, side, 0.05, len - 0.05, 1.95, 1.98, D - 0.6, D - 0.55, brass2, false);
-      fb(g, f, side, 0.05, len - 0.05, 1.93, 1.96, D - 0.3, D - 0.25, brass2, false);
-      for (let u = 0.25; u < len; u += 0.75) { fb(g, f, side, u, u + 0.03, 1.9, 1.98, D - 0.6, D - 0.08, brass2, false); fb(g, f, side, u, u + 0.03, 1.55, 1.9, D - 0.1, D - 0.07, brass2, false); }
-      if (f.pax) addPassenger(g, r, 0.56, D / 2, -Math.PI / 2, 0.5, { prefer: ['student', 'worker', 'granny', 'girl', 'oldman', 'conductor', 'gent'] });
+      for (let i = 0; i < W; i++) {
+        fb(g, f, side, i + 0.1, i + 0.9, 0.52, 0.64, 0.02, 0.1, walnut2);       // 走道側的扶手
+        fb(g, f, side, i + 0.1, i + 0.9, 0.52, 0.64, D / 2 - 0.04, D / 2 + 0.04, walnut2);   // 兩個座位中間的扶手
+      }
+      // 行李架：天花板加高了，架子也跟著放高一點
+      fb(g, f, side, 0.05, len - 0.05, 2.3, 2.33, D - 0.7, D - 0.65, brass2, false);
+      fb(g, f, side, 0.05, len - 0.05, 2.28, 2.31, D - 0.3, D - 0.25, brass2, false);
+      for (let u = 0.25; u < len; u += 0.75) { fb(g, f, side, u, u + 0.03, 2.25, 2.33, D - 0.7, D - 0.08, brass2, false); fb(g, f, side, u, u + 0.03, 1.9, 2.25, D - 0.1, D - 0.07, brass2, false); }
+      // 乘客：坐在 paxAt 那幾格（data.js 的 paxSpots，跟站上乘客頭頂的判定用同一份）
+      for (const [dx, dy] of paxSpots(f)) addPassenger(g, r, dx + 0.56, dy + 0.5, -Math.PI / 2, 0.5, { prefer: ['student', 'worker', 'granny', 'girl', 'oldman', 'conductor', 'gent'] });
       r.top = 1.14;
       return true;
     }
@@ -5999,7 +6050,7 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
       r.top = 1.6;
       return true;
     }
-    case 'bed': { // 臥鋪 A（你的床）：胡桃木床框、泛黃的床單和枕頭、暗紅的毯子；床底下會伸出手（跟第一世界一樣）
+    case 'bed': { // 景觀車廂的床（原本臥鋪 A 的床搬過來）：胡桃木床框、泛黃的床單和枕頭、暗紅的毯子；床底下會伸出手（跟第一世界一樣）
       box(g, 0.03, W - 0.03, 0, 0.3, 0.03, D - 0.03, walnut);
       box(g, 0.06, W - 0.06, 0.3, 0.48, 0.06, D - 0.06, photoMat('w3-linen', '#d6cdb9'));
       fb(g, f, side, 0.1, 0.55, 0.48, 0.6, 0.15, D - 0.15, ivory);
@@ -6012,10 +6063,10 @@ function trainFurniture(f, g, r, W, D, side, len, cabinet) {
       return true;
     }
     case 'ladder': { // 爬上車頂的鐵梯：釘在牆上的兩根鐵桿和橫桿，天花板上是艙口蓋
-      for (const u of [0.3, 0.7]) fb(g, f, side, u - 0.03, u + 0.03, 0.1, WALL_H, D - 0.22, D - 0.16, iron);
-      for (let y = 0.3; y < WALL_H - 0.1; y += 0.3) fb(g, f, side, 0.26, 0.74, y, y + 0.04, D - 0.24, D - 0.14, iron, false);
-      fb(g, f, side, 0.12, 0.88, WALL_H - 0.04, WALL_H - 0.005, D - 0.55, D - 0.05, lm('#2a2a2e'), false);
-      r.top = WALL_H;
+      for (const u of [0.3, 0.7]) fb(g, f, side, u - 0.03, u + 0.03, 0.1, CEIL_W3, D - 0.22, D - 0.16, iron);
+      for (let y = 0.3; y < CEIL_W3 - 0.1; y += 0.3) fb(g, f, side, 0.26, 0.74, y, y + 0.04, D - 0.24, D - 0.14, iron, false);
+      fb(g, f, side, 0.12, 0.88, CEIL_W3 - 0.04, CEIL_W3 - 0.005, D - 0.55, D - 0.05, lm('#2a2a2e'), false);
+      r.top = CEIL_W3;
       return true;
     }
     case 'hatch': { // 車頂的艙口：鐵蓋子和拉環
@@ -6115,14 +6166,14 @@ function syncStopEyes(t) {
 function buildRoof3() {
   const steel = lm('#28282c'), dark = lm('#17171a'), bellows = lm('#101012'), glass = ownBasic({ color: 0x3a2a14, transparent: true, opacity: 0.85, fog: false });
   const g = new THREE.Group(); houseGroup.add(g);
-  const Z0 = 4, Z1 = 11, R = ROOF_H;   // 天窗層蓋住列車的北牆到南牆（y=4～10）
+  const Z0 = W3.body.z0, Z1 = W3.body.z1, ZC = (Z0 + Z1) / 2, R = ROOF_H;   // 天窗層蓋住列車的北牆到南牆（y=4～12）
   for (let i = 0; i < W3_CARS.length; i++) {
     const c = W3_CARS[i], X0 = c.x0 - 1, X1 = c.x1 + 2;
     if (c.id === 'engine') continue;
     box(g, X0 + 0.35, X1 - 0.35, R - 0.2, R + 0.62, Z0 + 0.05, Z1 - 0.05, steel);       // 天窗層的身體
     box(g, X0 + 0.25, X1 - 0.25, R + 0.62, R + 0.72, Z0 - 0.08, Z1 + 0.08, dark);        // 頂板（兩邊微微突出）
     for (let x = X0 + 1; x < X1 - 1.2; x += 2) box(g, x + 0.2, x + 0.8, R + 0.18, R + 0.46, Z0 + 0.02, Z0 + 0.07, glass, false);   // 一排天窗
-    for (let x = X0 + 2.5; x < X1 - 2; x += 4) { cyl(g, 0.12, 0.12, 0.2, x, R + 0.72, 7.5, dark, 10); cyl(g, 0.3, 0.1, 0.1, x, R + 0.92, 7.5, dark, 10); }   // 通風帽
+    for (let x = X0 + 2.5; x < X1 - 2; x += 4) { cyl(g, 0.12, 0.12, 0.2, x, R + 0.72, ZC, dark, 10); cyl(g, 0.3, 0.1, 0.1, x, R + 0.92, ZC, dark, 10); }   // 通風帽
     box(g, X0, X1, R - 0.12, R + 0.08, 0.86, 1.0, dark);                                // 北側的邊條
     if (i < W3_CARS.length - 1) box(g, X1 - 0.5, X1 + 0.5, R - 0.2, R + 0.35, Z0 + 0.3, Z1 - 0.3, bellows);   // 車廂之間的蛇腹
   }
@@ -6132,20 +6183,21 @@ function buildRoof3() {
 // 車頭（復古蒸汽機車）：煤水車、駕駛室、橫躺的大鍋爐、蒸汽包、汽笛、煙囪；全部都在車頂的高度以上
 function buildLoco(g, steel, dark) {
   const R = ROOF_H, black = lm('#141416'), coal = ownLM('#141416', { shade: 0.6 }), brass = lm('#8a6a2a');
-  // 煤水車：x 5～10（車頂走道的西端就是它的後壁），上面堆著煤
-  box(g, 5, 10, R - 0.2, R + 0.9, 0.9, 11.1, steel);
-  box(g, 5.2, 9.8, R + 0.9, R + 0.95, 1.1, 10.9, dark);
-  for (let i = 0; i < 26; i++) { const x = 5.6 + rnd() * 3.8, z = 1.6 + rnd() * 8.8; sph(g, 0.22 + rnd() * 0.2, x, R + 0.95 + rnd() * 0.25, z, coal, 1 + rnd() * 0.5, 0.6 + rnd() * 0.3, 1 + rnd() * 0.5, 7); }
+  const Z1 = W3.body.z1, ZC = (W3.body.z0 + Z1) / 2;   // 車身的南邊、中線
+  // 煤水車：x 5～10（車頂走道的西端就是它的後壁），上面堆著煤；從車頂的北邊一直蓋到車身的南邊
+  box(g, 5, 10, R - 0.2, R + 0.9, 0.9, Z1 + 0.1, steel);
+  box(g, 5.2, 9.8, R + 0.9, R + 0.95, 1.1, Z1 - 0.1, dark);
+  for (let i = 0; i < 30; i++) { const x = 5.6 + rnd() * 3.8, z = 1.6 + rnd() * (Z1 - 2.2); sph(g, 0.22 + rnd() * 0.2, x, R + 0.95 + rnd() * 0.25, z, coal, 1 + rnd() * 0.5, 0.6 + rnd() * 0.3, 1 + rnd() * 0.5, 7); }
   // 駕駛室：x 1.8～5，屋頂比車頂高 1.3
-  box(g, 1.8, 5, R - 0.2, R + 1.25, 4.2, 10.8, steel);
-  box(g, 1.7, 5.1, R + 1.25, R + 1.35, 4.0, 11.0, dark);
+  box(g, 1.8, 5, R - 0.2, R + 1.25, 4.2, Z1 - 0.2, steel);
+  box(g, 1.7, 5.1, R + 1.25, R + 1.35, 4.0, Z1, dark);
   // 鍋爐：橫躺的大圓筒（底部剛好貼著機車室的天花板），箍著幾圈鐵環；前面是煙囪、上面是蒸汽包和汽笛
-  const boiler = cyl(g, 1.25, 1.25, 6.3, 0, 0, 0, black, 24); boiler.rotation.z = Math.PI / 2; boiler.position.set(-1.35, R + 1.0, 7.5);
-  for (const x of [-3.6, -1.2, 1.2]) { const ring = cyl(g, 1.29, 1.29, 0.12, 0, 0, 0, dark, 24); ring.rotation.z = Math.PI / 2; ring.position.set(x, R + 1.0, 7.5); }
+  const boiler = cyl(g, 1.25, 1.25, 6.3, 0, 0, 0, black, 24); boiler.rotation.z = Math.PI / 2; boiler.position.set(-1.35, R + 1.0, ZC);
+  for (const x of [-3.6, -1.2, 1.2]) { const ring = cyl(g, 1.29, 1.29, 0.12, 0, 0, 0, dark, 24); ring.rotation.z = Math.PI / 2; ring.position.set(x, R + 1.0, ZC); }
   const C = W3.loco.chimney;
   cyl(g, 0.3, 0.34, 1.3, C.x, R + 2.0, C.y, black, 14); cyl(g, 0.46, 0.3, 0.3, C.x, R + 3.3, C.y, black, 14);
-  sph(g, 0.6, -0.4, R + 2.1, 7.5, black, 1, 0.8, 1, 14); cyl(g, 0.06, 0.06, 0.5, 0.6, R + 2.1, 7.5, brass, 8);
-  for (const z of [6.3, 8.7]) box(g, -4.4, 1.8, R + 1.9, R + 1.94, z - 0.02, z + 0.02, brass, false);   // 扶手
+  sph(g, 0.6, -0.4, R + 2.1, ZC, black, 1, 0.8, 1, 14); cyl(g, 0.06, 0.06, 0.5, 0.6, R + 2.1, ZC, brass, 8);
+  for (const z of [ZC - 1.2, ZC + 1.2]) box(g, -4.4, 1.8, R + 1.9, R + 1.94, z - 0.02, z + 0.02, brass, false);   // 扶手
   // 煙囪的煙：十幾個會長大、變淡、往車尾飄的煙團
   locoSmoke = { g: new THREE.Group(), puffs: [], x: C.x, y: R + 3.6, z: C.y };
   g.add(locoSmoke.g);
@@ -6167,7 +6219,9 @@ function syncLocoSmoke(dt, k) {
   }
 }
 // 每一幀：火爐的火、煤氣燈閃爍、站牌的站名、乘客（過場動畫時活著；夜晚事件讓某個乘客的頭慢慢轉過來看你）
+let lastTF = 0;
 function updateTrainFurniture(t) {
+  const dtF = clamp(t - lastTF, 0, 0.1); lastTF = t;
   const fb3 = furn3d.firebox;
   if (fb3 && fb3.fire) {
     const k = fireBurning() ? 1 : (G.fire && G.fire.queue.length ? 0.35 : 0.08);
@@ -6185,7 +6239,7 @@ function updateTrainFurniture(t) {
     c.fillStyle = '#e8e0c8'; c.font = 'bold 44px "PingFang TC","Noto Sans TC",sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(sg.signName, 128, 50);
     sg.signTex.needsUpdate = true;
   }
-  updatePassengers();
+  updatePassengers(dtF);
 }
 
 // ====================================================================

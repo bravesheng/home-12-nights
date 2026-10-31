@@ -232,7 +232,20 @@ await scenario('w3', '第三世界第 1 天（照片貼圖、各式各樣死去�
   await sleep(2500);
   let s = await state(page);
   check(s.hud && s.day === 1, `要從第 1 天開始（現在：${s.label}）`);
-  check(await page.evaluate(() => MAP_W === 74 && ROOMS.find(r => r.id === 'engine').name === '機車室' && ROOMS.some(r => r.roof) && ROOMS.find(r => r.id === 'platform').open && DOORS.length === 12 && document.body.classList.contains('w3')), '第三世界要是 74 格長的列車地圖（機車室、車頂、露天的月台、12 扇門）');
+  check(await page.evaluate(() => MAP_W === 59 && ROOMS.find(r => r.id === 'engine').name === '機車室' && ROOMS.some(r => r.roof) && ROOMS.find(r => r.id === 'platform').open && DOORS.length === 8 && !ROOMS.some(r => r.id === 'sleeper' || r.id.startsWith('berth')) && document.body.classList.contains('w3')), '第三世界要是 59 格長的列車地圖（機車室、車頂、露天的月台、8 扇門，沒有臥鋪車廂）');
+  // 設計師第二次意見（2026/10/31）：車廂加寬（走道 3 格以上、7 排）、天花板加高、走道中間不放桌子、早晨禮物在火爐旁邊、神秘商人在景觀車廂車門外
+  const lay3 = await page.evaluate(() => {
+    const cars = ROOMS.filter(r => r.aisle), fb = FURN_BY_ID.firebox;
+    // 每節車廂中間那三排（y=7～9）不能有家具擋路（地毯不算）
+    const blocked = [];
+    for (const r of cars) for (let x = r.x; x < r.x + r.w; x++) for (let y = 7; y <= 9; y++) if (furnGrid[y][x]) blocked.push(furnGrid[y][x].id + '@' + x + ',' + y);
+    return { h: cars.map(r => r.h), blocked, ceil: CEIL_W3, roofH: ROOF_H, gift: Math.hypot(GIFT_POS.x - (fb.x + fb.w / 2), GIFT_POS.y - (fb.y + fb.h / 2)), giftOk: walkable(GIFT_POS.x, GIFT_POS.y),
+      merchant: roomAt(MERCHANT_POS.x, MERCHANT_POS.y).id, mdoor: DOORS.some(d => d.station && Math.abs(d.x + 0.5 - MERCHANT_POS.x) < 0.6) };
+  });
+  check(lay3.h.every(h => h >= 7) && lay3.blocked.length === 0, `車廂要 7 排寬、中間的走道不能有桌子擋路（${lay3.h.join(',')}；擋路：${lay3.blocked.join('、')}）`);
+  check(lay3.ceil >= 3.2 && lay3.roofH > lay3.ceil, `天花板要加高到 3.2 公尺以上（現在 ${lay3.ceil}，車頂 ${lay3.roofH}）`);
+  check(lay3.gift < 2 && lay3.giftOk, `早晨禮物要在機車室的火爐旁邊（離火爐 ${lay3.gift.toFixed(1)} 格）`);
+  check(lay3.merchant === 'platform' && lay3.mdoor, `神秘商人要在月台上、車門下車的正前方（現在在 ${lay3.merchant}）`);
   check(await page.evaluate(() => document.getElementById('alert').textContent.includes('🎯')), '狀態列要有 🎯 今天的目標');
   // 駕駛台：站在前面對著它，互動是「拉汽笛」；拉了之後要冷卻
   const wh = await page.evaluate(() => {
@@ -260,13 +273,57 @@ await scenario('w3', '第三世界第 1 天（照片貼圖、各式各樣死去�
   await sleep(600);
   await shot('1b-passenger-turn');
   await page.evaluate(() => { G.ev.paxTurn = null; });
+  // 跳上家具（設計師：「可跳到床、椅子、桌子、人的頭上」）：直接呼叫更新函式，不用等低 FPS 的遊戲時間
+  const jump = await page.evaluate(() => {
+    const run = (x, y, face, z, n = 60) => {
+      Object.assign(G.p, { x, y, face, z, vz: 0, pitch: 0, pose: null });
+      keys.w = true; tryJump();
+      let top = 0;
+      for (let i = 0; i < n; i++) { updatePlayer(0.02); top = Math.max(top, G.p.z); if (i > 18) keys.w = false; }
+      keys.w = false;
+      for (let i = 0; i < 40; i++) updatePlayer(0.02);
+      return { z: G.p.z, x: G.p.x, y: G.p.y, top };
+    };
+    const t = FURN_BY_ID.dtable4;   // 沒有乘客的餐桌：中間那格是桌子
+    const table = run(t.x + 1.5, t.y - 0.6, Math.PI / 2, 0);
+    const onTable = furnGrid[Math.floor(table.y)][Math.floor(table.x)] === t;
+    // 站在座位上，再跳到旁邊乘客的頭上
+    const sN = FURN_BY_ID.seatN3, [hx, hy] = sN.paxAt[0];
+    const head = run(sN.x + hx + 0.5, sN.y + hy + 1.5, -Math.PI / 2, furnTopH(sN, hx, hy + 1));
+    // 走出桌子的邊緣會掉下來
+    Object.assign(G.p, { x: t.x + 1.5, y: t.y + 0.5, z: 0.78, vz: 0, face: -Math.PI / 2 });
+    keys.w = true; for (let i = 0; i < 40; i++) updatePlayer(0.02); keys.w = false;
+    for (let i = 0; i < 40; i++) updatePlayer(0.02);
+    const fell = G.p.z;
+    // 坐下、躺下、站起來
+    sitDown(FURN_BY_ID.seatN2);
+    const sit = { pose: G.p.pose && G.p.pose.kind, drop: G.p.camDrop, z: G.p.z, face: G.p.face };
+    keys.w = true; updatePlayer(0.02); keys.w = false;
+    const up = { pose: G.p.pose, ok: walkable(G.p.x, G.p.y) };
+    Object.assign(G.p, { x: FURN_BY_ID.bed.x + 1, y: FURN_BY_ID.bed.y - 0.6, face: Math.PI / 2 });
+    const lieT = getTarget();
+    lieDown(FURN_BY_ID.bed);
+    const lie = { pose: G.p.pose && G.p.pose.kind, pitch: G.p.pitch, label: lieT && lieT.label, t: getTarget().label };
+    standUp();
+    return { table, onTable, head, fell, sit, up, lie };
+  });
+  check(jump.onTable && jump.table.z > 0.7, `要能跳上桌子（腳的高度 ${jump.table.z.toFixed(2)}、在桌子上 ${jump.onTable}）`);
+  check(jump.head.z > 1.2, `要能從座位跳到乘客的頭上（腳的高度 ${jump.head.z.toFixed(2)}，最高 ${jump.head.top.toFixed(2)}）`);
+  check(jump.fell < 0.05, `走出桌子的邊緣要掉下來（腳的高度 ${jump.fell.toFixed(2)}）`);
+  check(jump.sit.pose === 'sit' && jump.sit.drop > 0.5 && Math.abs(jump.sit.face - Math.PI) < 0.01 && !jump.up.pose && jump.up.ok, `對著座位要能坐下（面向車頭）、一走動就站起來（${JSON.stringify(jump.sit)}）`);
+  check(jump.lie.pose === 'lie' && jump.lie.pitch > 1 && jump.lie.label === '躺下' && jump.lie.t === '起來', `對著床要能躺下、看天花板（互動「${jump.lie.label}」→「${jump.lie.t}」）`);
+  // 坐在座位上拍一張（鏡頭比較低）
+  await page.evaluate(() => { Object.assign(G.p, { x: 15.5, y: 7.5, face: -Math.PI / 2 }); sitDown(FURN_BY_ID.seatN2); G.p.pitch = 0.05; G.p.face = 0.3; });
+  await sleep(1500);
+  await shot('1c-sit');
+  await page.evaluate(() => { standUp(); });
   // 下車：站在景觀車廂的車門北邊往南走，白天要走得下月台
-  await page.evaluate(() => { Object.assign(G.p, { x: 50.5, y: 9.3, face: Math.PI / 2, pitch: 0.05 }); });
+  await page.evaluate(() => { Object.assign(G.p, { x: 50.5, y: 11.3, face: Math.PI / 2, pitch: 0.05 }); });
   await page.keyboard.down('w');
-  await page.waitForFunction(() => G.p.y > 10.6, null, { timeout: 20000 }).catch(() => {});
+  await page.waitForFunction(() => G.p.y > 12.6, null, { timeout: 20000 }).catch(() => {});
   await page.keyboard.up('w');
   s = await state(page);
-  check(s.y > 10.6, `白天要能從車門走下月台（現在 y=${s.y.toFixed(1)}）`);
+  check(s.y > 12.6, `白天要能從車門走下月台（現在 y=${s.y.toFixed(1)}）`);
   await shot('2-platform');
   // 寶箱：每天在車站放 6 個（LV1×3、LV2×2、LV3×1）；走到櫃箱前面開它（直接呼叫開箱的函式，不用等按住 E）
   const ch = await page.evaluate(() => {
@@ -295,18 +352,25 @@ await scenario('w3', '第三世界第 1 天（照片貼圖、各式各樣死去�
   check(fire.n1 === fire.n0 + 1 && fire.w1 === fire.w0 - 1 && fire.left >= 25, `對著火爐用木柴要丟進去（火爐 ${fire.n0}→${fire.n1}，木柴 ${fire.w0}→${fire.w1}）`);
   check(fire.bar, '第三世界要顯示 🔥 火力條');
   // 天黑前 3 秒車站鎖門：門變成牆，還留在車站的人會被拉回車上
-  await page.evaluate(() => { Object.assign(G.p, { x: 30.5, y: 13.5 }); G.t = DAY_LEN - 3.2; });
+  await page.evaluate(() => { Object.assign(G.p, { x: 30.5, y: 15.5 }); G.t = DAY_LEN - 3.2; });
   await page.waitForFunction(() => DOORS.some(d => d.locked) || G.phase === 'night', null, { timeout: 30000 });
   await skipToNight(page);
   await page.waitForFunction(() => G.phase === 'night', null, { timeout: 30000 });
   await sleep(400);
-  const d = await page.evaluate(() => ({ locked: DOORS.filter(d => d.locked).length, y: G.p.y, solid: isSolid(19, 10), wall: isWall(35, 10) }));
+  const d = await page.evaluate(() => ({ locked: DOORS.filter(d => d.locked).length, y: G.p.y, solid: isSolid(19, 12), wall: isWall(35, 12) }));
   check(d.locked === 3 && d.solid && d.wall, `天黑時車站的三扇門要鎖住、變成牆（鎖了 ${d.locked} 扇）`);
-  check(d.y < 10, `留在車站的玩家要被拉回車上（現在 y=${d.y.toFixed(1)}）`);
+  check(d.y < 12, `留在車站的玩家要被拉回車上（現在 y=${d.y.toFixed(1)}）`);
   const lay = await overlaps(page);
   check(lay.length === 0, '天黑時版面重疊：' + lay.join('、'));
   await sleep(1200);
   await shot('3-night');
+  // 晚上：看得到你的乘客全部慢慢把頭轉過來盯著你（睜開眼睛）
+  await page.evaluate(() => { G.enemies = []; G.ev.schedule = []; G.ev.paxTurn = null; Object.assign(G.p, { x: 16.4, y: 7.6, face: -0.75, pitch: -0.3, inv: 999, flash: true, bat: 100 }); });
+  const stareN = await page.waitForFunction(() => Renderer.pax().list.filter(p => p.state === 'stare').length >= 4, null, { timeout: 30000 }).then(() => true).catch(() => false);
+  const nst = await page.evaluate(() => Renderer.pax().list.filter(p => p.state === 'stare').length);
+  check(stareN, `晚上看得到你的乘客都要轉頭盯著你（現在 ${nst} 個）`);
+  await sleep(800);
+  await shot('3b-stare');
 });
 
 await scenario('w3stop', '第三世界第 2 夜火爐是空的（?world=3&night=2&fire=0）：列車減速、停下來被攻擊，補燃料後重新開動', {}, async ({ page, shot, check }) => {
@@ -346,13 +410,24 @@ await scenario('w3cold', '第三世界寒寂之境（?world=3&night=3&cold）：
   await page.waitForFunction(() => mode === 'play');
   await sleep(2000);
   // 站在月台上：體溫每秒掉 2 點（低 FPS 下遊戲時間走得慢，直接比較前後）
-  const t0 = await page.evaluate(() => { Object.assign(G.p, { x: 30.5, y: 13.5, face: -Math.PI / 2 }); return { cold: G.cold, temp: G.p.temp, bar: !document.getElementById('tempBar').classList.contains('hidden') }; });
+  const t0 = await page.evaluate(() => { Object.assign(G.p, { x: 30.5, y: 15.5, face: -Math.PI / 2 }); return { cold: G.cold, temp: G.p.temp, bar: !document.getElementById('tempBar').classList.contains('hidden') }; });
   check(t0.cold && t0.bar, '&cold 要是寒寂之境，狀態列要顯示 🌡️ 體溫');
   await sleep(3000);
   const t1 = await page.evaluate(() => ({ temp: G.p.temp, frost: G.frost, snow: G.fx.length }));
   check(t1.temp < t0.temp, `在車站體溫要一直掉（${t0.temp} → ${t1.temp.toFixed(1)}）`);
   check(t1.snow > 0, '寒寂之境的車站要下雪');
   await shot('1-platform');
+  // 蠟燭：拿在手上（物品列選中蠟燭），在月台上體溫掉得慢很多；手上看得到點著的蠟燭、狀態列有提示
+  const cd = await page.evaluate(() => {
+    addItem('candle', 2);
+    const drop = sel => { G.selId = sel; G.p.temp = 80; G.p.candleT = 0; for (let i = 0; i < 10; i++) updateWarmth3(0.2); return 80 - G.p.temp; };
+    const without = drop('bulb1'), withC = drop('candle');
+    updateHUD();
+    return { without, withC, alert: document.getElementById('alert').textContent };
+  });
+  check(cd.withC < cd.without * 0.5 && cd.alert.includes('蠟燭讓你暖和一點'), `拿著蠟燭時體溫要掉得慢很多（沒拿 -${cd.without.toFixed(1)}、拿著 -${cd.withC.toFixed(1)}；狀態列「${cd.alert.slice(0, 40)}」）`);
+  await sleep(1200);
+  await shot('1a-candle');
   // 大白燈：放一盞落地燈裝上大白燈，走到大白面前會被抱住、體溫回升
   const h0 = await page.evaluate(() => {
     Object.assign(G.p, { x: 49.5, y: 7.6, face: -Math.PI / 2, pitch: -0.1 });
@@ -375,7 +450,7 @@ await scenario('w3cold', '第三世界寒寂之境（?world=3&night=3&cold）：
   await shot('2-baymax');
 });
 
-await scenario('monsters', '怪物模型（火柴人、鳥腳女和爬行女會動的頭髮、眼球花，手電筒開關各拍一張）', {}, async ({ page, shot, check }) => {
+await scenario('monsters', '怪物模型（火柴人、鳥腳女和爬行女會動的頭髮、眼球花，手電筒開關各拍一張；小丑突然出現在面前嚇你、扣血）', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=1&night=6&kit=1', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
   await skipToDusk(page);
@@ -401,6 +476,28 @@ await scenario('monsters', '怪物模型（火柴人、鳥腳女和爬行女會�
   await sleep(1500);
   check((await state(page)).flash === true, '按 F 要打開手電筒');
   await shot('2-flashlight');
+  // 小丑（設計師：「小丑會突然出現在你面前然後嚇死你，血量會減少」）：氣球碰到你，小丑出現在鏡頭正前方約 1 公尺，然後撲上來嚇你、扣血
+  const cl = await page.evaluate(() => {
+    G.enemies = []; G.flowers = [];
+    Object.assign(G.p, { x: 20.5, y: 23.2, face: -Math.PI / 2, pitch: 0, inv: 0, hp: 100, flash: false });
+    const b = Object.assign(spawnEnemy('balloon', { x: 20.5, y: 22.8 }), { spawn: 0 });
+    updateBalloon(b, 0.05);
+    G.enemies = G.enemies.filter(e => !e.dead);   // 破掉的氣球（遊戲迴圈本來會在同一幀拿掉）
+    const c = G.enemies.find(e => e.kind === 'clown');
+    if (!c) return null;
+    c.pop = 99;   // 先讓他站著拍照
+    return { d: Math.hypot(c.x - G.p.x, c.y - G.p.y), a: lookAngle(c.x, c.y) };
+  });
+  check(cl && cl.d < 1.5 && cl.a < 0.5, `氣球碰到你，小丑要出現在你面前（距離 ${cl && cl.d.toFixed(2)}、偏 ${cl && cl.a.toFixed(2)}）`);
+  await page.keyboard.press('f');
+  await sleep(1500);
+  await shot('3-clown');
+  const scare = await page.evaluate(() => {
+    const c = G.enemies.find(e => e.kind === 'clown'), hp = G.p.hp;
+    c.pop = 0.01; updateClown(c, 0.05);
+    return { hp0: hp, hp1: G.p.hp, js: document.getElementById('jumpscare').classList.contains('show'), back: c.back > 0 };
+  });
+  check(scare.js && scare.hp1 < scare.hp0 - 10 && scare.back, `小丑要撲上來嚇你（驚嚇畫面 ${scare.js}）、扣血（${scare.hp0.toFixed(0)} → ${scare.hp1.toFixed(0)}）、再往後退（帶著護身符，只扣一半）`);
 });
 
 await scenario('monsters2', '第二世界怪物模型（草叢人、大嘴觸角蟲、眼花女孩、向日葵眼、千眼菇排成一排，手電筒開關各拍一張）', {}, async ({ page, shot, check }) => {
@@ -441,14 +538,14 @@ await scenario('monsters3', '第三世界怪物模型（克羅諾斯・蕈裂、
   // 在景觀車廂排一排（pose：不追、不咬人，只做待機的動作），玩家在車尾那一頭往車頭看；落地燈裝上大白燈
   const n = await page.evaluate(() => {
     G.enemies = []; G.ev.schedule = [];
-    Object.assign(G.p, { x: 53.5, y: 7.5, face: Math.PI, pitch: -0.06, inv: 999 });
+    Object.assign(G.p, { x: 53.5, y: 8.5, face: Math.PI, pitch: -0.06, inv: 999 });
     const put = (kind, x, y, extra) => Object.assign(spawnEnemy(kind, { x, y }), { spawn: 0, pose: true, face: 0 }, extra);
-    put('kronos', 49.8, 5.7, { thrust: 0.3 });
-    put('tyrant', 47.2, 8.9);
-    put('warlord', 49.8, 9.1);
-    put('taowu', 46.6, 6.1);
-    G.p.x = 50.5; G.p.y = 5.8; G.selId = 'lamp_floor'; useSelected(); installBulb(G.lamps[0], BAYMAX_TIER);
-    Object.assign(G.p, { x: 53.5, y: 7.5, face: Math.PI });
+    put('kronos', 49.8, 6.7, { thrust: 0.3 });
+    put('tyrant', 47.2, 9.9);
+    put('warlord', 49.8, 10.1);
+    put('taowu', 46.6, 7.1);
+    G.p.x = 50.5; G.p.y = 6.8; G.selId = 'lamp_floor'; useSelected(); installBulb(G.lamps[0], BAYMAX_TIER);
+    Object.assign(G.p, { x: 53.5, y: 8.5, face: Math.PI });
     return G.enemies.length + G.lamps.filter(l => l.bulb === BAYMAX_TIER).length;
   });
   check(n === 5, `要放好 4 隻怪物和大白（現在 ${n}）`);
@@ -481,20 +578,20 @@ await scenario('w3roof', '第三世界的車頂（爬梯上去、風、檮杌會
   // 對著景觀車廂的爬梯：互動是「爬上車頂」；爬上去之後站在車頂（地板比較高）
   const up = await page.evaluate(() => {
     G.enemies = []; G.ev.schedule = []; G.train.k = 1;
-    Object.assign(G.p, { x: 56.5, y: 7.5, face: 0, pitch: 0 });
+    Object.assign(G.p, { x: 56.5, y: 6.5, face: 0, pitch: 0 });
     const t1 = getTarget();
     climbRoof(FURN_BY_ID.ladder2);
     Object.assign(G.p, { face: Math.PI, pitch: -0.05 });
     return { label: t1 && t1.label, roof: onRoof(G.p.x, G.p.y), fh: floorH(G.p.x, G.p.y), room: roomAt(G.p.x, G.p.y).name };
   });
-  check(up.label === '爬上車頂' && up.roof && up.fh > 2 && up.room === '車頂', `爬梯要能爬上車頂（互動「${up.label}」、房間「${up.room}」、高度 ${up.fh}）`);
+  check(up.label === '爬上車頂' && up.roof && up.fh > 3.2 && up.room === '車頂', `爬梯要能爬上車頂（互動「${up.label}」、房間「${up.room}」、高度 ${up.fh}）`);
   await sleep(1500);
   const wind = await page.evaluate(() => ({ fx: G.fx.some(f => f.vx > 5), alert: document.getElementById('alert').textContent }));
   check(wind.fx && wind.alert.includes('車頂'), '車頂上要有迎面的風（光點）和提示');
   await shot('1-roof');
   // 檮杌會跟上車頂：牠在車廂裡、你在車頂，4 秒後牠從最近的艙口跳上來（直接呼叫牠的更新函式，不用等低 FPS 的遊戲時間）
   const tw = await page.evaluate(() => {
-    const e = Object.assign(spawnEnemy('taowu', { x: 47.5, y: 7.5 }), { spawn: 0 });
+    const e = Object.assign(spawnEnemy('taowu', { x: 47.5, y: 8.5 }), { spawn: 0 });
     for (let i = 0; i < 60; i++) updateTaowu(e, 0.1);
     return { roof: onRoof(e.x, e.y), pos: [Math.round(e.x), Math.round(e.y)] };
   });
@@ -508,23 +605,24 @@ await scenario('w3roof', '第三世界的車頂（爬梯上去、風、檮杌會
     return { label: t2 && t2.label, roof: onRoof(G.p.x, G.p.y), ok: walkable(G.p.x, G.p.y), room: roomAt(G.p.x, G.p.y).name };
   });
   check(down.label === '爬回車廂' && !down.roof && down.ok && down.room === '景觀車廂', `艙口要能爬回車廂（互動「${down.label}」、房間「${down.room}」）`);
-  // 墮落戰神：從列車的一頭巡邏到另一頭（走得動、一直在走道裡）；你躲進包廂牠就在門外的走道上等，不會進來
+  // 墮落戰神：從列車的一頭巡邏到另一頭（走得動、一直在走道裡）；你躲進機車室牠就在門外的走道上等，不會進來
   const wl = await page.evaluate(() => {
-    Object.assign(G.p, { x: 50.5, y: 7.5, face: Math.PI });
+    Object.assign(G.p, { x: 50.5, y: 8.5, face: Math.PI });
     const e = Object.assign(spawnEnemy('warlord', warlordSpawn()), { spawn: 0 });
     const x0 = e.x;
     let hall = true;
     for (let i = 0; i < 40; i++) { updateWarlord(e, 0.1); if (!inHall(e.x, e.y)) hall = false; }
     const walked = Math.abs(e.x - x0);
-    // 玩家躲進臥鋪 B，戰神從走道衝過來
-    Object.assign(G.p, { x: 65.5, y: 8.6 });
-    Object.assign(e, { x: 60.5, y: 5.5, state: 'charge', waitT: 0, pt: null });
+    // 玩家躲進機車室，戰神從走道衝過來
+    Object.assign(G.p, { x: 4.5, y: 7.5 });
+    Object.assign(e, { x: 14.5, y: 8.5, state: 'charge', waitT: 0, pt: null });
     let inside = false;
     for (let i = 0; i < 60; i++) { updateWarlord(e, 0.1); if (roomAt(e.x, e.y) && roomAt(e.x, e.y).comp) inside = true; }
-    return { walked, hall, state: e.state, wait: [Math.round(e.x * 10) / 10, Math.round(e.y * 10) / 10], inside, near: Math.hypot(e.x - 66.5, e.y - 6.5) < 1.3 };
+    const door = DOORS.find(d => d.comp);
+    return { walked, hall, state: e.state, wait: [Math.round(e.x * 10) / 10, Math.round(e.y * 10) / 10], inside, near: Math.hypot(e.x - (door.x + 1.5), e.y - (door.y + 0.5)) < 1.3 };
   });
   check(wl.walked > 3 && wl.hall, `墮落戰神要在走道裡巡邏（走了 ${wl.walked.toFixed(1)} 格、一直在走道 ${wl.hall}）`);
-  check(wl.state === 'wait' && wl.near && !wl.inside, `躲進包廂時戰神要在門外等（狀態 ${wl.state}、位置 ${wl.wait}、進過包廂 ${wl.inside}）`);
+  check(wl.state === 'wait' && wl.near && !wl.inside, `躲進機車室時戰神要在門外等（狀態 ${wl.state}、位置 ${wl.wait}、進過機車室 ${wl.inside}）`);
   const lay = await overlaps(page);
   check(lay.length === 0, '車頂時版面重疊：' + lay.join('、'));
   await shot('2-corridor');
@@ -713,13 +811,17 @@ await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：100×76 的大
     const t = getTarget(), id = pk.id, n0 = G.inv[id] || 0;
     if (t && t.action) t.action();
     const took = (G.inv[id] || 0) > n0 || (G.hand && G.hand.id === id);
-    // 放在地上，再看著它撿回來
-    G.hand = null; G.inv[id] = Math.max(G.inv[id] || 0, 1); G.selId = id;
+    // 放在地上，再看著它撿回來（背包先空出一格，撿回來才不會變成手上的第 17 個）
+    G.hand = null;
+    while (bagUsed() >= BAG_SLOTS) { const o = invList().find(x => x !== id); delete G.inv[o]; }
+    G.inv[id] = Math.max(G.inv[id] || 0, 1); G.selId = id;
     const c0 = G.inv[id]; dropSelected4(false);
     const dropped = G.pickups.find(p => p.id === id && !p.s && Math.hypot(p.x - G.p.x, p.y - G.p.y) < 1.2);
-    Object.assign(G.p, { pitch: -Math.atan2(1.4, 0.7) });
+    if (dropped) G.p.pitch = -Math.atan2(1.4, Math.max(0.05, Math.hypot(dropped.x - G.p.x, dropped.y - G.p.y)));
     const lp = lookedPickup4(); if (lp) takePickup4(lp.pk);
-    return { shelf, label: t && t.label, took, dropped: !!dropped, back: (G.inv[id] || 0) === c0, lamp: bulbName(1), flash7: FLASH_TIERS[7].name };
+    const back = (G.inv[id] || 0) === c0;
+    G.hand = null;
+    return { shelf, label: t && t.label, took, dropped: !!dropped, back, lamp: bulbName(1), flash7: FLASH_TIERS[7].name };
   });
   check(items.shelf > 60, `架子上要擺著真的東西（${items.shelf} 個）`);
   check(items.took && items.label && items.label.startsWith('拿起'), `看著架上的東西按 E 要拿起來（「${items.label}」）`);

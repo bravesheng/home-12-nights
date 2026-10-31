@@ -505,8 +505,9 @@ function dropSelected4(all = true) {
   if (!id || !G.inv[id]) return;
   const n = all ? G.inv[id] : 1, p = G.p;
   removeItem(id, n);
-  let x = p.x + Math.cos(p.face) * 0.7, y = p.y + Math.sin(p.face) * 0.7;
-  if (!walkable(x, y)) { x = p.x; y = p.y; }
+  // 放在前面的地上（前面擋住了就放近一點，再不行就放在腳邊）
+  let x = p.x, y = p.y;
+  for (const r of [0.7, 0.45, 0.25]) { const tx = p.x + Math.cos(p.face) * r, ty = p.y + Math.sin(p.face) * r; if (walkable(tx, ty)) { x = tx; y = ty; break; } }
   G.pickups.push({ x, y, id, n, t: 0, keep: 1, a: p.face + Math.PI + rand(-0.3, 0.3) });
   Sound.play('place');
   toast(`把${itemName(id)}${n > 1 ? ` ×${n}` : ''}放在地上了（看著它按 E 可以再拿起來）。`);
@@ -562,7 +563,8 @@ function lookedPickup4() {
     if (pk.id === 'coin' && !pk.s) continue;   // 地上的硬幣走過去就撿
     const dx = pk.x - p.x, dy = pk.y - p.y, dz = (pk.z || 0) + 0.1 - eye, d = Math.hypot(dx, dy, dz);
     if (d > 2.3 || Math.hypot(dx, dy) > 2.0) continue;
-    const ang = Math.acos(clamp((dx * lx + dy * ly + dz * lz) / Math.max(d, 0.01), -1, 1));
+    let ang = Math.acos(clamp((dx * lx + dy * ly + dz * lz) / Math.max(d, 0.01), -1, 1));
+    if (Math.hypot(dx, dy) < 0.4 && lz < -0.8) ang = Math.min(ang, 0.15);   // 就在腳邊：低頭看就拿得到
     if (ang > Math.max(0.16, 0.34 / d)) continue;
     if (!best || ang + d * 0.05 < best.ang + best.d * 0.05) best = { pk, ang, d };
   }
@@ -688,7 +690,8 @@ function addTargets4(cands) {
     if (!f.move) continue;   // 搬不動的家具（櫃台、貨架）照 game.js 原本的搜索
     const lift = () => takeFurn4(f), sub = '按住 E：拿起來搬走';
     if (spec.store) cands.push({ d, id: 'f4:' + f.id, label: `打開${f.name}`, sub, hold: 0.6, tap: () => openStore4(f), action: lift });
-    else if (spec.fn === 'bed' && G.phase === 'day' && G.t < DAY_LEN - 25) cands.push({ d, id: 'f4:' + f.id, label: '睡到傍晚（點一下）', sub, hold: 0.6, tap: sleep, action: lift });
+    else if (FURN_LIE[f.type] && !airborne(p)) cands.push({ d, id: 'f4:' + f.id, label: '躺下（點一下）', sub: (G.phase === 'day' && G.t < DAY_LEN - 25 ? '躺著按住 E 睡到傍晚・' : '') + sub, hold: 0.6, tap: () => lieDown(f), action: lift });
+    else if (FURN_SIT[f.type] && seatSpots(f).length && !airborne(p)) cands.push({ d, id: 'f4:' + f.id, label: '坐下（點一下）', sub, hold: 0.6, tap: () => sitDown(f), action: lift });
     else if (spec.fn === 'fire') {
       const sel = G.selId && ITEMS[G.selId].kind === 'fuel' ? G.selId : worstFuel(), left = Math.round((f.fuel || []).reduce((s, q) => s + q.left, 0));
       cands.push({ d, id: 'f4:' + f.id, label: sel ? `丟${ITEMS[sel].name}進火爐` : `火爐：還能燒 ${left} 秒`, sub: (sel ? `還能燒 ${left} 秒・` : '背包裡沒有木柴或煤炭・') + sub, hold: 0.6, tap: () => sel && fuelFire4(f, sel), action: lift });
