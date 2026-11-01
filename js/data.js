@@ -581,15 +581,16 @@ const BAYMAX_MAX = 2;   // 整個遊戲最多拿到幾顆大白燈
 // 房子要自己蓋：板子放在格子的邊上（world4.js）；家具大部分可以搬（FURN4 的 move）
 // ====================================================================
 const CEIL_W4 = 7.5;      // 賣場的天花板高度（設計師：天花板太低 → 7.5 公尺，爬到 5.2 公尺高的貨架頂上也站得直；小房間是一般的 2.7）
-const ROOF4_H = 3.0;      // 屋頂（躺平的板子）放多高：疊 3 片 1 公尺的正方形板子剛好碰到屋頂
+const PLANK4 = 2;        // 板子是 2×2 公尺的正方形（設計師：板子太小了，改成和身高一樣的板子），門也一樣大（兩扇對開）
+const ROOF4_H = 2.0;      // 屋頂（躺平的板子）放多高：一片板子的高度，牆排一圈、上面放屋頂就是一間房子
 // 板子五級（設計師：木頭、水泥、黃金、岩漿、玻璃；普通、稀有、史詩、傳奇、神話）。板子是 1×1 公尺的正方形（2026/11/01 設計師：
 // 全部板子變成正方形），一面牆要疊 2～3 片；hp 是一片要打多久才打得破（玻璃打不破）
 const PLANKS = [null,
-  { key: 'wood',   name: '木頭板子', rar: 'common', hp: 20,  price: 1,  color: '#b08458', desc: '最常見的板子。被酸雨淋到會慢慢腐蝕。' },
-  { key: 'cement', name: '水泥板子', rar: 'rare',   hp: 50,  price: 2,  color: '#e8e4dc', desc: '像普通人家裡的白色牆壁，比木頭耐打很多。' },
-  { key: 'gold',   name: '黃金板子', rar: 'epic',   hp: 100, price: 4,  color: '#e2b23c', desc: '閃閃發亮的金屬板，非常耐打。' },
-  { key: 'lava',   name: '岩漿板子', rar: 'legend', hp: 160, price: 7, color: '#5a2414', desc: '黑色岩石裡流著岩漿：會發光、旁邊 2 格很溫暖，怪物打它會被燙到。' },
-  { key: 'glass',  name: '玻璃板子', rar: 'mythic', hp: Infinity, price: 10, color: '#cfe8f0', desc: '透明的強化玻璃：看得清外面、光透得過去，怪物完全打不破。' },
+  { key: 'wood',   name: '木頭板子', rar: 'common', hp: 40,  price: 2,  color: '#b08458', desc: '最常見的板子。被酸雨淋到會慢慢腐蝕。' },
+  { key: 'cement', name: '水泥板子', rar: 'rare',   hp: 100, price: 4,  color: '#e8e4dc', desc: '像普通人家裡的白色牆壁，比木頭耐打很多。' },
+  { key: 'gold',   name: '黃金板子', rar: 'epic',   hp: 200, price: 8,  color: '#e2b23c', desc: '閃閃發亮的金屬板，非常耐打。' },
+  { key: 'lava',   name: '岩漿板子', rar: 'legend', hp: 320, price: 14, color: '#5a2414', desc: '黑色岩石裡流著岩漿：會發光、旁邊 2 格很溫暖，怪物打它會被燙到。' },
+  { key: 'glass',  name: '玻璃板子', rar: 'mythic', hp: Infinity, price: 20, color: '#cfe8f0', desc: '透明的強化玻璃：看得清外面、光透得過去，怪物完全打不破。' },
 ];
 const PLANK_MAX = PLANKS.length - 1, GLASS_TIER = 5, LAVA_TIER = 4;
 // 貨架的高度和每一層的高度（3D 模型和 world4.js 擺真的東西的位置共用）：倉儲貨架 5.2 公尺（設計師：鐵架太矮了）
@@ -762,7 +763,7 @@ const W4 = {
   start: { x: W4AX + 0.5, y: W4H - 3.5, face: -Math.PI / 2 },
   staffOut: { x: 91.5, y: 71.5 },
   patrol: [{ x: W4AX + 0.5, y: 1.5 }, { x: W4AX + 0.5, y: W4H - 2.5 }, { x: 1.5, y: W4AY + 0.5 }, { x: W4W - 1.5, y: W4AY + 0.5 }],
-  starterPlanks: [-1.5, -1, -0.5, 2.5, 3, 3.5].flatMap(dx => [[W4AX + dx, W4H - 5.5], [W4AX + dx, W4H - 6.3]]),   // 新遊戲送的 12 片木頭板子（放在入口旁邊的地上）
+  starterPlanks: [-2.5, -1, 2, 3.5].flatMap(dx => [[W4AX + dx, W4H - 5.5], [W4AX + dx, W4H - 7]]),   // 新遊戲送的 8 片木頭板子（2×2 公尺，放在入口旁邊的地上）
 };
 // 天氣：紅月（2 天）、寒寂之境（4 天）、酸雨（每局隨機 2～3 次，開新遊戲時排好）
 const RED_MOON_W4 = [5, 11], COLD_DAYS_W4 = [3, 6, 9, 12];

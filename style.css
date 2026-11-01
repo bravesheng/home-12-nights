@@ -339,7 +339,6 @@ li { margin-bottom: 9px; line-height: 1.55; font-size: 14px; }
 #stopfx { background: radial-gradient(ellipse at center, rgba(60, 0, 10, 0) 30%, rgba(80, 0, 10, .7) 100%); transition: opacity 1s; }
 
 /* 平板：第二、三世界才有「跳」按鈕 */
-body:not(.w2):not(.w3):not(.w4) #tbtns .tb.jump { visibility: hidden; }   /* 第一世界不能跳；第二、三、四世界可以（設計師：要可以跳躍！） */
 .tb.jump { border-color: rgba(255, 158, 200, .7); color: #ffd0e6; }
 
 /* ===== 破關動畫 ===== */
