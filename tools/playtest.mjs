@@ -57,7 +57,8 @@ const results = [];
 const ONLY = process.env.PT_ONLY ? process.env.PT_ONLY.split(',') : null;
 async function scenario(name, title, ctxOpts, fn) {
   if (ONLY && !ONLY.includes(name)) return;
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, ...ctxOpts });
+  const { limit = 120000, ...opts } = ctxOpts;   // limit：這個情境最多跑多久（預設 2 分鐘）
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, ...opts });
   const page = await ctx.newPage();
   const problems = [];
   // 同一個檔案載入失敗，瀏覽器會報好幾次（404、console、中斷），只記一次
@@ -78,10 +79,10 @@ async function scenario(name, title, ctxOpts, fn) {
   const t0 = Date.now();
   let fps = '';
   try {
-    // 每個情境最多 2 分鐘，卡住就算失敗，不要整個測試停在那裡
+    // 每個情境最多 2 分鐘（兩個分頁的 net 情境 4 分鐘），卡住就算失敗，不要整個測試停在那裡
     let timer;
-    const limit = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('超過 2 分鐘，卡住了')), 120000); });
-    await Promise.race([fn({ page, ctx, shot, check }), limit]).finally(() => clearTimeout(timer));
+    const stop = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`超過 ${limit / 60000} 分鐘，卡住了`)), limit); });
+    await Promise.race([fn({ page, ctx, shot, check }), stop]).finally(() => clearTimeout(timer));
     fps = await measureFps(page);
   } catch (e) {
     problems.push('執行失敗：' + e.message.split('\n')[0]);
@@ -1107,6 +1108,150 @@ await scenario('cut3', '第三到第四世界（?cut=3）：第三世界的結�
   check(await page.evaluate(() => curWorld === 4 && bagUsed() > 0), '要進第四世界、背包要帶過去');
 });
 
+await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩個分頁，用 BroadcastChannel 互連，不用上網）：遊戲中開房間、用代碼加入、客人進到房主的世界和天數、時間對齊、看得到彼此的 3D 人物和手電筒、自訂事件（大訊息切塊）、換白天晚上、客人倒下天亮時醒來、客人的存檔不變、離開房間、在主選單等房主開始、第四世界一起蓋房子（板子、家具、架上的東西、斜坡同步）', { limit: 240000 }, async ({ page, ctx, shot, check }) => {
+  // 房主用測試版（不存檔，不會蓋掉客人的存檔；兩個分頁共用 localStorage），客人用正式版
+  const guest = await ctx.newPage();
+  guest.on('pageerror', e => check(false, '客人的分頁 JS 錯誤：' + e.message));
+  guest.on('console', m => { if (m.type() === 'error' && !m.text().startsWith('Failed to load resource')) check(false, '客人的分頁 console 錯誤：' + m.text()); });
+  const gshot = label => guest.screenshot({ path: path.join(OUT, `net-${label}.png`) });
+  const SAVE = JSON.stringify({ v: 1, day: 3, diff: 'easy', world: 1, p: { x: 19.5, y: 23, hp: 100, san: 100, hunger: 100, bat: 100, flashLv: 1 }, inv: { bulb1: 1 }, sockets: [], lamps: [], containers: {}, stats: { searched: 0, dissolved: 0, bestTier: 1 } });
+  await guest.goto(BASE + '?nettest', { waitUntil: 'load' });
+  await guest.evaluate(s => { localStorage.setItem('home99_save_v1', s); localStorage.removeItem('home99_progress_v1'); }, SAVE);
+  await page.goto(BASE + 'test.html?world=4&night=2&nettest', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play' && curWorld === 4);
+  await page.evaluate(() => { G.t = 40; Object.assign(G.p, { ...W4.start, pitch: 0 }); });   // 第 2 天的白天
+  // 房主：遊戲中按暫停 →「👥 朋友」→「開房間」
+  await page.evaluate(() => pauseGame());
+  await page.click('#btnPauseFriends');
+  await page.click('#fHost');
+  await page.waitForFunction(() => /^[A-Z2-9]{4}$/.test(document.getElementById('fRoomCode').textContent), null, { timeout: 10000 });
+  const code = await page.evaluate(() => document.getElementById('fRoomCode').textContent);
+  check(!/[01OI]/.test(code), `房間代碼不能有 0、O、1、I（${code}）`);
+  await shot('1-room');
+  await page.click('#fResume');
+  // 客人：主選單「👥 朋友」→ 取名字、選女生 → 輸入代碼 → 加入
+  await guest.reload({ waitUntil: 'load' });
+  await guest.waitForSelector('#btnFriends');
+  await guest.click('#btnFriends');
+  check(await guest.evaluate(() => document.getElementById('fOffline').classList.contains('hidden')), '測試用的本機連線要能用（不能顯示「沒有網路」）');
+  await guest.fill('#fName', '小明');
+  await guest.click('#fLook button[data-look="f"]');
+  await guest.fill('#fCode', code.toLowerCase());
+  check(await guest.evaluate(c => document.getElementById('fCode').value === c, code), '輸入的代碼要自動變成大寫');
+  await guest.click('#fJoin');
+  await guest.waitForFunction(() => mode === 'play' && curWorld === 4, null, { timeout: 30000 });
+  await page.evaluate(() => { if (mode === 'pause') resumeGame(); });
+  await page.waitForFunction(() => Net.friends().some(f => f.ingame && f.world === 4), null, { timeout: 15000 }).catch(() => {});
+  await guest.waitForFunction(() => Net.friends().some(f => f.ingame && f.world === 4), null, { timeout: 15000 }).catch(() => {});
+  await sleep(500);
+  const hs = await page.evaluate(() => ({ t: G.t, day: G.day, net: Net.isHost && Net.active, fr: Net.friends(), roster: Net.roster().map(r => r.name) }));
+  const gs = await guest.evaluate(() => ({ t: G.t, day: G.day, phase: G.phase, world: curWorld, guest: Net.guest, ready: Net.ready, fr: Net.friends(), name: Net.name, inv: Object.keys(G.inv).length }));
+  check(gs.guest && gs.ready && gs.world === 4 && gs.day === 2 && gs.phase === 'day', `客人要進到房主的世界和天數（第 ${gs.world} 世界、第 ${gs.day} 天 ${gs.phase}）`);
+  check(Math.abs(gs.t - hs.t) < 2, `客人的時間要跟房主對齊（房主 ${hs.t.toFixed(1)}、客人 ${gs.t.toFixed(1)} 秒）`);
+  check(hs.net && hs.roster.includes('小明') && hs.fr.some(f => f.name === '小明' && f.ingame && f.world === 4), `房主要看得到客人（${JSON.stringify(hs.roster)}；${JSON.stringify(hs.fr)}）`);
+  check(gs.fr.some(f => f.host && f.ingame && f.world === 4), '客人要看得到房主');
+  check(gs.inv > 0, '客人要有新遊戲的起始物品');
+  // 自訂事件：客人 → 房主、房主 → 客人（3 萬字的大訊息要自動切塊再拼回來）
+  await page.evaluate(() => { window.__got = []; Net.on('hi', (d, from) => window.__got.push({ d, from })); });
+  await guest.evaluate(() => { window.__got = []; Net.on('big', d => window.__got.push(d)); Net.send('hi', { n: 7, s: '你好' }); });
+  const gid = await guest.evaluate(() => Net.myId);
+  await page.evaluate(id => Net.sendTo(id, 'big', { s: 'x'.repeat(30000) + '完' }), gid);
+  await sleep(800);
+  const ev1 = await page.evaluate(() => window.__got), ev2 = await guest.evaluate(() => window.__got);
+  check(ev1.length === 1 && ev1[0].d.n === 7 && ev1[0].d.s === '你好' && ev1[0].from === gid, `房主要收到客人的自訂事件（${JSON.stringify(ev1).slice(0, 80)}）`);
+  check(ev2.length === 1 && ev2[0].s.length === 30001 && ev2[0].s.endsWith('完'), `客人要收到房主送的大訊息（收到 ${ev2.length} 則）`);
+  // 兩個人面對面站著，客人開手電筒：兩邊的 3D 畫面都要有對方的人物
+  await page.evaluate(() => Object.assign(G.p, { x: W4AX + 0.5, y: W4H - 3.5, face: -Math.PI / 2, pitch: 0.05 }));
+  await guest.evaluate(() => { Object.assign(G.p, { x: W4AX + 0.8, y: W4H - 6.3, face: Math.PI / 2 + 0.25, pitch: -0.05, flash: true, bat: 100 }); });
+  await sleep(2000);
+  for (const pg of [page, guest]) await pg.waitForFunction(() => Renderer.friends().some(r => r.visible), null, { timeout: 10000 }).catch(() => {});
+  const r3 = await page.evaluate(() => Renderer.friends()), r3g = await guest.evaluate(() => Renderer.friends());
+  check(r3.length === 1 && r3[0].visible && r3[0].meshes >= 15, `房主的畫面要有客人的人物（${JSON.stringify(r3)}）`);
+  const near = await page.evaluate(() => { const f = Renderer.friends()[0]; return f && Math.hypot(f.x - (W4AX + 0.8), f.y - (W4H - 6.3)); });
+  check(near !== undefined && near < 0.6, `客人的人物要在客人的位置（差 ${near && near.toFixed(2)} 格）`);
+  check(r3.length === 1 && r3[0].beam, '客人開手電筒，房主要看得到光束');
+  check(r3g.length === 1 && r3g[0].visible, `客人的畫面要有房主的人物（${JSON.stringify(r3g)}）`);
+  await shot('2-host-sees-guest');
+  await gshot('3-guest-sees-host');
+  check(await page.evaluate(() => typeof drawMinimap === 'function'), '小地圖照常');
+  // 口哨（第四世界）：朋友是藍點
+  const dots = await page.evaluate(() => { G.whistleT = 5; const d = whistleDots4(); G.whistleT = 0; return d.filter(x => !x.red).length; });
+  check(dots >= 1, '吹口哨時朋友要是藍點');
+  // 第四世界一起蓋房子：客人進來時拿到房主的賣場（架上的東西一樣）；之後房主放的板子、搬的家具，客人拿走的架上東西、放的斜坡都會同步
+  await guest.waitForFunction(() => G.pickups.some(p => p.uid), null, { timeout: 10000 }).catch(() => {});
+  const b1 = await page.evaluate(() => {
+    holdThing({ k: 'plank', tier: 2 }); Object.assign(G.p, { x: 46.3, y: 66.5, face: 0, pitch: 0 }); Object.assign(G.bld, { dist: 1.0, rx: 0, ry: 0, rz: 0 }); place4(); G.hand = null;
+    const w = G.b4.list[G.b4.list.length - 1], pk = G.pickups.find(p => p.s && p.uid && p.id !== 'coin');
+    const f = FURN.find(f => f.type === 'chair4' && !(zoneAt(f.x, f.y) || {}).cube);
+    takeFurn4(f); Object.assign(G.p, { x: 56.5, y: 64.5, face: 0 }); G.bld.dist = 1.4; place4(); G.hand = null;
+    Object.assign(G.p, { x: W4AX + 0.5, y: W4H - 3.5 });
+    return { pid: w && w.pid, uid: pk && pk.uid, fid: f.id, fx: f.x, fy: f.y, shelf: G.pickups.filter(p => p.s).map(p => p.uid).sort().join() };
+  });
+  await guest.waitForFunction(pid => G.b4.list.some(w => w.pid === pid), b1.pid, { timeout: 8000 }).catch(() => {});
+  await sleep(500);
+  const b2 = await guest.evaluate(b => {
+    const f = FURN_BY_ID[b.fid], pk = G.pickups.find(p => p.uid === b.uid);
+    const out = { wall: G.b4.list.some(w => w.pid === b.pid), shelf: G.pickups.filter(p => p.s).map(p => p.uid).sort().join() === b.shelf, chair: f && !f.held && f.x === b.fx && f.y === b.fy, pk: !!pk };
+    if (pk) { G.hand = null; G.inv = {}; takePickup4(pk); }
+    holdThing({ k: 'plank', tier: 1 }); Object.assign(G.p, { x: 52.5, y: 64.5, face: -Math.PI / 2, pitch: 0 }); Object.assign(G.bld, { dist: 1.0, rx: 45, ry: 0, rz: 0 }); place4(); G.hand = null;
+    return out;
+  }, b1);
+  check(b2.wall && b2.shelf && b2.pk, `客人要看到房主放的板子、架上的東西要跟房主一樣（${JSON.stringify(b2)}）`);
+  check(b2.chair, `房主搬的家具，客人那邊也要搬過去（${JSON.stringify(b2)}）`);
+  await page.waitForFunction(() => G.b4.ramps.size > 0, null, { timeout: 8000 }).catch(() => {});
+  const b3 = await page.evaluate(uid => ({ gone: !G.pickups.some(p => p.uid === uid), ramp: G.b4.ramps.has('52,63') }), b1.uid);
+  check(b3.gone && b3.ramp, `客人拿走的架上東西、放的斜坡，房主那邊也要同步（${JSON.stringify(b3)}）`);
+  // 房主天黑 → 客人跟著天黑
+  await page.evaluate(() => { G.t = DAY_LEN - 0.05; });
+  await guest.waitForFunction(() => G.phase === 'night' && G.day === 2, null, { timeout: 20000 });
+  // 客人倒下：不會卡在結束畫面，等天亮
+  await guest.evaluate(() => gameOver());
+  await sleep(600);
+  const dn = await guest.evaluate(() => ({ mode, over: !document.getElementById('gameover').classList.contains('hidden'), down: !document.getElementById('netDown').classList.contains('hidden'), text: document.getElementById('netDownText').textContent }));
+  check(dn.mode === 'down' && !dn.over && dn.down && dn.text.includes('天亮'), `客人倒下要顯示「天亮時會醒來」、不是結束畫面（${JSON.stringify(dn)}）`);
+  await gshot('4-guest-down');
+  await page.waitForFunction(() => Net.friends().some(f => f.down), null, { timeout: 5000 }).catch(() => check(false, '房主要看到客人倒下了'));
+  // 房主天亮 → 客人在第 3 天醒過來
+  await page.evaluate(() => { G.t = NIGHT_LEN - 0.05; });
+  await guest.waitForFunction(() => G.phase === 'day' && G.day === 3 && mode === 'play', null, { timeout: 20000 }).catch(() => {});
+  const up = await guest.evaluate(() => ({ mode, day: G.day, phase: G.phase, hp: G.p.hp, down: !document.getElementById('netDown').classList.contains('hidden'), ok: walkable(G.p.x, G.p.y) }));
+  check(up.mode === 'play' && up.day === 3 && up.phase === 'day' && up.hp > 0 && !up.down && up.ok, `天亮了客人要醒過來（${JSON.stringify(up)}）`);
+  check(await guest.evaluate(s => localStorage.getItem('home99_save_v1') === s, SAVE), '客人自己的存檔不能被改掉');
+  // 客人離開房間：回主選單，自己的存檔還在；房主看到客人離開了
+  await guest.evaluate(() => pauseGame());
+  check(await guest.evaluate(() => document.getElementById('btnQuit').textContent.includes('離開房間') && !document.getElementById('pauseNet').classList.contains('hidden')), '客人的暫停選單要寫「離開房間」和房間資訊');
+  await guest.click('#btnQuit');
+  await guest.waitForFunction(() => mode === 'title' && !Net.active);
+  await page.waitForFunction(() => Net.friends().length === 0 && Net.roster().length === 1, null, { timeout: 5000 }).catch(() => check(false, '客人離開後房主的房間裡要只剩自己'));
+  const tt = await guest.evaluate(() => ({ cont: !document.getElementById('btnContinue').disabled, info: document.getElementById('saveInfo').textContent }));
+  check(tt.cont && tt.info.includes('第 3 天'), `離開房間後客人自己的存檔要還在（${tt.info}）`);
+  // 房主回主選單（房間還開著）→ 客人再加入，在朋友的畫面等 → 房主開新遊戲（第一世界）→ 客人跟著進去
+  await page.evaluate(() => pauseGame());
+  await page.click('#btnQuit');
+  await page.waitForFunction(() => mode === 'title' && Net.isHost && !document.getElementById('netNote').classList.contains('hidden'));
+  await guest.click('#btnFriends');
+  check(await guest.evaluate(c => document.getElementById('fCode').value === c, code), '再打開朋友的畫面時，代碼要記得上一次的');
+  await guest.click('#fJoin');
+  await guest.waitForFunction(() => Net.guest && !document.getElementById('fWait').classList.contains('hidden'), null, { timeout: 10000 });
+  await gshot('5-guest-lobby');
+  await page.click('#btnFriends');
+  await page.waitForFunction(() => document.querySelectorAll('#fRoster li').length === 2);
+  await page.click('#fStartNew');
+  await page.click('#worldPick .worldbtn.w1');
+  await page.click('#diffPick .diffbtn.easy');
+  await guest.waitForFunction(() => mode === 'play' && curWorld === 1, null, { timeout: 30000 }).catch(() => {});
+  const w1 = await guest.evaluate(() => ({ mode, world: curWorld, day: G.day, diff: G.diff, ready: Net.ready }));
+  check(w1.mode === 'play' && w1.world === 1 && w1.day === 1 && w1.diff === 'easy' && w1.ready, `房主開新遊戲時，在主選單等的客人要跟著進去（${JSON.stringify(w1)}）`);
+  await sleep(1200);
+  await gshot('6-guest-w1');
+  // 房主關掉房間：客人回到主選單，有提示
+  await page.evaluate(() => Net.leave());
+  await guest.waitForFunction(() => mode === 'title' && !Net.active, null, { timeout: 15000 }).catch(() => {});
+  const bye = await guest.evaluate(() => ({ mode, note: document.getElementById('netNote').textContent }));
+  check(bye.mode === 'title' && bye.note.includes('房主'), `房主關掉房間時，客人要回到主選單並看到提示（${JSON.stringify(bye)}）`);
+  await guest.close();
+});
+
 await scenario('test', '測試版頁面（test.html）：所有世界都開著、圖鑑沒有問號、新遊戲可以從第 6 夜開始、不存檔也不碰正式版的進度；test.html 要跟 index.html 同步', {}, async ({ page, shot, check }) => {
   // test.html 是 tools/make-test.mjs 從 index.html 產生的，改了 index.html 要重新產生
   const { makeTest } = await import('./make-test.mjs');
@@ -1161,6 +1306,13 @@ await scenario('offline', '離線（快取後斷網，重新打開並開新遊�
   await ctx.setOffline(true);
   await page.reload({ waitUntil: 'load' });
   await page.waitForSelector('#btnNew');
+  // 跟朋友一起玩：斷網時連線程式庫照樣載得到（遊戲不會壞），朋友的畫面寫「沒有網路，現在只能自己玩」
+  check(await page.evaluate(() => typeof Peer === 'function' && typeof Net === 'object'), '斷網後連線程式庫（js/vendor/peerjs.min.js、js/net.js）也要載得到');
+  await page.click('#btnFriends');
+  const off = await page.evaluate(() => ({ shown: !document.getElementById('fOffline').classList.contains('hidden'), text: document.getElementById('fOffline').textContent, host: document.getElementById('fHost').disabled }));
+  check(off.shown && off.text.includes('沒有網路，現在只能自己玩') && off.host, `斷網時朋友的畫面要寫「沒有網路，現在只能自己玩」、不能開房間（${JSON.stringify(off)}）`);
+  await shot('0-friends-offline');
+  await page.click('#fBack');
   await page.click('#btnNew');
   await page.click('#worldPick .worldbtn.w1');
   await page.click('#diffPick .diffbtn.easy');

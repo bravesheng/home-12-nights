@@ -704,6 +704,14 @@ function updateLightmap(dark) {
     const rooms = roomGrid[ty][tx] ? [roomGrid[ty][tx]] : doorGrid[ty][tx] ? doorGrid[ty][tx].rooms : [];
     for (const r of rooms) addLight(p.x, p.y, 2.2, r, [0.55, 0.58, 0.7], 0.2);
   }
+  // 跟朋友一起玩：朋友的手電筒照到的地方（syncFriends 算好的）
+  if (mode !== 'title') for (const L of friendLights) {
+    const col = [toLin(L.col[0]), toLin(L.col[1]), toLin(L.col[2])];
+    if (w4) { addLight4(L, col, L.k); continue; }
+    const tx = Math.floor(L.x), ty = Math.floor(L.y);
+    if (!inMap(tx, ty)) continue;
+    for (const r of roomGrid[ty][tx] ? [roomGrid[ty][tx]] : doorGrid[ty][tx] ? doorGrid[ty][tx].rooms : []) addLight(L.x, L.y, L.r, r, col, L.k);
+  }
   for (let i = 0, n = LMW * LMH; i < n; i++) {
     lmBytes[i * 4] = Math.min(255, lmAcc[i * 3] * 127.5);
     lmBytes[i * 4 + 1] = Math.min(255, lmAcc[i * 3 + 1] * 127.5);
@@ -4446,6 +4454,215 @@ function updatePlaceGhost() {
 }
 
 // ====================================================================
+// 朋友（跟朋友一起玩，js/net.js）：寫實的人（不要可愛風），每個朋友一個顏色的 T 恤，配牛仔褲、球鞋，頭上寫名字。
+// 頭借用第三世界乘客的寫實頭（paxHead：畫布畫的臉、立體的頭髮，換成活人的膚色、睜著眼），身體是會動的關節：
+// 走路兩腳一前一後、膝蓋會彎、手臂反著擺；頭先轉向看的方向（最多 65°），身體慢慢跟上；蹲下、坐下、躺下、倒下各有姿勢。
+// 開手電筒時右手舉起來照著看的方向，有一道淡淡的光束，照到的地方光照貼圖也會亮一圈。
+// 位置由 net.js 平滑內插過；只畫同一個世界的朋友；小地圖不畫（第四世界要吹口哨才看得到藍點）
+// ====================================================================
+const FRIEND_HIP = 0.94, FRIEND_PANTS = ['#2f3b52', '#3b3631', '#272b31', '#4a5262'];
+const friendMap = new Map(), friendLights = [];
+const _fv = new THREE.Vector3(), _fv2 = new THREE.Vector3();
+let friendBeamTex = null;
+// 長相（膚色、髮色、褲子）：照名字固定，同一個朋友每次都一樣；男生短髮、女生鮑伯頭
+function friendSpec(f) {
+  const h = hash4(f.name + '|' + f.look), girl = f.look === 'f';
+  const skin = PAX_SKIN[h % PAX_SKIN.length];
+  const hair = (girl ? ['#15110e', '#2b1d14', '#4a3020', '#6b3a22'] : ['#15110e', '#2b1d14', '#3a2616', '#1c1612'])[(h >>> 4) & 3];
+  return { kind: 'friend', sex: girl ? 'f' : 'm', build: girl ? 'f' : 'm', age: 0.1, sc: girl ? 0.95 : 1, skin, deadSkin: skin, hair, style: girl ? 'bob' : 'short', hat: null, pose: 'still',
+    iris: ['#2a1a10', '#3a2414', '#4a3018'][(h >>> 7) % 3], brow: mixHex(hair, '#000000', 0.1), lips: mixHex(skin, girl ? '#b0505a' : '#8a4a44', girl ? 0.45 : 0.35),
+    hd: PAX_HEADS[girl ? 'f' : 'm'], pants: FRIEND_PANTS[(h >>> 9) & 3] };
+}
+const LATHE = (key, pts, seg) => geo(key, () => new THREE.LatheGeometry(pts.map(([x, y]) => new THREE.Vector2(x, y)), seg));
+function buildFriend(f) {
+  const p = friendSpec(f), s0 = seed;   // 畫臉會用到亂數：用完放回去，第三世界的乘客才不會因為朋友來了就變臉
+  const g = new THREE.Group(); scene.add(g);
+  const body = new THREE.Group(); body.scale.setScalar(p.sc); g.add(body);
+  const r = { g, body, p, id: f.id, look: f.look, color: f.color, name: f.name, yaw: faceRot(f.face || 0), ph: 0, walkK: 0, crK: 0, init: false };
+  const sh = { shade: 0.55 };
+  const shirt = withDetail(ownLM(f.color || '#8a8a8a', sh), 'cotton', 5, 0.9);
+  const jeans = withDetail(ownLM(p.pants, sh), 'cotton', 7, 1.1);
+  const skin = withDetail(ownLM(p.skin, sh), 'skin', 8, 1.2);
+  const shoe = ownLM('#2b2420', { shade: 0.5 }), sole = ownLM('#dcd6cb', { shade: 0.5 }), belt = ownLM('#1d1916', { shade: 0.5 }), metal = ownLM('#2a2a2e', { shade: 0.5 }), rim = ownLM('#5a5b60', { shade: 0.5 });
+  // 腰：大腿和上半身都從這裡出發
+  const hips = new THREE.Group(); hips.position.y = FRIEND_HIP; body.add(hips); r.hips = hips;
+  const pelvis = new THREE.Mesh(LATHE('frPelvis', [[0.001, -0.15], [0.07, -0.145], [0.13, -0.11], [0.158, -0.05], [0.16, 0.02], [0.155, 0.06]], 18), jeans);
+  pelvis.scale.set(1.1, 1, 0.7); pelvis.castShadow = true; hips.add(pelvis);
+  cyl(hips, 0.158, 0.16, 0.035, 0, 0.022, 0, belt, 18, true).scale.set(1.1, 1, 0.7);   // 皮帶
+  // 上半身（蹲下、跑步時往前彎）：T 恤、肩膀
+  const torso = new THREE.Group(); hips.add(torso); r.torso = torso;
+  const tm = new THREE.Group(); torso.add(tm);
+  const chest = new THREE.Mesh(LATHE('frTorso', [[0.152, -0.02], [0.148, 0.06], [0.142, 0.13], [0.152, 0.24], [0.17, 0.36], [0.164, 0.43], [0.14, 0.49], [0.1, 0.53], [0.06, 0.555], [0.001, 0.565]], 20), shirt);
+  chest.scale.set(1.1, 1, 0.64); tm.add(chest);
+  for (const s of [-1, 1]) sph(tm, 0.056, s * 0.178, 0.462, 0, shirt, 1.05, 0.9, 1, 12);   // 肩膀（圓圓的，接到袖子）
+  mergeByMat(tm);
+  // 頭：脖子底下 → 轉頭（yaw）→ 抬頭低頭（pose）
+  const neck = new THREE.Group(); neck.position.set(0, 0.548, 0.004); torso.add(neck);
+  r.headYaw = new THREE.Group(); neck.add(r.headYaw);
+  r.headPose = new THREE.Group(); r.headYaw.add(r.headPose);
+  const px = { kind: 'friend', p, g, skins: [], tex: {}, state: 'dead' };
+  paxHead(r.headPose, p, px);
+  paxMerge(r.headPose, px.skins);
+  paxState(px, 'alive');
+  r.px = px;
+  // 手臂：肩膀 → 手肘 → 手（arms[0] 是右手，拿著手電筒）
+  r.arms = [-1, 1].map(s => {
+    const shp = new THREE.Group(); shp.position.set(s * 0.205, 0.47, 0); shp.rotation.order = 'YXZ'; torso.add(shp);
+    const ua = new THREE.Group(); shp.add(ua);
+    taper(ua, [0, 0.025, 0], [0, -0.155, 0], 0.058, 0.054, shirt, 12);   // 短袖
+    taper(ua, [0, -0.13, 0], [0, -0.285, 0], 0.046, 0.039, skin, 10);
+    const el = new THREE.Group(); el.position.set(0, -0.285, 0); shp.add(el);
+    const fa = new THREE.Group(); el.add(fa);
+    taper(fa, [0, 0.01, 0], [0, -0.24, 0], 0.039, 0.03, skin, 10);
+    sph(fa, 0.03, 0, -0.285, 0.006, skin, 1.1, 1.85, 0.72, 10);   // 手掌
+    mergeByMat(fa);
+    return { sh: shp, el, fa };
+  });
+  const hand = r.arms[0].fa;
+  cyl(hand, 0.017, 0.015, 0.15, 0, -0.39, 0.012, metal, 10);   // 手電筒
+  cyl(hand, 0.022, 0.018, 0.03, 0, -0.42, 0.012, rim, 10);
+  r.tip = new THREE.Object3D(); r.tip.position.set(0, -0.43, 0.012); hand.add(r.tip);
+  r.lens = ownSprite(glowTex, 0xfff0d0); r.lens.scale.setScalar(0.22); r.tip.add(r.lens);
+  // 腳：大腿 → 膝蓋 → 小腿 → 腳踝和球鞋（腳踝會轉回來，腳底板才會平平地踩在地上；legs[0] 是右腳）
+  r.legs = [-1, 1].map(s => {
+    const hp = new THREE.Group(); hp.position.set(s * 0.09, -0.04, 0); hips.add(hp);
+    taper(hp, [0, 0.02, 0], [0, -0.43, 0], 0.079, 0.057, jeans, 12);
+    const kn = new THREE.Group(); kn.position.set(0, -0.43, 0); hp.add(kn);
+    taper(kn, [0, 0.02, 0], [0, -0.385, 0], 0.056, 0.044, jeans, 12);
+    const an = new THREE.Group(); an.position.set(0, -0.385, 0); kn.add(an);
+    box(an, -0.048, 0.048, -0.07, 0, -0.06, 0.17, shoe);
+    box(an, -0.051, 0.051, -0.09, -0.067, -0.065, 0.178, sole);   // 白色的鞋底
+    return { hp, kn, an };
+  });
+  // 手電筒的光束：放在場景裡（不跟著手臂轉），每一幀照著看的方向擺；尖端亮、越遠越淡
+  if (!friendBeamTex) friendBeamTex = canvasTex(8, 128, (c, w, h) => { const gr = c.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.3, 'rgba(255,255,255,.4)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = gr; c.fillRect(0, 0, w, h); });
+  r.beam = new THREE.Mesh(geo('frBeam', () => new THREE.ConeGeometry(1.25, 5.5, 20, 1, true).translate(0, -2.75, 0).rotateX(-Math.PI / 2)),
+    ownBasic({ map: friendBeamTex, color: 0xfff0d8, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+  r.beam.renderOrder = 4; r.beam.visible = false; scene.add(r.beam);
+  seed = s0;
+  return r;
+}
+// 頭上的名字（倒下時前面加 💤）
+function friendLabel(r, text, color) {
+  if (r.label) { r.g.remove(r.label); r.label.material.map.dispose(); r.label.material.dispose(); }
+  const font = n => `bold ${n}px "PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif`;
+  const tex = canvasTex(256, 64, (c, w) => {
+    c.font = font(34);
+    const tw = c.measureText(text).width;
+    if (tw > 236) c.font = font(Math.floor(34 * 236 / tw));
+    c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round';
+    c.lineWidth = 7; c.strokeStyle = 'rgba(0,0,0,.8)'; c.strokeText(text, w / 2, 27);
+    c.fillStyle = '#ffffff'; c.fillText(text, w / 2, 27);
+    c.fillStyle = color || '#888888'; c.fillRect(w / 2 - 28, 50, 56, 7);   // 衣服的顏色
+  });
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  s.scale.set(0.84, 0.21, 1); s.renderOrder = 6;
+  r.g.add(s); r.label = s; r.labelKey = text;
+}
+function disposeFriend(r) {
+  disposeGroup(r.g);
+  for (const t of (r.px && r.px.headMat && r.px.headMat.userData.maps) || []) t.dispose();
+  if (r.label) { r.label.material.map.dispose(); r.label.material.dispose(); }
+  scene.remove(r.beam); r.beam.material.dispose();
+}
+function poseFriend(f, r, t, dt, darkK) {
+  const p = r.p, fh = floorH(f.x, f.y), lying = f.down || f.pose === 'lie', sit = !f.down && f.pose === 'sit';
+  const dx = r.init ? f.x - r.lx : 0, dy = r.init ? f.y - r.ly : 0, dist = Math.hypot(dx, dy);
+  r.lx = f.x; r.ly = f.y; r.init = true;
+  const sp = dist > 1 ? 0 : dist / Math.max(dt, 1e-3);   // 瞬間移動（爬梯子、醒過來）不算走路
+  r.walkK += ((lying || sit ? 0 : clamp(sp / 3.2, 0, 1.35)) - r.walkK) * Math.min(1, dt * 8);
+  if (dist < 1) r.ph += dist * 4.4;
+  r.crK += ((f.crouch && !lying && !sit ? 1 : 0) - r.crK) * Math.min(1, dt * 10);
+  // 頭先轉、身體慢慢跟上（走路時跟得快）；頭最多轉 65°
+  const target = faceRot(f.face), HEAD = 1.13;
+  let diff = wrapA(target - r.yaw);
+  if (Math.abs(diff) > HEAD) { r.yaw = wrapA(r.yaw + diff - Math.sign(diff) * HEAD); diff = Math.sign(diff) * HEAD; }
+  r.yaw = wrapA(r.yaw + diff * Math.min(1, dt * (r.walkK > 0.15 || lying || sit ? 9 : 2.2)));
+  diff = wrapA(target - r.yaw);
+  const A = 0.42 * Math.min(1, r.walkK), run = clamp(r.walkK - 1, 0, 0.35) * 1.4, cr = r.crK, armR = r.arms[0];
+  let y = fh + (f.z || 0), lean = 0;
+  r.body.rotation.set(0, 0, 0); r.body.position.set(0, 0, 0);
+  if (lying) {
+    // 躺著（倒下是躺在地上）：臉朝上，頭在玩家的位置，身體往面向的方向伸出去
+    r.yaw = target; diff = 0;
+    r.body.rotation.x = -Math.PI / 2; r.body.position.set(0, 0.12, 1.6 * p.sc);
+    for (const L of r.legs) { L.hp.rotation.x = 0; L.kn.rotation.x = 0.06; L.an.rotation.x = 0.3; }
+    r.arms.forEach((a, i) => { a.sh.rotation.set(0.06, 0, (i ? 1 : -1) * 0.12); a.el.rotation.x = -0.15; });
+    r.headYaw.rotation.y = f.down ? 0.45 : 0; r.headPose.rotation.set(0, 0, 0);
+    if (f.down) y = fh;
+  } else if (sit) {
+    // 坐著：大腿往前平放、小腿垂下來，手放在腿上
+    y += 0.07 - FRIEND_HIP * p.sc;
+    for (const L of r.legs) { L.hp.rotation.x = -Math.PI / 2 + 0.05; L.kn.rotation.x = Math.PI / 2 - 0.05; L.an.rotation.x = 0; }
+    r.arms.forEach((a, i) => { a.sh.rotation.set(-0.35, 0, (i ? 1 : -1) * 0.1); a.el.rotation.x = -0.95; });
+    lean = -0.05;
+  } else {
+    // 走路：兩腳一前一後（跑步步伐大一點）；蹲下：屁股往下、膝蓋往前，腳底板還是平的
+    y += Math.abs(Math.cos(r.ph)) * 0.025 * r.walkK - cr * 0.31 * p.sc;
+    r.legs.forEach((L, i) => {
+      const ph = r.ph + (i ? Math.PI : 0), s = Math.sin(ph);
+      L.hp.rotation.x = -s * A * (1 + run) - cr * 1.05;
+      L.kn.rotation.x = Math.max(0, Math.sin(ph + 1.9)) * (0.7 + run * 0.6) * Math.min(1, r.walkK) + cr * 1.75 + 0.04;
+      L.an.rotation.x = -(L.hp.rotation.x + L.kn.rotation.x) * (0.75 + 0.25 * cr);
+    });
+    lean = cr * 0.3 + r.walkK * 0.04 + run * 0.12;
+    r.arms.forEach((a, i) => {
+      const s = Math.sin(r.ph + (i ? Math.PI : 0));
+      a.sh.rotation.set(s * A * 0.8, 0, (i ? 1 : -1) * 0.07);   // 跟同一邊的腳反著擺
+      a.el.rotation.x = -0.18 - 0.45 * Math.min(1, r.walkK) - cr * 0.4;
+    });
+  }
+  r.torso.rotation.x = lean;
+  // 手電筒：右手舉起來照著看的方向（上下也跟著看的方向）
+  const flash = f.flash && !lying;
+  if (flash) { armR.sh.rotation.set(-Math.PI / 2 - clamp(f.pitch, -1.1, 1.1) * 0.95 - lean, diff * 0.9, 0); armR.el.rotation.x = -0.05; }
+  // 頭：轉向看的方向、抬頭低頭（身體往前彎時頭抬回來）
+  if (!lying) { r.headYaw.rotation.y = diff; r.headPose.rotation.set(clamp(-f.pitch * 0.75, -0.6, 0.5) - lean * 0.7, 0, 0); }
+  r.g.position.set(f.x, y, f.y); r.g.rotation.y = r.yaw;
+  const key = f.down ? '💤 ' + f.name : f.name;
+  if (key !== r.labelKey) friendLabel(r, key, f.color);
+  r.label.position.set(0, lying ? 0.55 : (FRIEND_HIP + 0.93 - cr * 0.27 - (sit ? 0.42 : 0)) * p.sc, 0);
+  r.lens.visible = flash; r.beam.visible = flash;
+  if (!flash) return;
+  r.g.updateMatrixWorld(true);
+  r.tip.getWorldPosition(_fv);
+  const cp = Math.cos(f.pitch), dir = _fv2.set(Math.cos(f.face) * cp, Math.sin(f.pitch), Math.sin(f.face) * cp);
+  r.beam.position.copy(_fv); r.beam.lookAt(_fv.x + dir.x, _fv.y + dir.y, _fv.z + dir.z);
+  const ft = FLASH_TIERS[clamp(f.flashLv || 1, 1, FLASH_MAX)], col = ft.beam ? ft.beam[0] : [255, 240, 216];   // 第四世界的手電筒 4～7 級有顏色
+  r.beam.material.color.setRGB(col[0] / 255, col[1] / 255, col[2] / 255, SRGB); r.lens.material.color.copy(r.beam.material.color);
+  r.beam.material.opacity = (0.025 + 0.12 * darkK) * (0.93 + 0.07 * Math.sin(t * 13 + r.ph));
+  // 照到的地方（往下照：照在腳前面的地上；往前照：牆前面一點）在光照貼圖上亮一圈
+  let d = Math.min(castRay(f.x, f.y, f.face, 6.5) - 0.35, 3.4);
+  if (f.pitch < -0.12) d = Math.min(d, 1.35 / Math.tan(-f.pitch));
+  if (f.pitch < 0.6 && d > 0.3) friendLights.push({ x: f.x + Math.cos(f.face) * d, y: f.y + Math.sin(f.face) * d, r: 2.3, col, k: 0.5 });
+}
+function syncFriends(t, dt, dark) {
+  friendLights.length = 0;
+  const active = typeof Net !== 'undefined' && Net.active;
+  const show = active && !!G && mode !== 'title' && mode !== 'cutscene';
+  const list = active ? Net.friends() : [], seen = new Set(), darkK = clamp(dark / NIGHT_DARK, 0, 1);
+  if (show) for (const f of list) {
+    if (!f.ingame || f.world !== curWorld) continue;
+    let r = friendMap.get(f.id);
+    if (r && (r.look !== f.look || r.color !== f.color || r.name !== f.name)) { disposeFriend(r); friendMap.delete(f.id); r = null; }
+    if (!r) { r = buildFriend(f); friendMap.set(f.id, r); }
+    seen.add(f.id);
+    r.g.visible = true;
+    poseFriend(f, r, t, dt, darkK);
+  }
+  for (const [id, r] of friendMap) {
+    if (seen.has(id)) continue;
+    if (active && list.some(f => f.id === id)) { r.g.visible = false; r.beam.visible = false; r.init = false; }   // 不在同一個世界、回到主選單、過場動畫：先藏起來
+    else { disposeFriend(r); friendMap.delete(id); }   // 離開房間了
+  }
+}
+// 試玩測試用：畫面上的朋友
+function friendStats() {
+  return [...friendMap.values()].map(r => { let n = 0; r.g.traverse(o => { if (o.isMesh) n++; }); return { id: r.id, name: r.name, visible: r.g.visible, x: r.g.position.x, y: r.g.position.z, h: r.g.position.y, beam: r.beam.visible, meshes: n }; });
+}
+
+// ====================================================================
 // 第三世界：末班列車。鍍金年代的豪華特快車（深胡桃木、黃銅、暗紅絨布、象牙白的天花板），全部都要「舊」；
 // 最下面一排是車站。牆上有真的窗戶，窗外是會捲動的三層風景（遠山和天空、樹林、電線桿）
 // ====================================================================
@@ -7757,6 +7974,7 @@ function render(dt) {
   syncFlowers(t);
   syncAngels(t);
   syncExtras(t);
+  syncFriends(t, dt, dark);   // 跟朋友一起玩：朋友的人物（要在光照貼圖前面：手電筒照到的地方）
   syncFireballs(t);
   syncProjectiles(t);
   syncWorld2(t);
@@ -7823,7 +8041,7 @@ function init() {
   buildExtras();
   glowPts = makePoints(0.07, THREE.AdditiveBlending);
   smokePts = makePoints(0.3, THREE.NormalBlending);
-  window.Renderer = { render, resize, setWorld, furn4: furnChanged4, dbg: () => ({ scene, camera, THREE }), book: { ok: bookOk, show: bookShow, stats: book.stats }, pax: paxStats, photos: () => ({ loaded: Object.keys(photos), total: PHOTO_TEX.length }) };
+  window.Renderer = { render, resize, setWorld, furn4: furnChanged4, dbg: () => ({ scene, camera, THREE }), book: { ok: bookOk, show: bookShow, stats: book.stats }, pax: paxStats, friends: friendStats, photos: () => ({ loaded: Object.keys(photos), total: PHOTO_TEX.length }) };
   resize();
 }
 loadPhotos().then(init);   // 照片貼圖載入好才開始（最多等 5 秒）

@@ -30,8 +30,9 @@ node tools/playtest.mjs
   - `&dusk`：第 1 夜也從天黑前 3 秒開始
   - `&cold`：第三世界這一天強制是寒寂之境；`&fire=0`：火爐一開始是空的（測列車停下來）
   - `?world=4`：第四世界（賣場）。`&kit=1` 只帶 16 格以內的東西（背包只有 16 格），另外在旁邊的地上放各級板子各 2 片、一扇木門，背包裡有木柴和煤炭；`&cold` 寒寂之境、`&acid` 馬上下酸雨、`&red` 今晚紅月
+  - `?nettest`（或 `&nettest`）：跟朋友一起玩改用同一個瀏覽器分頁之間的 BroadcastChannel 互連，不用上網（自動試玩的 `net` 情境用這個）
   - `?cut=1`：直接播第一世界破關的開門動畫；`?cut=2`：第二到第三世界的過場動畫；`?cut=3`：第三世界的結局（按「走進賣場」播第三到第四世界的過場動畫）
-- 只跑某幾個情境：`PT_ONLY=w3,w3cold node tools/playtest.mjs`（名稱是 `scenario()` 的第一個參數）。現在共 21 個情境。
+- 只跑某幾個情境：`PT_ONLY=w3,w3cold node tools/playtest.mjs`（名稱是 `scenario()` 的第一個參數）。現在共 22 個情境。
 - 內建瀏覽器的面板沒顯示在前面時，Chrome 會把遊戲迴圈降到每秒 1 幀，截圖也會慢一拍：要測時間相關的東西就直接呼叫更新函式（例如 `updateWarlord(e, 0.1)`），截圖前多等一下或連拍兩張。
 - 這台 Mac 沒有全域的 Node 版 Playwright（`/opt/homebrew/bin/playwright` 是 Python 版），Node 版裝在上一層目錄 `~/codebase/node_modules`，`import('playwright')` 往上找得到。
 - 自己開來看：`python3 -m http.server 8765`，打開 http://localhost:8765/（跟 `.claude/launch.json` 的設定一樣）。
@@ -46,10 +47,11 @@ node tools/playtest.mjs
 
 ## 檔案
 
-- `index.html`：畫面元素和各個選單（`test.html` 是它的測試版，產生出來的）。script 依序載入 `version.js` → `data.js` → `audio.js` → `world2.js` → `world3.js` → `world4.js` → `game.js`，都是一般 script，頂層的變數和函式（例如遊戲狀態 `G`、`mode`）彼此共用；最後的 `render3d.js` 是 module。
+- `index.html`：畫面元素和各個選單（`test.html` 是它的測試版，產生出來的）。script 依序載入 `version.js` → `data.js` → `audio.js` → `world2.js` → `world3.js` → `world4.js` → `vendor/peerjs.min.js` → `net.js` → `game.js`，都是一般 script，頂層的變數和函式（例如遊戲狀態 `G`、`mode`）彼此共用；最後的 `render3d.js` 是 module。
 - `js/data.js`：地圖、家具、物品、燈泡的資料。第一、二世界共用 44×33 的房子（`ROOMS_HOUSE`、`DOORS_HOUSE`、`SOCKETS_HOUSE`、`FURN`）；第三世界是 59×25 的列車地圖（4 節車廂，2026/10/31 拿掉臥鋪、加寬成 7 排、天花板 3.3 公尺），自己一套 `ROOMS_W3`（房間有 `aisle`／`comp`／`roof`／`station` 旗標）、`DOORS_W3`（`vest` 連結處、`comp` 包廂、`station` 車站）、`SOCKETS_W3`、`FURN_W3`、`W3_CARS`（每節車廂的 x 範圍）、`W3_WINDOWS`、`W3`（起點、商人、禮物、過場路線、巡邏點、煙囪）。`MAP_W`／`MAP_H`、`ROOMS`、`DOORS`、`SOCKETS`、`FURN` 是「現在這個世界」的，換世界時由 `applyWorld` 重新填。另外有寶箱四級、站名和窗外風景。第四世界是 100×76 的賣場（`W4W`、`W4H`，十字主走道在 `W4AX`、`W4AY`；`W4MAP` 在載入時用程式排出樣品間 `W4_ROOMS_TMPL`、貨架、柱子；格局改版要把 `W4_MAP_VER` 加 1，舊存檔會由 `migrate4` 把蓋的板子退回來），`FURN4` 是家具能不能搬（`move`）、收納（`store`）、踩過去（`solid: false`）和功能（`fn`）；`PLANKS` 是五級板子；`wallsForWorld` 是額外的牆格子。日夜長度看 `DAY_SECS`／`NIGHT_SECS`（第四世界白天 300 秒、晚上 360 秒）。 站上、坐下、躺下家具是通用的：`FURN_TOP_H`（頂面高度，可以是函式）、`FURN_SIT`、`FURN_LIE`，加一行 type 就能用（判斷在 game.js 的 `tileTopH`、`groundUnder`、`sitDown`、`lieDown`）。
 - `js/game.js`：遊戲邏輯和介面：世界、存檔、燈光、怪物、武器、商人和扭蛋、日夜事件、輸入、主迴圈。`isW3()` 的分支會呼叫 `world3.js` 的函式。
 - `js/world2.js`：第二世界的 5 隻怪物。
+- `js/net.js`：跟朋友一起玩（PeerJS，`js/vendor/peerjs.min.js` 是原封不動的程式庫）：全域 `Net`（`Net.send`／`Net.sendTo`／`Net.on`、`Net.friends()`、`'@join'`／`'@leave'`／`'@start'`／`'@close'`），房主說了算世界、天數和時間，客人不讀寫自己的存檔；朋友的 3D 人物在 render3d.js 的「朋友」那一段。第四世界一起蓋房子的同步在 world4.js 最後一段（`net4`、`b4req`／`b4full`、`day4`）。
 - `js/world4.js`：第四世界（無盡賣場，照 Roblox《3008》）：自己蓋的牆放在格子的「邊」上（`G.b4`：`h`／`v` 兩個陣列、`roofs`）；板子是 1×1 公尺的正方形，同一個位置往上疊：邊上存的是一疊（陣列），每一片有 `lv`、`stk`，`wallBetween` 回傳最下面那片當代表（`stackH`、`hasGlass`、`wallHigh`、`wallOpaque` 看整疊），下面的拿掉上面會掉下來（`restack`）；斜坡在 `G.b4.ramps`（`surf4` 給 game.js 的 `groundUnder` 用，屋頂也站得上去）；梯子是 `ladders4`（爬的時候用 `ride.climb`）；轉 15°、45° 的斜牆是 `free: true`（`cx`、`cy`、`ang`），碰撞照線段算，尋路、視線、光、在家裡把它穿過的格子當成有牆（`G.b4.cells`、`freeIn`），碰撞（`hitsWall4`）、視線（`sightBlocked4`）、尋路（`computeFlow4`：打得破的牆很貴、玻璃過不去，怪物路上有牆就記在 `e.wallAhead` 去打）、光（`lightMask4`：被不透明的牆擋住）、「在家裡」（`enclosure4`）都要算上它；拿在手上的東西是 `G.hand`（板子、家具，或背包滿了多拿的第 17 個）、預覽 `ghost4()`、放下 `place4()`；架上擺的真的東西（`DISPLAY4` 的架子，`shelfSlots4` 排位置、`stockShelves4` 每天補貨，是 `G.pickups` 裡有 `s`、`si`、`z` 的那些，看著按 E 拿：`lookedPickup4`；3D 模型在 render3d.js 的 `item3D`）、口哨的紅點藍點（`whistle4`）、背包 16 格、櫃子收納、火爐、天氣（紅月、寒寂之境、酸雨）、神秘店員、5 隻新怪物、燈泡圖鑑、過場和結局。牆、門、家具改變了要呼叫 `b4Changed()`（路線、光、在家裡都會重算）。
 - `js/world3.js`：第三世界：車站門的鎖、火爐和燃料、列車停下來、寶箱、車頂（爬梯和艙口用換位置的方式上下，車頂的風）、體溫和寒寂之境、大白燈的擁抱、4 隻新怪物（墮落戰神只在 `aisle` 房間裡走、檮杌會跟著上車頂）、過場動畫和結局、圖鑑的「見過」紀錄。
 - `js/render3d.js`：Three.js 3D 畫面，模型都是程式產生的；貼圖大部分是程式畫的，第三世界的牆壁、地板、天花板、車身、車門、車頂、地毯、家具的材質（胡桃木、絨布、皮箱、黃銅、桌布）、車窗外的風景（遠景、五種中景、白天的站場；中景和站場是 Gemini 畫在洋紅色背景上再去背）、牆上的海報（`W3.posters`）和時刻表是照片貼圖（`PHOTO_TEX`，載入好才開始畫，載不到就用程式畫的；家具用 `photoMat(照片, 顏色)`，照片乘上顏色，深淺跟原本的純色一樣）。怪物也用照片材質，形狀、顏色、臉和花紋不變：`withDetail(材質, 名字, 一公尺幾張, 強度)` 把 `d-*` 細節紋路（照片除以模糊過的自己，平均是灰色）用模型座標的三向投影乘在原本的顏色上（不靠 UV，細長的手腳不會拉長）；菇傘、菌褶、菇柄、葵花籽、花瓣、熔岩直接用 `m-*` 照片（`photoInto` 畫進原本的畫布再拉回原本的平均色）；眼球的貼圖用 `overlayDetail` 疊眼白的照片。光照貼圖的大小跟著地圖走（`allocLM`）。第三世界的場景（車廂、車站、真的窗戶和會捲動的車外風景、滑門、家具、寶箱、大白、新怪物、車頂和車頭的鍋爐煙囪）在「第三世界」那幾段；座位上寫實、形形色色的乘客在「第三世界的乘客」那一段（臉和衣服用畫布畫，零件合併成幾個網格）；車頂比車廂地板高 `ROOF_H`，放東西和擺鏡頭都要加 `floorH(x, y)`。第四世界在「第四世界」那幾段：`buildStore4`（地板、天花板的日光燈板、牆、柱子、招牌）、`store4Furniture`（家具全部程式產生，每件照材質合成幾個網格 `mergeByMat`；搬動時 `Renderer.furn4` 拆掉重建）、`syncBuild4`（自己蓋的牆、屋頂、地上的板子）、5 隻新怪物和神秘店員（`syncMonster4`、`buildClerk4`）、雪和酸雨（`syncWeather4`），光照貼圖用 `addLight4`。

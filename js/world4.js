@@ -89,6 +89,7 @@ function setWall(w) {
     const arr = w.o === 'h' ? b.h : b.v, i = edgeIdx(w.o, w.x, w.y);
     s = arr[i] || (arr[i] = []);
   }
+  if (!w.pid) w.pid = rid4();   // 每一片自己的 id（跟朋友一起蓋時用）
   if (w.door) s.unshift(w); else s.push(w);   // 門一定在最下面
   w.stk = s; w.gone = false; restack(s);
   b.list.push(w); b.n++;
@@ -478,24 +479,25 @@ function place4() {
   if (!g || !g.ok) { toast('🧱 ' + ((g && g.why) || '這裡放不下') + '。'); Sound.play('empty'); return; }
   if (g.kind === 'wall' || g.kind === 'free') {
     const base = { tier: h.tier, hp: h.hp ?? PLANKS[h.tier].hp * (h.door ? 2 : 1), door: !!h.door, open: false, lean: g.lean || 0 };   // 門 2 公尺高，耐打兩倍
-    setWall(g.kind === 'free' ? { free: true, cx: g.cx, cy: g.cy, ang: g.ang, ...base } : { o: g.o, x: g.x, y: g.y, ...base });
+    const pc = g.kind === 'free' ? { free: true, cx: g.cx, cy: g.cy, ang: g.ang, ...base } : { o: g.o, x: g.x, y: g.y, ...base };
+    setWall(pc); net4('wall', { w: pieceSpec4(pc) });
     Sound.play('plank'); makeNoise(4);
     if (!G.home) { setHome4(true); }
     if (!G.ev.wallTip) { G.ev.wallTip = 1; toast('🧱 放好第一片板子了！板子是 1 公尺的正方形，同一個地方再放會往上疊（疊 2 片以上才算圍起來、3 片就碰到屋頂）。怪物打得破板子（玻璃打不破）；對著自己的板子按住 E 可以拿回最上面那片。', 'good'); }
   } else if (g.kind === 'ramp') {
-    G.b4.ramps.set(g.x + ',' + g.y, { x: g.x, y: g.y, dir: g.dir, lv: g.lv, tier: h.tier, hp: h.hp ?? PLANKS[h.tier].hp });
-    G.b4.ver++;
+    const rp = { x: g.x, y: g.y, dir: g.dir, lv: g.lv, tier: h.tier, hp: h.hp ?? PLANKS[h.tier].hp };
+    G.b4.ramps.set(g.x + ',' + g.y, rp); G.b4.ver++; net4('ramp', { r: { ...rp, hp: inf4(rp.hp) } });
     Sound.play('plank'); makeNoise(4);
     if (!G.ev.rampTip4) { G.ev.rampTip4 = 1; toast('🪜 斜坡放好了！走上去就爬高了。下一格再放一片斜坡會接在它高的那一頭（一格接一格就是樓梯），可以走到疊高的板子和屋頂上。', 'good'); }
   } else if (g.kind === 'roof') {
-    G.b4.roofs.set(g.x + ',' + g.y, { x: g.x, y: g.y, tier: h.tier, hp: h.hp ?? PLANKS[h.tier].hp, tilt: g.tilt || 0, tax: g.tax });
-    G.b4.ver++;
+    const rf = { x: g.x, y: g.y, tier: h.tier, hp: h.hp ?? PLANKS[h.tier].hp, tilt: g.tilt || 0, tax: g.tax };
+    G.b4.roofs.set(g.x + ',' + g.y, rf); G.b4.ver++; net4('roof', { r: { ...rf, hp: inf4(rf.hp) } });
     Sound.play('plank'); makeNoise(4);
     if (!G.ev.roofTip4) { G.ev.roofTip4 = 1; toast('🏠 屋頂放好了！站在屋頂底下，酸雨和燼皇的燼雨都淋不到你。', 'good'); }
   } else {
     const f = h.f;
     Object.assign(f, { x: g.x, y: g.y, w: g.w, h: g.h, side: g.side, yaw: g.yaw || 0 });
-    addFurn4(f);
+    addFurn4(f); net4('put', { id: f.id, x: f.x, y: f.y, w: f.w, h: f.h, side: f.side, yaw: f.yaw });
     Sound.play('place'); makeNoise(3);
   }
   G.hand = null; invDirty = true;
@@ -519,27 +521,27 @@ function addFurn4(f) {
 function takeWall4(w0) {
   if (G.hand) { toast('✋ 手上已經拿著東西了。'); return; }
   const s = stk(w0), w = s[s.length - 1] || w0;   // 拿最上面那一片
-  removeWall(w);
+  removeWall(w); net4('rm', { pid: w.pid });
   holdThing({ k: 'plank', tier: w.tier, door: w.door, hp: w.hp });
   Sound.play('pickup');
 }
 function takeRamp4(rp) {
   if (G.hand) { toast('✋ 手上已經拿著東西了。'); return; }
-  G.b4.ramps.delete(rp.x + ',' + rp.y); G.b4.ver++;
+  G.b4.ramps.delete(rp.x + ',' + rp.y); G.b4.ver++; net4('unramp', { x: rp.x, y: rp.y });
   holdThing({ k: 'plank', tier: rp.tier, hp: rp.hp });
   bld().rx = 45;   // 拿下來的斜坡還是斜的
   Sound.play('pickup');
 }
 function takeRoof4(r) {
   if (G.hand) { toast('✋ 手上已經拿著東西了。'); return; }
-  G.b4.roofs.delete(r.x + ',' + r.y); G.b4.ver++;
+  G.b4.roofs.delete(r.x + ',' + r.y); G.b4.ver++; net4('unroof', { x: r.x, y: r.y });
   holdThing({ k: 'plank', tier: r.tier, hp: r.hp });
   bld().rx = 90;   // 拿下來的屋頂還是躺平的
   Sound.play('pickup');
 }
 function takeFurn4(f) {
   if (G.hand) { toast('✋ 手上已經拿著東西了。'); return; }
-  liftFurn4(f);
+  liftFurn4(f); net4('lift', { id: f.id });
   holdThing({ k: 'furn', f });
   Sound.play('pickup');
   if (G.containers[f.id] && G.containers[f.id].items.length && !G.ev.carryTip) { G.ev.carryTip = 1; toast('📦 櫃子裡的東西會跟著一起搬。'); }
@@ -578,7 +580,7 @@ function refillPiles4(first) {
 function takeFromPile4(f) {
   if (G.hand) { toast('✋ 手上已經拿著東西了，先放下來。'); return; }
   if (!(f.count > 0)) { toast(`${PLANKS[f.tier].name}堆空了，明天早上會再補。`); Sound.play('empty'); return; }
-  f.count--;
+  f.count--; net4('pile', { id: f.id, count: f.count });
   holdThing({ k: 'plank', tier: f.tier });
   if (f.special && !f.count) { FURN.splice(FURN.indexOf(f), 1); furnGrid[f.y][f.x] = null; solid[f.y][f.x] = false; b4Changed(); if (Renderer.furn4) Renderer.furn4(f, true); }
   Sound.play('pickup');
@@ -593,7 +595,7 @@ function dropLoose4(x, y, k) {
 }
 function takeLoose4(l) {
   if (G.hand) { toast('✋ 手上已經拿著東西了，先放下來。'); return; }
-  G.loose4.splice(G.loose4.indexOf(l), 1);
+  G.loose4.splice(G.loose4.indexOf(l), 1); net4('tloose', { uid: uidOf4(l) });
   holdThing({ k: 'plank', tier: l.tier, door: l.door });
   Sound.play('pickup');
 }
@@ -619,7 +621,8 @@ function dropSelected4(all = true) {
   // 放在前面的地上（前面擋住了就放近一點，再不行就放在腳邊）
   let x = p.x, y = p.y;
   for (const r of [0.7, 0.45, 0.25]) { const tx = p.x + Math.cos(p.face) * r, ty = p.y + Math.sin(p.face) * r; if (walkable(tx, ty)) { x = tx; y = ty; break; } }
-  G.pickups.push({ x, y, id, n, t: 0, keep: 1, a: p.face + Math.PI + rand(-0.3, 0.3) });
+  const pk = { x, y, id, n, t: 0, keep: 1, a: p.face + Math.PI + rand(-0.3, 0.3) };
+  G.pickups.push(pk); net4('drop', { pk: pkSpec4(pk) });
   Sound.play('place');
   toast(`把${itemName(id)}${n > 1 ? ` ×${n}` : ''}放在地上了（看著它按 E 可以再拿起來）。`);
 }
@@ -743,6 +746,7 @@ function takePickup4(pk) {
   G.pickups.splice(G.pickups.indexOf(pk), 1);
   const got = gainItem(pk.id, pk.n);
   if (!got.length) { G.pickups.push(pk); return; }
+  net4('take', { uid: uidOf4(pk) });
   Sound.play('pickup');
   if (pk.s) G.stats.searched++;
   toast('拿到了' + got.map(([id, n]) => itemName(id) + (n > 1 ? ' ×' + n : '')).join('、'), 'item');
@@ -877,7 +881,7 @@ function toggleDoor4(w) {
   if (w.open && G.enemies.some(e => !e.dead && distToWall(e.x, e.y, w) < 0.45)) { toast('門口有東西擋著，關不起來。'); return; }
   if (w.open && distToWall(G.p.x, G.p.y, w) < PLAYER_R + WALL_T) { toast('你站在門口，關不起來。'); return; }
   w.open = !w.open;
-  b4Changed();
+  b4Changed(); net4('door', { pid: w.pid, open: w.open });
   Sound.play(w.open ? 'click' : 'doorSlam', 0.5);
   if (w.open) mimicDoorOpened4(w);
 }
@@ -891,7 +895,7 @@ function useBulb4(tier) {
   const t = lampTile();
   if (!t) { toast('這裡放不下檯燈。'); return; }
   const o = { kind: 'lamp', type: isTvTier(tier) ? 'tv' : 'desk', x: t.x, y: t.y, room: roomGrid[t.y][t.x], bulb: tier, dying: 0, free: true, face: Math.round((G.p.face + Math.PI) * 100) / 100 };   // 第 6 級以上放下來是一台電視（螢幕朝向你）
-  G.lamps.push(o);
+  G.lamps.push(o); net4('lamp', { o: lampSpec4(o) });
   removeItem('bulb' + tier);
   Sound.play('install');
   toast(`💡 放下了${bulbName(tier)}。對著它按 E 可以拿起來。`, 'good');
@@ -966,7 +970,7 @@ function damageWall4(w, amt, e, dt = 0) {
   if (w.hp <= 0) breakWall4(w, e);
 }
 function breakWall4(w, e) {
-  removeWall(w);
+  removeWall(w); net4('rm', { pid: w.pid });
   const [x0, y0, x1, y1] = wallEnds(w), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
   puff(cx, cy, w.tier === 2 ? [225, 220, 210] : w.tier === 3 ? [230, 190, 80] : w.tier === 4 ? [80, 40, 30] : [150, 110, 70], 18, (w.lv || 0) + 0.5);
   for (let i = 0; i < 12; i++) G.fx.push({ type: 'spark', x: cx, y: cy, h: (w.lv || 0) + rand(0.1, 0.9), vx: rand(-2, 2), vy: rand(-2, 2), vh: rand(-0.5, 1.5), life: 0.6, max: 0.6, color: w.tier === 4 ? pick(EMBER_COLORS) : [210, 180, 140] });
@@ -981,10 +985,9 @@ function breakWall4(w, e) {
 function startDay4(d) {
   G.cold = !!G.forceCold || COLD_DAYS_W4.includes(d);
   G.acid = null; G.acidT = 0;
-  refillPiles4(d === 1);
-  stockShelves4(d === 1);
+  if (!isGuest4()) { refillPiles4(d === 1); stockShelves4(d === 1); }   // 跟朋友一起玩的客人照房主的補貨（net4Day）
   // 偶爾出現的特別板材堆：岩漿（傳說）或玻璃（神話），只有 1 片
-  if (d >= 3 && Math.random() < 0.4) {
+  if (d >= 3 && !isGuest4() && Math.random() < 0.4) {
     const sp = randomSpot4(14);
     if (sp) {
       const tier = Math.random() < 0.3 ? GLASS_TIER : LAVA_TIER, f = { id: 'pile_sp' + d, type: 'plankpile', name: '板材堆', x: Math.floor(sp.x), y: Math.floor(sp.y), w: 1, h: 1, tier, count: 1, special: true };
@@ -1002,6 +1005,7 @@ function startDay4(d) {
   for (const e of G.enemies) puff(e.x, e.y);
   G.enemies = [];
   spawnIdleStaff4();
+  net4Day();   // 跟朋友一起玩：把今天的補貨和神秘店員的位置送給客人
   const wx = (G.wx4 && G.wx4.acid || []).find(a => a.day === d);
   if (wx) G.acid = { ...wx, started: false };
   if (G.cold) toast('❄️ 寒寂之境：今天整天下雪（雪從賣場的天花板飄下來），體溫歸零就會死。把火爐搬回家、丟木柴或煤炭進去燒，待在家裡也比較暖。', 'warn');
@@ -1125,7 +1129,7 @@ function updateAcid4(dt) {
     w.hp -= 0.25 * dt;
     if (w.hp <= 0) breakWall4(w, null);
   }
-  for (const [k, r] of G.b4.roofs) if (r.tier === 1) { r.hp -= 0.25 * dt; if (r.hp <= 0) { G.b4.roofs.delete(k); G.b4.ver++; puff(r.x + 0.5, r.y + 0.5, [150, 110, 70], 10, ROOF4_H); } }
+  for (const [k, r] of G.b4.roofs) if (r.tier === 1) { r.hp -= 0.25 * dt; if (r.hp <= 0) { G.b4.roofs.delete(k); G.b4.ver++; net4('unroof', { x: r.x, y: r.y }); puff(r.x + 0.5, r.y + 0.5, [150, 110, 70], 10, ROOF4_H); } }
   // 綠色的雨絲（在玩家附近、沒有遮著的地方）
   for (let i = 0; i < 6; i++) {
     const x = p.x + rand(-6, 6), y = p.y + rand(-6, 6);
@@ -1270,6 +1274,8 @@ function whistleDots4() {
   const p = G.p, out = [];
   for (const e of G.enemies) if (!e.dead && Math.hypot(e.x - p.x, e.y - p.y) < WHISTLE_R) out.push({ x: e.x, y: e.y, h: e.kind === 'shake' || e.kind === 'blob' ? 0.7 : 1.7, red: true });
   if (merchantHere() && Math.hypot(MERCHANT_POS.x - p.x, MERCHANT_POS.y - p.y) < WHISTLE_R * 1.5) out.push({ x: MERCHANT_POS.x, y: MERCHANT_POS.y, h: 1.6, red: false });
+  // 跟朋友一起玩：同一個世界的朋友也是藍點（js/net.js；小地圖不標，要吹口哨才看得到）
+  if (typeof Net !== 'undefined' && Net.active) for (const f of Net.friends()) if (f.ingame && f.world === 4) out.push({ x: f.x, y: f.y, h: f.crouch || f.down ? 1.0 : 1.75, red: false });
   return out;
 }
 function toggleCrouch4() {
@@ -1298,7 +1304,7 @@ function save4() {
   const b = G.b4;
   return {
     // 每一片正方形板子（sq：2026/11/01 以後的存檔）：斜放的牆 o 是 'f'，x、y 是中心，後面多存角度；再來是斜靠的角度、第幾層（lv）
-    walls: [...b.list].sort((a, c) => a.lv - c.lv).map(w => [w.free ? 'f' : w.o, w.free ? Math.round(w.cx * 100) / 100 : w.x, w.free ? Math.round(w.cy * 100) / 100 : w.y, w.tier, Math.round(Math.min(w.hp, 9999)), w.door ? 1 : 0, w.open ? 1 : 0, w.free ? Math.round(w.ang * 180 / Math.PI) : 0, w.lean || 0, w.lv]),
+    walls: [...b.list].sort((a, c) => a.lv - c.lv).map(w => [w.free ? 'f' : w.o, w.free ? Math.round(w.cx * 100) / 100 : w.x, w.free ? Math.round(w.cy * 100) / 100 : w.y, w.tier, Math.round(Math.min(w.hp, 9999)), w.door ? 1 : 0, w.open ? 1 : 0, w.free ? Math.round(w.ang * 180 / Math.PI) : 0, w.lean || 0, w.lv, w.pid]),
     sq: 1, ramps: [...b.ramps.values()].map(r => [r.x, r.y, r.dir, r.lv, r.tier, Math.round(Math.min(r.hp, 9999))]),
     roofs: [...b.roofs.values()].map(r => [r.x, r.y, r.tier, Math.round(Math.min(r.hp, 9999)), r.tilt || 0, r.tax || 'x']),
     furn: FURN.filter(f => f.move || f.type === 'plankpile' || f.fuel || f.on).map(f => ({ id: f.id, x: f.x, y: f.y, w: f.w, h: f.h, side: f.side, yaw: f.yaw || undefined, held: f.held ? 1 : 0, fuel: f.fuel, on: f.on ? 1 : 0, count: f.count, sp: f.special ? [f.tier] : undefined })),
@@ -1307,17 +1313,14 @@ function save4() {
     wx: G.wx4, merchant: { x: MERCHANT_POS.x, y: MERCHANT_POS.y }, mv: W4_MAP_VER,
   };
 }
-function load4(s) {
-  initB4();
-  G.wx4 = s && s.wx ? s.wx : makeWeather4();
-  if (!s) { refillPiles4(true); return; }
-  if ((s.mv || 1) !== W4_MAP_VER) { migrate4(s); return; }
-  for (const [o, x, y, tier, hp, door, open, ad, lean] of s.walls || []) {
+// 存檔（或房主送來的資料）裡的房子：牆、斜坡、屋頂、搬過的家具和板材堆（load4 和跟朋友一起玩的 net4ApplyFull 共用）
+function loadBuild4(s) {
+  for (const [o, x, y, tier, hp, door, open, ad, lean, , pid] of s.walls || []) {
     if (!PLANKS[tier]) continue;
     // 2026/10/31 的存檔一片牆是 2.6 公尺高的長板子：換成疊 3 片的正方形板子（門是 2 公尺的門加上面 1 片），房子的樣子不變
     const n = s.sq ? 1 : door ? 2 : 3, k = s.sq ? 1 : Math.min(1, hp / (PLANKS[tier].hp * 2));
     for (let i = 0; i < n; i++) {
-      const base = { tier, hp: tier === GLASS_TIER ? Infinity : s.sq ? hp : Math.max(1, Math.round(PLANKS[tier].hp * k)), door: !!door && i === 0, open: !!open && i === 0, lean: lean || 0 };
+      const base = { tier, hp: tier === GLASS_TIER ? Infinity : s.sq ? hp : Math.max(1, Math.round(PLANKS[tier].hp * k)), door: !!door && i === 0, open: !!open && i === 0, lean: lean || 0, pid: n === 1 ? pid : undefined };
       if (o === 'f') setWall({ free: true, cx: x, cy: y, ang: (ad || 0) * Math.PI / 180, ...base });
       else setWall({ o, x, y, ...base });
     }
@@ -1333,6 +1336,13 @@ function load4(s) {
     if (sf.on !== undefined) f.on = !!sf.on;
     if (sf.count !== undefined) f.count = sf.count;
   }
+}
+function load4(s) {
+  initB4();
+  G.wx4 = s && s.wx ? s.wx : makeWeather4();
+  if (!s) { refillPiles4(true); return; }
+  if ((s.mv || 1) !== W4_MAP_VER) { migrate4(s); return; }
+  loadBuild4(s);
   // 放回去的家具壓到別的東西就留在手上（不會不見）
   if (s.hand && s.hand.k === 'furn') { const f = FURN_BY_ID[s.hand.id]; if (f) { if (!f.held) liftFurn4(f); G.hand = { k: 'furn', f }; } }
   else if (s.hand && (s.hand.k === 'plank' ? PLANKS[s.hand.tier] : ITEMS[s.hand.id])) G.hand = s.hand;
@@ -2142,3 +2152,99 @@ function showBulbPage(tab) {
   $('bulbNote').textContent = note;
   $('bulbList').innerHTML = html;
 }
+
+// ====================================================================
+// 跟朋友一起蓋房子（net.js 的 Net）：第四世界自己蓋的牆、門、屋頂、斜坡、搬的家具、板材堆、地上的板子、
+// 架上的東西、放下的檯燈和電視會同步給房間裡的人（怪物照舊各自算）。每一片板子、每個東西有自己的 id（pid／uid），收到時照 id 找。
+// 客人進到房主的第四世界時先要一份完整的資料（b4req → b4full）；之後每一個變動送一個 'b4' 事件；
+// 每天早上的補貨（架上的東西、板材堆）和神秘店員的位置照房主的（day4）
+// ====================================================================
+let net4Mute = false;   // 正在套用朋友送來的變動（不要再送出去）
+const rid4 = () => Math.random().toString(36).slice(2, 10);
+const uidOf4 = o => o.uid || (o.uid = rid4());
+const net4On = () => typeof NET_OK !== 'undefined' && NET_OK && Net.active && Net.ready && isW4();
+const isGuest4 = () => typeof NET_OK !== 'undefined' && NET_OK && Net.active && Net.guest;
+function net4(a, d = {}) { if (!net4Mute && net4On()) Net.send('b4', { a, ...d }); }
+const inf4 = v => (v === Infinity ? -1 : v), uninf4 = v => (v < 0 ? Infinity : v);
+const pieceSpec4 = w => ({ pid: w.pid, free: w.free ? 1 : 0, o: w.o, x: w.x, y: w.y, cx: w.cx, cy: w.cy, ang: w.ang, tier: w.tier, hp: inf4(w.hp), door: w.door ? 1 : 0, open: w.open ? 1 : 0, lean: w.lean || 0 });
+const fromSpec4 = d => ({ pid: d.pid, ...(d.free ? { free: true, cx: d.cx, cy: d.cy, ang: d.ang } : { o: d.o, x: d.x, y: d.y }), tier: d.tier, hp: uninf4(d.hp), door: !!d.door, open: !!d.open, lean: d.lean || 0 });
+const pieceById4 = pid => G.b4.list.find(w => w.pid === pid);
+const pkSpec4 = p => ({ uid: uidOf4(p), x: p.x, y: p.y, z: p.z, a: p.a, id: p.id, n: p.n, s: p.s, si: p.si });
+const lampSpec4 = l => ({ uid: uidOf4(l), type: l.type, x: l.x, y: l.y, bulb: l.bulb, free: true, face: l.face });
+const shelfList4 = () => G.pickups.filter(p => p.s).map(pkSpec4);
+function net4Apply(d) {
+  if (!isW4() || !G || !G.b4) return;
+  net4Mute = true;
+  try {
+    switch (d.a) {
+      case 'wall': if (!pieceById4(d.w.pid)) setWall(fromSpec4(d.w)); break;
+      case 'rm': { const w = pieceById4(d.pid); if (w) removeWall(w); break; }
+      case 'door': { const w = pieceById4(d.pid); if (w) { w.open = !!d.open; b4Changed(); Sound.play(w.open ? 'click' : 'doorSlam', 0.3); } break; }
+      case 'roof': G.b4.roofs.set(d.r.x + ',' + d.r.y, { ...d.r, hp: uninf4(d.r.hp) }); G.b4.ver++; break;
+      case 'unroof': G.b4.roofs.delete(d.x + ',' + d.y); G.b4.ver++; break;
+      case 'ramp': G.b4.ramps.set(d.r.x + ',' + d.r.y, { ...d.r, hp: uninf4(d.r.hp) }); G.b4.ver++; break;
+      case 'unramp': G.b4.ramps.delete(d.x + ',' + d.y); G.b4.ver++; break;
+      case 'lift': { const f = FURN_BY_ID[d.id]; if (f && !f.held) liftFurn4(f); break; }   // 朋友把家具拿起來搬走了
+      case 'put': {
+        const f = FURN_BY_ID[d.id];
+        if (!f || (G.hand && G.hand.f === f)) break;
+        if (!f.held) liftFurn4(f);
+        Object.assign(f, { x: d.x, y: d.y, w: d.w, h: d.h, side: d.side, yaw: d.yaw || 0 });
+        addFurn4(f);
+        break;
+      }
+      case 'pile': { const f = FURN_BY_ID[d.id]; if (f) f.count = d.count; break; }
+      case 'take': { const i = G.pickups.findIndex(p => p.uid === d.uid); if (i >= 0) G.pickups.splice(i, 1); break; }
+      case 'drop': if (!G.pickups.some(p => p.uid === d.pk.uid)) G.pickups.push({ ...d.pk, t: 0, keep: 1 }); break;
+      case 'tloose': { const i = G.loose4.findIndex(l => l.uid === d.uid); if (i >= 0) G.loose4.splice(i, 1); break; }
+      case 'lamp': if (inMap(d.o.x, d.o.y) && !G.lamps.some(l => l.uid === d.o.uid)) G.lamps.push({ kind: 'lamp', ...d.o, dying: 0, room: roomGrid[d.o.y][d.o.x] }); break;
+      case 'lampset': { const l = G.lamps.find(o => o.uid === d.uid); if (l) Object.assign(l, { bulb: d.bulb, type: d.type, dying: 0 }); break; }
+      case 'unlamp': { const i = G.lamps.findIndex(l => l.uid === d.uid); if (i >= 0) G.lamps.splice(i, 1); break; }
+    }
+  } finally { net4Mute = false; }
+}
+// 房主送給剛進來的客人：整個賣場的房子、家具、地上和架上的東西、放下的燈、天氣、神秘店員的位置
+function net4Full() {
+  return {
+    s: save4(), loose: G.loose4.map(l => ({ x: l.x, y: l.y, tier: l.tier, door: l.door, a: l.a, k: 'plank', uid: uidOf4(l) })),
+    pk: G.pickups.filter(p => p.s || p.id !== 'coin').map(pkSpec4), lamps: G.lamps.filter(l => l.free).map(lampSpec4),
+  };
+}
+function net4ApplyFull(d) {
+  if (!isW4() || !G || !d || !d.s) return;
+  net4Mute = true;
+  try {
+    const home = G.home, hand = G.hand && G.hand.k !== 'furn' ? G.hand : null;
+    if (G.hand && G.hand.k === 'furn') { addFurn4(G.hand.f); G.hand = null; }
+    initB4(); loadBuild4(d.s);
+    G.home = home; G.hand = hand;
+    G.wx4 = d.s.wx || G.wx4;
+    const wx = (G.wx4.acid || []).find(a => a.day === G.day);
+    if (!acidOn4()) G.acid = wx ? { ...wx, started: false } : null;
+    if (d.s.merchant) Object.assign(MERCHANT_POS, d.s.merchant);
+    G.loose4 = (d.loose || []).filter(l => PLANKS[l.tier]);
+    G.pickups = G.pickups.filter(p => p.id === 'coin' && !p.s).concat((d.pk || []).map(p => ({ ...p, t: Math.random() * 6, keep: 1 })));
+    G.lamps = G.lamps.filter(l => !l.free).concat((d.lamps || []).filter(l => inMap(l.x, l.y)).map(l => ({ kind: 'lamp', ...l, dying: 0, room: roomGrid[l.y][l.x] })));
+  } finally { net4Mute = false; }
+  toast('🏠 跟房主的賣場同步好了：大家蓋的房子、搬的家具、架上的東西都一樣。', 'good');
+}
+// 每天早上：房主補好貨以後，把架上的東西、板材堆、神秘店員的位置送給客人
+function net4Day() {
+  if (!net4On() || !Net.isHost) return;
+  Net.send('day4', { pks: shelfList4(), piles: FURN.filter(f => f.type === 'plankpile' && !f.special).map(f => [f.id, f.count || 0]), merchant: { x: MERCHANT_POS.x, y: MERCHANT_POS.y } });
+}
+function net4ApplyDay(d) {
+  if (!isW4() || !G) return;
+  G.pickups = G.pickups.filter(p => !p.s).concat((d.pks || []).map(p => ({ ...p, t: Math.random() * 6, keep: 1 })));
+  for (const [id, n] of d.piles || []) { const f = FURN_BY_ID[id]; if (f) f.count = n; }
+  if (d.merchant) Object.assign(MERCHANT_POS, d.merchant);
+}
+function net4Bind() {
+  if (typeof Net === 'undefined') return;
+  Net.on('b4', d => net4Apply(d));
+  Net.on('b4req', (d, from) => { if (Net.isHost && isW4() && G && G.b4) Net.sendTo(from, 'b4full', net4Full()); });
+  Net.on('b4full', d => { if (Net.guest) net4ApplyFull(d); });
+  Net.on('day4', d => { if (Net.guest) net4ApplyDay(d); });
+  Net.on('@start', d => { if (Net.guest && d && d.world === 4) Net.send('b4req', {}); });
+}
+addEventListener('DOMContentLoaded', net4Bind);

@@ -22,6 +22,9 @@ const PROG_KEY = 'home99_progress_v1';   // 已解鎖的世界（跟存檔分開
 // 測試版（test.html 會先設 window.TEST_MODE = true）：所有世界和圖鑑的怪物都開著、新遊戲可以從任一夜開始；
 // 不讀也不寫存檔和解鎖紀錄，所以不會影響正式版的進度
 const TEST_MODE = !!window.TEST_MODE;
+// 跟朋友一起玩（js/net.js，在這個檔案之前載入）：客人玩的是房主的世界，不存檔、時間跟著房主
+const NET_OK = typeof Net !== 'undefined';
+const isGuest = () => NET_OK && Net.guest;
 
 const $ = id => document.getElementById(id);
 // 舊版 iPad Safari 沒有 roundRect
@@ -68,6 +71,7 @@ const worldOf = w => (w === 4 ? 4 : w === 3 ? 3 : w === 2 ? 2 : 1);
 function applyWorld(w) {
   w = worldOf(w);
   if (w === curWorld && tiles) return;
+  if (NET_OK) Net.busy();   // 跟朋友一起玩：蓋世界會卡一下，先跟朋友說一聲，才不會被當成斷線
   curWorld = w;
   [MAP_W, MAP_H] = MAP_SIZE[w];   // 第三世界的地圖是一列長長的列車（59 格）、第四世界是 60×44 的賣場
   DAY_LEN = DAY_SECS[w]; NIGHT_LEN = NIGHT_SECS[w];
@@ -253,7 +257,7 @@ function startPlay() {
 // 存檔
 // ====================================================================
 function saveGame() {
-  if (TEST_MODE) return;   // 測試版不存檔
+  if (TEST_MODE || isGuest()) return;   // 測試版不存檔；跟朋友一起玩的客人也不存（玩的是房主的世界，自己的存檔不變）
   const s = {
     v: 1, day: G.day, diff: G.diff, world: G.world || 1,
     p: { x: G.p.x, y: G.p.y, hp: G.p.hp, san: G.p.san, hunger: G.p.hunger, bat: G.p.bat, flashLv: G.p.flashLv },
@@ -2689,7 +2693,7 @@ function startDay(d) {
   showBig(`第 ${d} 天`, d === LAST_NIGHT ? '今晚是最後一夜！' : `你撐過了第 ${d - 1} 夜，還剩 ${LAST_NIGHT - d + 1} 夜`);
   Sound.play('dawn');
   saveGame();
-  toast(`💾 已自動存檔，${isW4() ? '賣場的貨架和板材堆' : isW3() ? '車站和列車上' : isW2() ? '箱子和籃子' : '櫃子'}裡的物資也刷新了。`, 'good');
+  toast(`${isGuest() ? '☀️ 天亮了' : '💾 已自動存檔'}，${isW4() ? '賣場的貨架和板材堆' : isW3() ? '車站和列車上' : isW2() ? '箱子和籃子' : '櫃子'}裡的物資也刷新了。`, 'good');
   if (G.gift) toast(isW4() ? `🎁 ${G.home ? '你家' : '你旁邊'}有一份早晨禮物！` : isW3() ? `🎁 ${RN('engine')}的火爐旁邊（丟木炭的地方）有一份早晨禮物！` : `🎁 ${FURN_BY_ID.bed && FURN_BY_ID.bed.room ? FURN_BY_ID.bed.room.name : RN('bedroom')}的床邊有一份早晨禮物！`, 'good');
   if (G.treasure) toast(`⭐ 今天的寶藏星星藏在「${G.treasure.room}」，快去找！`, 'good');
   if (isW4()) toast('🛒 神秘店員今天在賣場的某個角落……要自己去找，仔細聽鈴鐺的聲音。');
@@ -2821,6 +2825,7 @@ function triggerEvent(type) {
 }
 function updateTime(dt) {
   G.t += dt;
+  if (isGuest()) G.t = Net.clock(G.t, dt);   // 跟朋友一起玩的客人：時間跟著房主走，白天晚上也等房主換（net.js）
   const ev = G.ev;
   if (G.phase === 'day') {
     if (G.day === 1 && isW2()) {
@@ -3145,6 +3150,7 @@ function restorePower() {
   toast('💡 電力恢復了！', 'good');
 }
 function sleep() {
+  if (isGuest()) { toast('🛏️ 跟朋友一起玩的時候不能睡到傍晚：時間是房主決定的。'); return; }
   G.t = Math.max(G.t, DAY_LEN - 25);
   G.p.san = Math.min(100, G.p.san + 20);
   toast('你睡了一覺……醒來時天快黑了。', 'good');
@@ -3264,6 +3270,7 @@ function installBulb(fx, tier) {
   if (isW4() && fx.free && (fx.type === 'tv' || fx.type === 'desk')) {
     // 第四世界的燈泡就是整盞檯燈或整台電視：換成另一個（換下來的收回背包）
     fx.type = isTvTier(tier) ? 'tv' : 'desk';
+    net4('lampset', { uid: uidOf4(fx), bulb: tier, type: fx.type });   // 跟朋友一起玩
     toast(`💡 換成${bulbName(tier)}了${old ? `（${bulbName(old)}收回背包）` : ''}。`, 'good');
     return;
   }
@@ -3284,6 +3291,7 @@ function pickUp() {
     if (!fx.free) addItem(lampItemId(fx.type));   // 第四世界用燈泡直接放的檯燈：收回來只剩燈泡
     if (fx.bulb) addItem('bulb' + fx.bulb);
     G.lamps.splice(G.lamps.indexOf(fx), 1);
+    if (isW4() && fx.free) net4('unlamp', { uid: uidOf4(fx) });   // 跟朋友一起玩
     Sound.play('pickup'); toast(`拿起了${fixtureName(fx)}。`);
   } else if (fx.bulb) {
     addItem('bulb' + fx.bulb);
@@ -3509,6 +3517,7 @@ function bulbPos(o) {
 // ====================================================================
 const WORLD_PREFIX = () => (isW4() ? '第四世界・' : isW3() ? '第三世界・' : isW2() ? '第二世界・' : '');
 function gameOver(cause = '') {
+  if (isGuest()) { Net.down(cause); return; }   // 跟朋友一起玩的客人倒下了：不卡在結束畫面，天亮時醒過來（net.js）
   mode = 'over';
   Sound.setDrone(0);
   G.p.grabbed = null;
@@ -4014,6 +4023,7 @@ function pauseGame() {
   if (document.pointerLockElement) document.exitPointerLock();
   $('pause').classList.remove('hidden');
   $('jumpscare').classList.remove('show');
+  if (NET_OK) Net.onPause();   // 暫停選單上的房間資訊
 }
 function resumeGame() {
   $('pause').classList.add('hidden');
@@ -4198,6 +4208,7 @@ function toTitle() {
   $('hud').classList.add('hidden');
   $('title').classList.remove('hidden');
   refreshTitle();
+  if (NET_OK) Net.onTitle();   // 客人回主選單就是離開房間；房主的房間還開著
 }
 let helpFrom = 'title', pickWorld = 1;
 $('btnNew').onclick = () => {
@@ -4334,6 +4345,7 @@ function frame(ts) {
   else if (mode === 'title') { G.time += dt; for (const e of G.enemies) e.wob += dt; buildLights(); }
   else if (mode === 'cutscene') { updateCutscene(dt); if (mode === 'cutscene') buildLights(); }
   else buildLights();
+  if (NET_OK) Net.tick(dt);   // 朋友的位置平滑內插、客人跟著房主換世界和時間
   Sound.music(musicState(), mode === 'play' ? musicIntensity() : 0, mode === 'title' ? 1 : curWorld);
   Sound.setStatic(mode === 'play' && G.ev.tvOn ? nearVol(Math.hypot(G.p.x - 15, G.p.y - 16)) : 0);
   if (window.Renderer) Renderer.render(dt);
