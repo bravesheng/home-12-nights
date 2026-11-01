@@ -1108,7 +1108,7 @@ await scenario('cut3', '第三到第四世界（?cut=3）：第三世界的結�
   check(await page.evaluate(() => curWorld === 4 && bagUsed() > 0), '要進第四世界、背包要帶過去');
 });
 
-await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩個分頁，用 BroadcastChannel 互連，不用上網）：遊戲中開房間、用代碼加入、客人進到房主的世界和天數、時間對齊、看得到彼此的 3D 人物和手電筒、自訂事件（大訊息切塊）、換白天晚上、客人倒下天亮時醒來、客人的存檔不變、離開房間、在主選單等房主開始、第四世界一起蓋房子（板子、家具、架上的東西、斜坡同步）', { limit: 240000 }, async ({ page, ctx, shot, check }) => {
+await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩個分頁，用 BroadcastChannel 互連，不用上網）：遊戲中開房間、用代碼加入、客人進到房主的世界和天數、時間對齊、看得到彼此的 3D 人物和手電筒、自訂事件（大訊息切塊）、換白天晚上、客人倒下天亮時醒來、客人的存檔不變、暫停同步（有人暫停大家都暫停、寫著是誰、誰按繼續大家一起繼續、開書包不算暫停）、切到別的 App 時藏起人物、離開房間（人物馬上消失）、在主選單等房主開始、關掉分頁馬上算離開、第四世界一起蓋房子（板子、家具、架上的東西、斜坡同步）', { limit: 300000 }, async ({ page, ctx, shot, check }) => {
   // 房主用測試版（不存檔，不會蓋掉客人的存檔；兩個分頁共用 localStorage），客人用正式版
   const guest = await ctx.newPage();
   guest.on('pageerror', e => check(false, '客人的分頁 JS 錯誤：' + e.message));
@@ -1118,7 +1118,7 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   await guest.goto(BASE + '?nettest', { waitUntil: 'load' });
   await guest.evaluate(s => { localStorage.setItem('home99_save_v1', s); localStorage.removeItem('home99_progress_v1'); }, SAVE);
   await page.goto(BASE + 'test.html?world=4&night=2&nettest', { waitUntil: 'load' });
-  await page.waitForFunction(() => mode === 'play' && curWorld === 4);
+  await page.waitForFunction(() => mode === 'play' && curWorld === 4, null, { timeout: 60000 });   // 電腦很忙的時候蓋賣場會超過 30 秒
   await page.evaluate(() => { G.t = 40; Object.assign(G.p, { ...W4.start, pitch: 0 }); });   // 第 2 天的白天
   // 房主：遊戲中按暫停 →「👥 朋友」→「開房間」
   await page.evaluate(() => pauseGame());
@@ -1139,8 +1139,11 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   await guest.fill('#fCode', code.toLowerCase());
   check(await guest.evaluate(c => document.getElementById('fCode').value === c, code), '輸入的代碼要自動變成大寫');
   await guest.click('#fJoin');
-  await guest.waitForFunction(() => mode === 'play' && curWorld === 4, null, { timeout: 30000 });
+  // 房主這時可能是暫停的（例如切到別的分頁）：客人進來也會是暫停畫面，房主按繼續就大家一起繼續
+  await guest.waitForFunction(() => (mode === 'play' || mode === 'pause') && curWorld === 4 && Net.ready, null, { timeout: 60000 });
   await page.evaluate(() => { if (mode === 'pause') resumeGame(); });
+  // 客人剛進來要蓋房主的整個賣場（沒有 GPU 時會卡十幾秒），多等一下
+  await guest.waitForFunction(() => mode === 'play', null, { timeout: 20000 }).catch(async () => check(false, `房主按繼續，剛進來的客人也要一起繼續（房主 ${await page.evaluate(() => mode)}、客人 ${await guest.evaluate(() => mode)}）`));
   await page.waitForFunction(() => Net.friends().some(f => f.ingame && f.world === 4), null, { timeout: 15000 }).catch(() => {});
   await guest.waitForFunction(() => Net.friends().some(f => f.ingame && f.world === 4), null, { timeout: 15000 }).catch(() => {});
   await sleep(500);
@@ -1173,6 +1176,15 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   check(r3g.length === 1 && r3g[0].visible, `客人的畫面要有房主的人物（${JSON.stringify(r3g)}）`);
   await shot('2-host-sees-guest');
   await gshot('3-guest-sees-host');
+  // 客人切到別的 App（visibilitychange）：房主那邊馬上藏起他的人物（還在房間裡）；切回來又看得到
+  const setHidden = h => guest.evaluate(h => { if (h) Object.defineProperty(document, 'hidden', { value: true, configurable: true }); else delete document.hidden; document.dispatchEvent(new Event('visibilitychange')); }, h);
+  await setHidden(true);
+  await page.waitForFunction(() => !Renderer.friends().some(r => r.visible), null, { timeout: 3000 }).catch(() => {});
+  const aw = await page.evaluate(() => ({ vis: Renderer.friends().filter(r => r.visible).length, f: Net.friends().map(f => ({ away: f.away, ingame: f.ingame })), roster: Net.roster().length }));
+  check(aw.vis === 0 && aw.f.length === 1 && aw.f[0].away && !aw.f[0].ingame && aw.roster === 2, `客人切到別的 App，房主那邊要馬上藏起他的人物、但他還在房間裡（${JSON.stringify(aw)}）`);
+  await setHidden(false);
+  await page.waitForFunction(() => Renderer.friends().some(r => r.visible), null, { timeout: 5000 }).catch(() => {});
+  check(await page.evaluate(() => Renderer.friends().some(r => r.visible) && !Net.friends()[0].away), '客人切回來，房主那邊又要看得到他的人物');
   check(await page.evaluate(() => typeof drawMinimap === 'function'), '小地圖照常');
   // 口哨（第四世界）：朋友是藍點
   const dots = await page.evaluate(() => { G.whistleT = 5; const d = whistleDots4(); G.whistleT = 0; return d.filter(x => !x.red).length; });
@@ -1217,18 +1229,71 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   const up = await guest.evaluate(() => ({ mode, day: G.day, phase: G.phase, hp: G.p.hp, down: !document.getElementById('netDown').classList.contains('hidden'), ok: walkable(G.p.x, G.p.y) }));
   check(up.mode === 'play' && up.day === 3 && up.phase === 'day' && up.hp > 0 && !up.down && up.ok, `天亮了客人要醒過來（${JSON.stringify(up)}）`);
   check(await guest.evaluate(s => localStorage.getItem('home99_save_v1') === s, SAVE), '客人自己的存檔不能被改掉');
-  // 客人離開房間：回主選單，自己的存檔還在；房主看到客人離開了
+  // 暫停同步：房主暫停 → 客人也進暫停畫面（寫著是誰暫停的），兩邊的時間都停住
+  const hostName = await page.evaluate(() => Net.name);
+  const pzState = pg => pg.evaluate(() => ({ mode, t: G.t, shown: !document.getElementById('pause').classList.contains('hidden'),
+    who: document.getElementById('pauseWho').classList.contains('hidden') ? '' : document.getElementById('pauseWho').textContent }));
+  await page.evaluate(() => pauseGame());
+  await guest.waitForFunction(() => mode === 'pause', null, { timeout: 5000 }).catch(() => {});
+  const pz1 = await pzState(guest), pz1h = await pzState(page);
+  check(pz1.mode === 'pause' && pz1.shown && pz1.who.includes(`${hostName}暫停了`), `房主暫停時客人也要進暫停畫面、寫著是誰暫停的（${JSON.stringify(pz1)}）`);
+  check(pz1h.who.includes('你暫停了'), `房主自己的暫停畫面要寫「你暫停了」（${JSON.stringify(pz1h)}）`);
+  await sleep(1500);
+  const pz2 = await pzState(guest), pz2h = await pzState(page);
+  check(Math.abs(pz2.t - pz1.t) < 0.1 && Math.abs(pz2h.t - pz1h.t) < 0.1, `暫停時房主和客人的時間都要停住（客人 ${pz1.t.toFixed(2)}→${pz2.t.toFixed(2)}、房主 ${pz1h.t.toFixed(2)}→${pz2h.t.toFixed(2)}）`);
+  await gshot('4b-guest-paused-by-host');
+  // 客人按「繼續」→ 兩邊一起繼續，房主那邊跳「小明按了繼續」
+  await guest.click('#btnResume');
+  await page.waitForFunction(() => mode === 'play', null, { timeout: 5000 }).catch(() => {});
+  const rs1 = await page.evaluate(() => ({ mode, pause: !document.getElementById('pause').classList.contains('hidden'), toast: document.getElementById('toasts').textContent }));
+  const rs1g = await guest.evaluate(() => mode);
+  check(rs1.mode === 'play' && !rs1.pause && rs1g === 'play', `客人按「繼續」，房主和客人要一起繼續（房主 ${rs1.mode}、客人 ${rs1g}）`);
+  check(rs1.toast.includes('小明按了繼續'), `房主要看到「小明按了繼續」（${rs1.toast.slice(-60)}）`);
+  // 客人暫停 → 房主也暫停、寫「小明暫停了」；房主按 Esc 繼續 → 客人也繼續
+  await guest.evaluate(() => pauseGame());
+  await page.waitForFunction(() => mode === 'pause', null, { timeout: 5000 }).catch(() => {});
+  const pz3 = await pzState(page);
+  check(pz3.mode === 'pause' && pz3.who.includes('小明暫停了'), `客人暫停時房主也要暫停、寫「小明暫停了」（${JSON.stringify(pz3)}）`);
+  await shot('4c-host-paused-by-guest');
+  await page.keyboard.press('Escape');
+  await guest.waitForFunction(() => mode === 'play', null, { timeout: 5000 }).catch(() => {});
+  check(await page.evaluate(() => mode) === 'play' && await guest.evaluate(() => mode) === 'play', '房主按 Esc 繼續，客人也要一起繼續');
+  // 開書包的視窗不算暫停：房主開書包，客人照樣在玩；客人這時暫停，房主的書包不會被關掉，關掉書包才進暫停畫面
+  await page.evaluate(() => openBag4());
+  await sleep(800);
+  check(await guest.evaluate(() => mode) === 'play', '房主開書包的視窗時，客人不能被拉進暫停畫面');
+  await guest.evaluate(() => pauseGame());
+  await sleep(800);
+  check(await page.evaluate(() => mode) === 'modal', '房主開著書包時，客人暫停不能把書包關掉');
+  await page.evaluate(() => closeModal());
+  await page.waitForFunction(() => mode === 'pause', null, { timeout: 5000 }).catch(() => {});
+  check(await page.evaluate(() => mode) === 'pause', '房主關掉書包之後要進暫停畫面（客人暫停了）');
+  await page.evaluate(() => resumeGame());
+  await guest.waitForFunction(() => mode === 'play', null, { timeout: 5000 }).catch(() => {});
+  check(await guest.evaluate(() => mode) === 'play', '房主按繼續，客人也要一起繼續');
+  // 客人離開房間：回主選單，自己的存檔還在；房主看到客人離開了、他的人物馬上不見；客人是暫停的人，房主的暫停畫面改寫「小明離開了」
   await guest.evaluate(() => pauseGame());
   check(await guest.evaluate(() => document.getElementById('btnQuit').textContent.includes('離開房間') && !document.getElementById('pauseNet').classList.contains('hidden')), '客人的暫停選單要寫「離開房間」和房間資訊');
+  await page.waitForFunction(() => mode === 'pause', null, { timeout: 5000 }).catch(() => {});
+  await page.evaluate(() => { window.__leftAt = 0; Net.on('@leave', () => { window.__leftAt = Date.now(); }); });
+  const quitAt = await guest.evaluate(() => Date.now());
   await guest.click('#btnQuit');
   await guest.waitForFunction(() => mode === 'title' && !Net.active);
   await page.waitForFunction(() => Net.friends().length === 0 && Net.roster().length === 1, null, { timeout: 5000 }).catch(() => check(false, '客人離開後房主的房間裡要只剩自己'));
+  await page.waitForFunction(() => !Renderer.friends().some(r => r.visible), null, { timeout: 3000 }).catch(() => {});
+  const lv = await page.evaluate(() => ({ at: window.__leftAt, vis: Renderer.friends().filter(r => r.visible).length, mode,
+    who: document.getElementById('pauseWho').classList.contains('hidden') ? '' : document.getElementById('pauseWho').textContent }));
+  check(lv.at > 0 && lv.at - quitAt < 2000, `客人按「離開房間」，房主那邊要馬上知道（${lv.at ? lv.at - quitAt : '沒收到'} 毫秒）`);
+  check(lv.vis === 0, '客人離開房間後，房主的畫面上不能再有他的人物');
+  check(lv.mode === 'pause' && lv.who.includes('小明離開了'), `暫停的客人離開了，房主還在暫停畫面、要寫「小明離開了」（${JSON.stringify(lv)}）`);
+  await shot('4d-host-pauser-left');
   const tt = await guest.evaluate(() => ({ cont: !document.getElementById('btnContinue').disabled, info: document.getElementById('saveInfo').textContent }));
   check(tt.cont && tt.info.includes('第 3 天'), `離開房間後客人自己的存檔要還在（${tt.info}）`);
   // 房主回主選單（房間還開著）→ 客人再加入，在朋友的畫面等 → 房主開新遊戲（第一世界）→ 客人跟著進去
   await page.evaluate(() => pauseGame());
   await page.click('#btnQuit');
   await page.waitForFunction(() => mode === 'title' && Net.isHost && !document.getElementById('netNote').classList.contains('hidden'));
+  await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));   // 等房主畫好主選單（沒有 GPU 時第一次畫要編譯很久，這時回不了「有人要加入」）
   await guest.click('#btnFriends');
   check(await guest.evaluate(c => document.getElementById('fCode').value === c, code), '再打開朋友的畫面時，代碼要記得上一次的');
   await guest.click('#fJoin');
@@ -1249,7 +1314,19 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   await guest.waitForFunction(() => mode === 'title' && !Net.active, null, { timeout: 15000 }).catch(() => {});
   const bye = await guest.evaluate(() => ({ mode, note: document.getElementById('netNote').textContent }));
   check(bye.mode === 'title' && bye.note.includes('房主'), `房主關掉房間時，客人要回到主選單並看到提示（${JSON.stringify(bye)}）`);
+  // 客人直接關掉分頁（App）：pagehide 送「掰掰」，房主馬上拿掉他的人物、跳「離開了」，不用等 15 秒斷線
+  const code2 = await page.evaluate(() => Net.host());
+  await guest.click('#btnFriends');
+  await guest.fill('#fCode', code2);
+  await guest.click('#fJoin');
+  await guest.waitForFunction(() => mode === 'play' && Net.ready, null, { timeout: 30000 }).catch(() => {});
+  await page.waitForFunction(() => Renderer.friends().some(r => r.visible), null, { timeout: 10000 }).catch(() => check(false, '再加入之後房主要看得到客人'));
+  const closeAt = Date.now();
   await guest.close();
+  await page.waitForFunction(() => Net.roster().length === 1 && !Renderer.friends().some(r => r.visible), null, { timeout: 5000 }).catch(() => {});
+  const cl = await page.evaluate(() => ({ roster: Net.roster().length, vis: Renderer.friends().filter(r => r.visible).length, toast: document.getElementById('toasts').textContent }));
+  check(cl.roster === 1 && cl.vis === 0 && Date.now() - closeAt < 6000, `客人關掉分頁，房主要馬上拿掉他的人物（${JSON.stringify(cl)}）`);
+  check(cl.toast.includes('小明 離開了'), `客人關掉分頁，房主要看到「小明 離開了」（${cl.toast.slice(-60)}）`);
 });
 
 await scenario('test', '測試版頁面（test.html）：所有世界都開著、圖鑑沒有問號、新遊戲可以從第 6 夜開始、不存檔也不碰正式版的進度；test.html 要跟 index.html 同步', {}, async ({ page, shot, check }) => {
