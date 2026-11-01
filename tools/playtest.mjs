@@ -1214,6 +1214,11 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   check(r3g.length === 1 && r3g[0].visible, `客人的畫面要有房主的人物（${JSON.stringify(r3g)}）`);
   await shot('2-host-sees-guest');
   await gshot('3-guest-sees-host');
+  // 朋友的人物：網格不能太多（平板要順）；房主走近一點、從斜前方看客人的細節（衣服、手、手電筒、球鞋、頭髮）
+  check(r3.length === 1 && r3[0].meshes <= 24, `朋友的人物網格太多了（${r3[0] && r3[0].meshes} 個）`);
+  await page.evaluate(() => Object.assign(G.p, { x: W4AX + 2.0, y: W4H - 4.9, face: Math.atan2(-1.4, -1.2), pitch: -0.4 }));
+  await sleep(1500);
+  await shot('2b-guest-close');
   // 客人切到別的 App（visibilitychange）：房主那邊馬上藏起他的人物（還在房間裡）；切回來又看得到
   const setHidden = h => guest.evaluate(h => { if (h) Object.defineProperty(document, 'hidden', { value: true, configurable: true }); else delete document.hidden; document.dispatchEvent(new Event('visibilitychange')); }, h);
   await setHidden(true);
