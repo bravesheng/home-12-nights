@@ -4,7 +4,7 @@
 const VERSION = 'home12-v28';
 const ASSETS = [
   './', './index.html', './style.css', './manifest.webmanifest', './test.html', './manifest-test.webmanifest',
-  './js/version.js', './js/data.js', './js/audio.js', './js/world2.js', './js/world3.js', './js/world4.js', './js/net.js', './js/netmon.js', './js/game.js', './js/render3d.js',
+  './js/version.js', './js/data.js', './js/audio.js', './js/world2.js', './js/world3.js', './js/world4.js', './js/world5.js', './js/net.js', './js/netmon.js', './js/game.js', './js/render3d.js',
   './js/vendor/peerjs.min.js',   // 跟朋友一起玩的連線程式庫（沒有網路時也要載得到，遊戲才不會壞）
   './lib/three.module.js', './lib/three.core.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png',

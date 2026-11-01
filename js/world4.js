@@ -8,10 +8,10 @@
 // 區域（樣品間、倉儲區、美食區……）：提示和寶藏星星用區域的名字，賣場本身只有一個大房間
 // ====================================================================
 function zoneAt(x, y) {
-  for (const z of W4MAP.zones) if (x >= z.x && x < z.x + z.w && y >= z.y && y < z.y + z.h) return z;
+  for (const z of (curWorld === 5 ? W5MAP : W4MAP).zones) if (x >= z.x && x < z.x + z.w && y >= z.y && y < z.y + z.h) return z;
   return null;
 }
-const zoneName = (x, y) => { const z = zoneAt(x, y); return z ? z.name : '賣場'; };
+const zoneName = (x, y) => { const z = zoneAt(x, y); return z ? z.name : curWorld === 5 ? '草原' : '賣場'; };
 // 主走道（墮落戰神只在這裡巡邏）
 const inAisle4 = (x, y) => { const z = zoneAt(x, y); return !!(z && z.aisle); };
 // 墮落戰神巡邏：主走道的四個端點裡離自己最遠的那個
@@ -52,7 +52,7 @@ function freeStackAt(cx, cy, ang) {
   for (const l of G.b4.cells.values()) for (const s of l) { const w = s[0]; if (Math.abs(w.cx - cx) < 0.01 && Math.abs(w.cy - cy) < 0.01 && Math.abs(Math.cos(w.ang - ang)) > 0.999) return s; }
   return null;
 }
-const b4On = () => !!(G && G.b4 && curWorld === 4);
+const b4On = () => !!(G && G.b4 && curWorld >= 4);   // 第五世界也可以自己蓋
 const edgeIdx = (o, x, y) => (o === 'h' ? (x >= 0 && x < MAP_W && y >= 0 && y <= MAP_H ? y * MAP_W + x : -1) : (x >= 0 && x <= MAP_W && y >= 0 && y < MAP_H ? y * (MAP_W + 1) + x : -1));
 // 那個邊上的那一疊（陣列，沒有就 null）
 function stackAt(o, x, y) { const i = edgeIdx(o, x, y); return i < 0 ? null : (o === 'h' ? G.b4.h : G.b4.v)[i] || null; }
@@ -940,6 +940,7 @@ function addTargets4(cands) {
     if (look(l.x, l.y, rd, 1.3)) cands.push({ d: rd - 0.3, id: 'loose4', label: `撿起${plankName(l.tier, l.door)}`, sub: '板子不能放進背包，一次拿一片', hold: 0, action: () => takeLoose4(l) });
   }
   climbTargets4(cands);   // 梯子
+  if (isW5()) addTargets5(cands);   // 第五世界：砍樹、釣魚、工作台、沐浴球機（world5.js）
   // 看著的東西（架上或地上）：按 E 拿起來
   const lp = lookedPickup4();
   if (lp) cands.push({ d: lp.ang * 2 + lp.d * 0.15 - 0.8, id: 'pk4', label: `拿起${itemName(lp.pk.id)}${lp.pk.n > 1 ? ' ×' + lp.pk.n : ''}`, sub: bagFits(lp.pk.id) ? `🎒 ${bagUsed()}/${BAG_SLOTS}` : '🎒 背包滿了', hold: 0, action: () => takePickup4(lp.pk) });
@@ -1049,7 +1050,7 @@ function bedAtHome4() {
 // ====================================================================
 // 怪物打牆：路上擋著牆（尋路時記下的 e.wallAhead），走到牆前面就一直打，打到壞掉為止。玻璃打不破
 // ====================================================================
-const BASH4 = { staff: 7, mimic: 3, tyrant: 14, warlord: 9, kronos: 4, tall: 10, woman: 4, clown: 5, momo: 5, snail: 3, girl: 4, grass: 3, shake: 1.5, ember: 6, shadow: 3 };
+const BASH4 = { staff: 7, mimic: 3, tyrant: 14, warlord: 9, kronos: 4, tall: 10, woman: 4, clown: 5, momo: 5, snail: 3, girl: 4, grass: 3, shake: 1.5, ember: 6, shadow: 3, gaze: 6, slice: 4, clone: 30 };
 function bash4(e, dt) {
   const w = e.wallAhead;
   if (!w || !wallClosed(w) || hasGlass(w) || e.spawn > 0 || e.stunT > 0) return;   // 怪物打那一疊最下面那片（有玻璃的打不破）
@@ -1087,8 +1088,23 @@ function breakWall4(w, e) {
 // 每天早上、天黑：日光燈、打烊廣播、神秘店員換位置（要自己去找）、板材堆補貨、禮物放在家裡
 // ====================================================================
 function startDay4(d) {
-  G.cold = !!G.forceCold || COLD_DAYS_W4.includes(d);
+  G.cold = !!G.forceCold || (isW5() ? COLD_DAYS_W5 : COLD_DAYS_W4).includes(d);
   G.acid = null; G.acidT = 0;
+  if (isW5()) {   // 第五世界：樹長回來、樹上和花上長東西、天氣（world5.js）；神秘店員和早晨禮物跟第四世界一樣
+    startDay5(d);
+    const m = randomSpot4(16);
+    if (m) Object.assign(MERCHANT_POS, m);
+    G.merchantSeen = false; G.ev.bellT = 3;
+    const gp = homeCenter4() || { x: G.p.x + Math.cos(G.p.face) * 1.2, y: G.p.y + Math.sin(G.p.face) * 1.2 };
+    Object.assign(GIFT_POS, walkable(gp.x, gp.y) ? gp : { x: G.p.x, y: G.p.y });
+    for (const e of G.enemies) puff(e.x, e.y);
+    G.enemies = []; G.motes5 = [];
+    net4Day();
+    const wx = (G.wx4 && G.wx4.acid || []).find(a => a.day === d);
+    if (wx) G.acid = { ...wx, started: false };
+    if (G.cold) toast('❄️ 寒寂之境：今天整天下雪，體溫歸零就會死。在工作台做火爐搬回家、丟木柴進去燒；拿著蠟燭、躺在家裡的床上也會暖起來。', 'warn');
+    return;
+  }
   if (!isGuest4()) { refillPiles4(d === 1); stockShelves4(d === 1); }   // 跟朋友一起玩的客人照房主的補貨（net4Day）
   // 偶爾出現的特別板材堆：岩漿（傳說）或玻璃（神話），只有 1 片
   if (d >= 3 && !isGuest4() && Math.random() < 0.4) {
@@ -1157,7 +1173,7 @@ function randomSpot4(minD = 10) {
   for (let i = 0; i < 200; i++) {
     const x = 1 + Math.floor(Math.random() * (MAP_W - 2)), y = 1 + Math.floor(Math.random() * (MAP_H - 2));
     if (Math.hypot(x + 0.5 - G.p.x, y + 0.5 - G.p.y) < minD) continue;
-    let ok = roomGrid[y][x] && roomGrid[y][x].id === 'store';
+    let ok = roomGrid[y][x] && roomGrid[y][x].id === (isW5() ? 'meadow' : 'store');
     for (let dy = -1; dy <= 1 && ok; dy++) for (let dx = -1; dx <= 1; dx++) if (!walkable(x + dx + 0.5, y + dy + 0.5)) { ok = false; break; }
     const z = zoneAt(x, y);
     if (!ok || (z && (z.cube || z.aisle))) continue;
@@ -1183,8 +1199,8 @@ function dayTips4() {
 }
 function updateDay4(dt) {
   const ev = G.ev;
-  if (G.day === 1) dayTips4();
-  if (!ev.paWarn && G.t >= DAY_LEN - DUSK) { ev.paWarn = 1; Sound.play('pa'); toast('📢 廣播：「本店即將打烊，請盡快離開……」日光燈開始一排一排閃了。', 'warn'); }
+  if (G.day === 1 && !isW5()) dayTips4();
+  if (!isW5() && !ev.paWarn && G.t >= DAY_LEN - DUSK) { ev.paWarn = 1; Sound.play('pa'); toast('📢 廣播：「本店即將打烊，請盡快離開……」日光燈開始一排一排閃了。', 'warn'); }
   // 神秘店員的鈴鐺：越近越大聲
   if (merchantHere()) {
     const d = Math.hypot(MERCHANT_POS.x - G.p.x, MERCHANT_POS.y - G.p.y);
@@ -1203,6 +1219,7 @@ function update4(dt) {
   updateFires4(dt);
   updateAcid4(dt);
   updateTemp4(dt);
+  if (isW5()) update5(dt);   // 第五世界：雨、打雷、沐浴球、記憶的光點（world5.js）
   if (mode !== 'play') return;
   if (G.phase === 'day') updateDay4(dt);
   for (const w of G.b4.list) if (w.hitT > 0) w.hitT -= dt;
@@ -1226,6 +1243,7 @@ function makeWeather4() {
 function sheltered4(x, y) {
   const tx = Math.floor(x), ty = Math.floor(y);
   if (!inMap(tx, ty)) return true;
+  if (isW5()) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const f = inMap(tx + dx, ty + dy) && furnGrid[ty + dy][tx + dx]; if (f && f.type === 'tree5' && Math.hypot(f.x + 0.5 - x, f.y + 0.5 - y) < 1.25) return true; }   // 第五世界：站在樹底下（樹冠遮著）
   const r = roomGrid[ty][tx] || (doorGrid[ty][tx] && doorGrid[ty][tx].rooms[0]);
   return !!(r && r.ceil) || G.b4.roofs.has(tx + ',' + ty);
 }
@@ -1460,10 +1478,11 @@ function save4() {
     walls: [...b.list].sort((a, c) => a.lv - c.lv).map(w => [w.free ? 'f' : w.o, w.free ? Math.round(w.cx * 100) / 100 : w.x, w.free ? Math.round(w.cy * 100) / 100 : w.y, w.tier, Math.round(Math.min(w.hp, 9999)), w.door ? 1 : 0, w.open ? 1 : 0, w.free ? Math.round(w.ang * 180 / Math.PI) : 0, w.lean || 0, w.lv, w.pid]),
     sq: 2, ramps: rampList4().map(r => [r.x, r.y, r.dir, r.lv, r.tier, Math.round(Math.min(r.hp, 9999))]),
     roofs: roofList4().map(r => [r.x, r.y, r.tier, Math.round(Math.min(r.hp, 9999)), r.tilt || 0, r.tax || 'x']),
-    furn: FURN.filter(f => f.move || f.type === 'plankpile' || f.fuel || f.on).map(f => ({ id: f.id, x: f.x, y: f.y, w: f.w, h: f.h, side: f.side, yaw: f.yaw || undefined, held: f.held ? 1 : 0, fuel: f.fuel, on: f.on ? 1 : 0, count: f.count, sp: f.special ? [f.tier] : undefined })),
+    furn: FURN.filter(f => f.move || f.type === 'plankpile' || f.fuel || f.on).map(f => ({ id: f.id, x: f.x, y: f.y, w: f.w, h: f.h, side: f.side, yaw: f.yaw || undefined, held: f.held ? 1 : 0, fuel: f.fuel, on: f.on ? 1 : 0, count: f.count, sp: f.special ? [f.tier] : undefined, dyn: f.dyn || undefined })),   // dyn：第五世界自己在工作台做的家具
     hand: G.hand ? (G.hand.k === 'furn' ? { k: 'furn', id: G.hand.f.id } : G.hand) : null,
     home: G.home, loose: G.loose4.map(l => [Math.round(l.x * 10) / 10, Math.round(l.y * 10) / 10, l.tier, l.door ? 1 : 0]),
-    wx: G.wx4, merchant: { x: MERCHANT_POS.x, y: MERCHANT_POS.y }, mv: W4_MAP_VER,
+    wx: G.wx4, merchant: { x: MERCHANT_POS.x, y: MERCHANT_POS.y }, mv: isW5() ? W5_MAP_VER : W4_MAP_VER,
+    w5: isW5() ? save5() : undefined,   // 第五世界：砍倒的樹（world5.js）
   };
 }
 // 存檔（或房主送來的資料）裡的房子：牆、斜坡、屋頂、搬過的家具和板材堆（load4 和跟朋友一起玩的 net4ApplyFull 共用）。
@@ -1493,7 +1512,7 @@ function builtPlanks4(s) {
 }
 // 退回來的板子放在家旁邊（沒有家就放在入口旁邊）的地上，一圈一圈往外排
 function dropBack4(list) {
-  const c = G.home || W4.start;
+  const c = G.home || (isW5() ? W5.start : W4.start);
   let i = 0;
   for (const [tier, door] of list) {
     for (; i < 600; i++) {
@@ -1507,6 +1526,7 @@ function loadFurn4(s) {
   for (const sf of s.furn || []) {
     let f = FURN_BY_ID[sf.id];
     if (!f && sf.sp) { f = { id: sf.id, type: 'plankpile', name: '板材堆', w: 1, h: 1, tier: sf.sp[0], special: true }; FURN.push(f); FURN_BY_ID[f.id] = f; }
+    if (!f && sf.dyn && FURN4[sf.dyn]) { f = { id: sf.id, type: sf.dyn, name: FURN4[sf.dyn].name, x: sf.x, y: sf.y, w: sf.w || 1, h: sf.h || 1, side: 's', move: true, dyn: sf.dyn, held: true }; if (FURN4[sf.dyn].solid === false) f.solid = false; FURN.push(f); FURN_BY_ID[f.id] = f; }
     if (!f) continue;
     if (f.move || f.special) { liftFurn4(f); Object.assign(f, { x: sf.x, y: sf.y, w: sf.w || f.w, h: sf.h || f.h, side: sf.side || f.side, yaw: sf.yaw || 0 }); if (!sf.held) addFurn4(f); }
     if (sf.fuel) f.fuel = sf.fuel.filter(q => ITEMS[q.id]);
@@ -1516,9 +1536,10 @@ function loadFurn4(s) {
 }
 function load4(s) {
   initB4();
-  G.wx4 = s && s.wx ? s.wx : makeWeather4();
-  if (!s) { refillPiles4(true); return; }
-  if ((s.mv || 1) !== W4_MAP_VER) { migrate4(s); return; }
+  G.wx4 = s && s.wx ? s.wx : isW5() ? makeWeather5() : makeWeather4();
+  if (!s) { if (!isW5()) refillPiles4(true); return; }
+  if (!isW5() && (s.mv || 1) !== W4_MAP_VER) { migrate4(s); return; }
+  if (isW5()) load5(s.w5);   // 砍倒的樹
   const back = loadBuild4(s);
   // 放回去的家具壓到別的東西就留在手上（不會不見）
   if (s.hand && s.hand.k === 'furn') { const f = FURN_BY_ID[s.hand.id]; if (f) { if (!f.held) liftFurn4(f); G.hand = { k: 'furn', f }; } }
@@ -1530,7 +1551,7 @@ function load4(s) {
     toast(`🧱 板子改成 2×2 公尺的大板子了（跟人一樣高）！你之前蓋的房子換成 ${back.length} 片大板子，放在${G.home ? '家' : '入口'}旁邊的地上，要重新蓋喔。`, 'warn');
   }
   if (s.merchant && walkable(s.merchant.x, s.merchant.y)) Object.assign(MERCHANT_POS, s.merchant);
-  G.cold = COLD_DAYS_W4.includes(G.day);
+  G.cold = (isW5() ? COLD_DAYS_W5 : COLD_DAYS_W4).includes(G.day);
   const wx = (G.wx4.acid || []).find(a => a.day === G.day);
   G.acid = wx ? { ...wx, started: false } : null;
   Object.assign(GIFT_POS, homeCenter4() || G.p);
@@ -1556,20 +1577,30 @@ function migrate4(s) {
 // 新遊戲：送 8 片木頭板子放在入口旁邊的地上
 function newGame4(carry) {
   load4(null);
-  G.loose4 = W4.starterPlanks.map(([x, y]) => ({ x, y, tier: 1, k: 'plank', a: Math.random() * 3 }));
+  G.loose4 = (isW5() ? W5 : W4).starterPlanks.map(([x, y]) => ({ x, y, tier: 1, k: 'plank', a: Math.random() * 3 }));
   G.tutorial4 = 1;
   startDay4(1);
-  if (!carry) { addItem('hotdog', 2); addItem('soda', 1); }
+  if (!carry && isW5()) { addItem('apple5', 2); addItem('soda', 1); addItem('pan', 1); addItem('bathbomb', 1); }   // 第五世界：送一顆沐浴球試試看
+  else if (!carry) { addItem('hotdog', 2); addItem('soda', 1); }
 }
 // 測試用網址參數：&cold 強制寒寂之境、&acid 馬上下酸雨、&red 今晚強制紅月；kit 另外帶各級板子（放在旁邊的地上）、火爐、木柴和煤炭
 function testStart4(q, night, kit) {
+  if (isW5()) {   // 第五世界：照那一天的天氣；&rain、&storm、&fog 強制今天下雨、雷暴雨、起霧
+    G.cold = (COLD_DAYS_W5).includes(G.day);
+    G.force5 = ['rain', 'storm', 'fog'].filter(k => q.has(k));
+    const wx = (G.wx4.acid || []).find(a => a.day === G.day);
+    G.acid = wx ? { ...wx, started: false } : null;
+    if (G.day > 1) { regrow5(); stock5(false); }
+  }
   if (q.has('cold')) { G.forceCold = true; G.cold = true; }
   if (q.has('red')) G.forceRed = true;
   if (q.has('acid')) { G.acid = { day: G.day, night: false, at: 0, dur: 90, started: true, warned: true }; G.acidT = 90; }
   if (kit) {
-    for (let t = 1; t <= PLANK_MAX; t++) for (let i = 0; i < 2; i++) G.loose4.push({ x: W4.start.x - 2 + t * 0.7, y: W4.start.y - 1.4 - i * 0.5, tier: t, k: 'plank', a: 0 });
-    G.loose4.push({ x: W4.start.x + 2.2, y: W4.start.y - 1, tier: 1, door: true, k: 'plank', a: 0 });
-    addItem('wood', 4); addItem('charcoal', 4);
+    const st = isW5() ? W5.start : W4.start, oy = isW5() ? 4.4 : 0;   // 第五世界放在起點南邊（北邊是工作台）
+    for (let t = 1; t <= PLANK_MAX; t++) for (let i = 0; i < 2; i++) G.loose4.push({ x: st.x - 2 + t * 0.7, y: st.y - 1.4 - i * 0.5 + oy, tier: t, k: 'plank', a: 0 });
+    G.loose4.push({ x: st.x + 2.2, y: st.y - 1 + oy, tier: 1, door: true, k: 'plank', a: 0 });
+    addItem('wood', isW5() ? 10 : 4);
+    if (isW5()) addItem('bathbomb', 2); else addItem('charcoal', 4);   // 第五世界的背包也只有 16 格：木柴多帶一點（工作台做方塊），不帶煤炭
   }
 }
 
@@ -1628,7 +1659,7 @@ function seesPlayer4(e, range, fov = 1.25) {
 
 // ---------- SCP-3008-2（店員）：白天站著不動、頭慢慢轉過來看你；天黑後巡邏，看到你就追過來打你，看不到 6 秒就回去巡邏 ----------
 function spawnIdleStaff4() {
-  if (isGuest4()) return;   // 跟朋友一起玩的客人：看到的是房主那邊的店員（netmon.js 同步）
+  if (isGuest4() || isW5()) return;   // 第五世界沒有店員   // 跟朋友一起玩的客人：看到的是房主那邊的店員（netmon.js 同步）
   for (let i = 0, n = 2 + Math.floor(G.day / 4); i < n; i++) {
     const sp = randomSpot4(12);
     if (!sp) continue;
@@ -2264,7 +2295,7 @@ function victory4() {
   if (document.pointerLockElement) document.exitPointerLock();
   $('hud').classList.add('hidden');
   $('cutscene').classList.remove('hidden');
-  cutCaption('🌅 天亮了', '日光燈一排一排亮了起來……');
+  cutCaption('🌅 天亮了', isW5() ? '草原上的白霧慢慢散開了……' : '日光燈一排一排亮了起來……');
   for (const e of G.enemies) puff(e.x, e.y);
   G.enemies = [];
 }
@@ -2272,7 +2303,7 @@ function updateCutscene5(dt) {
   const c = CUT;
   c.t += dt; G.time += dt;
   G.phase = 'day'; G.t = Math.min(DAWN, c.t * 2);
-  if (c.t > 0.3 && !c.lit) { c.lit = true; Sound.play('lightsOn'); }
+  if (c.t > 0.3 && !c.lit) { c.lit = true; Sound.play(isW5() ? 'dawn' : 'lightsOn'); }
   c.cam = { x: G.p.x, y: G.p.y, h: 0, face: G.p.face + Math.sin(c.t * 0.4) * 0.15, pitch: 0.08 };
   const white = clamp((c.t - 3.5) / 1.8, 0, 1), fade = $('cutFade');
   fade.style.background = '#fffaf0'; fade.style.opacity = white.toFixed(3);
@@ -2286,6 +2317,12 @@ function endVictory4() {
   $('goTitle').textContent = '🏬 你在 3008 撐過了 12 夜';
   $('goText').innerHTML = `天亮了，日光燈一排一排亮起來，店員們又站回走道上一動也不動。<br>賣場還是沒有出口……但你有了自己的家。<br>你在第四世界撐過了 ${LAST_NIGHT} 夜！搜索了 ${G.stats.searched} 次，打倒了 ${G.stats.dissolved} 個怪物。<br>最好的燈泡：${bulbName(G.stats.bestTier)}`;
   $('btnRetry').classList.add('hidden'); $('btnNextWorld').classList.add('hidden');
+  if (isW5()) endVictory5();   // 第五世界（world5.js）
+  else {   // 打贏第四世界：解鎖第五世界，可以直接走進去（帶著背包、硬幣、手電筒）
+    unlockW5();
+    nextCarry = { inv: { ...G.inv }, coins: G.coins, flashLv: G.p.flashLv, diff: G.diff, stats: G.stats, to: 5 };
+    $('btnNextWorld').textContent = '🌫️ 走進白霧（第五世界）'; $('btnNextWorld').classList.remove('hidden');
+  }
   $('gameover').classList.remove('hidden');
 }
 
@@ -2350,7 +2387,8 @@ function showBulbPage(tab) {
 // 跟朋友一起蓋房子（net.js 的 Net）：第四世界自己蓋的牆、門、屋頂、斜坡、搬的家具、板材堆、地上的板子、
 // 架上的東西、放下的檯燈和電視會同步給房間裡的人；牆被怪物打掉多少也會送（whp）。怪物在 netmon.js 同步。每一片板子、每個東西有自己的 id（pid／uid），收到時照 id 找。
 // 客人進到房主的第四世界時先要一份完整的資料（b4req → b4full）；之後每一個變動送一個 'b4' 事件；
-// 每天早上的補貨（架上的東西、板材堆）和神秘店員的位置照房主的（day4）
+// 每天早上的補貨（架上的東西、板材堆）和神秘店員的位置照房主的（day4）。第五世界也用這一套（isW4() 也是 true）：
+// 砍樹、樹上和花上的東西、合成的家具、沐浴球、閃電、記憶的光點在 world5.js 的 net5Apply
 // ====================================================================
 let net4Mute = false;   // 正在套用朋友送來的變動（不要再送出去）
 const rid4 = () => Math.random().toString(36).slice(2, 10);
@@ -2408,6 +2446,8 @@ function net4Apply(d) {
       case 'lamp': if (inMap(d.o.x, d.o.y) && !G.lamps.some(l => l.uid === d.o.uid)) G.lamps.push({ kind: 'lamp', ...d.o, dying: 0, room: roomGrid[d.o.y][d.o.x] }); break;
       case 'lampset': { const l = G.lamps.find(o => o.uid === d.uid); if (l) Object.assign(l, { bulb: d.bulb, type: d.type, dying: 0 }); break; }
       case 'unlamp': { const i = G.lamps.findIndex(l => l.uid === d.uid); if (i >= 0) G.lamps.splice(i, 1); break; }
+      case 'loose': if (d.l && PLANKS[d.l.tier] && !G.loose4.some(l => l.uid === d.l.uid)) G.loose4.push({ ...d.l, k: 'plank' }); break;   // 朋友那邊掉在地上的板子（第五世界砍樹、工作台）
+      default: if (isW5()) net5Apply(d);   // 第五世界：砍樹、合成的家具、沐浴球、閃電、記憶的光點（world5.js）
     }
   } finally { net4Mute = false; }
 }
@@ -2435,14 +2475,16 @@ function net4ApplyFull(d) {
     G.pickups = G.pickups.filter(p => p.id === 'coin' && !p.s).concat((d.pk || []).map(p => ({ ...p, t: Math.random() * 6, keep: 1 })));
     G.lamps = G.lamps.filter(l => !l.free).concat((d.lamps || []).filter(l => inMap(l.x, l.y)).map(l => ({ kind: 'lamp', ...l, dying: 0, room: roomGrid[l.y][l.x] })));
     for (const f of FURN) if ((FURN4[f.type] || {}).store) G.containers[f.id] = { items: ((d.cont || {})[f.id] || []).filter(e => typeof e === 'string' && ITEMS[storeEntry(e)[0]]) };
+    if (isW5() && d.s.w5) applyCut5(d.s.w5.cut || []);   // 第五世界：房主那邊砍倒的樹
   } finally { net4Mute = false; }
-  toast('🏠 跟房主的賣場同步好了：大家蓋的房子、搬的家具、架上的東西都一樣。', 'good');
+  toast(isW5() ? '🌳 跟房主的草原同步好了：大家蓋的房子、砍倒的樹、樹上的東西、做好的家具都一樣。' : '🏠 跟房主的賣場同步好了：大家蓋的房子、搬的家具、架上的東西都一樣。', 'good');
 }
 // 每天早上：房主補好貨以後，把架上的東西、板材堆、神秘店員的位置送給客人
 function net4Day() {
   if (!net4On() || !Net.isHost) return;
   Net.send('day4', { pks: shelfList4(), piles: FURN.filter(f => f.type === 'plankpile' && !f.special).map(f => [f.id, f.count || 0]), merchant: { x: MERCHANT_POS.x, y: MERCHANT_POS.y },
-    sp: FURN.filter(f => f.special && f.type === 'plankpile').map(f => [f.id, f.x, f.y, f.tier, f.count || 0, f.held ? 1 : 0]) });   // 特別板材堆（岩漿、玻璃）
+    sp: FURN.filter(f => f.special && f.type === 'plankpile').map(f => [f.id, f.x, f.y, f.tier, f.count || 0, f.held ? 1 : 0]),   // 特別板材堆（岩漿、玻璃）
+    cut: isW5() ? save5().cut : undefined });   // 第五世界：砍倒的樹（長回來的就不在裡面）
 }
 function net4ApplyDay(d) {
   if (!isW4() || !G) return;
@@ -2457,6 +2499,7 @@ function net4ApplyDay(d) {
     if (id === 'pile_sp' + G.day) toast(`✨ 聽說「${zoneName(x, y)}」出現了一片${PLANKS[tier].name}（${RARITY[PLANKS[tier].rar].name}）！`, 'good');
   }
   for (const f of FURN.filter(f => f.special && f.type === 'plankpile' && !f.held && !sp.some(r => r[0] === f.id))) dropSpecialPile4(f);
+  if (isW5() && Array.isArray(d.cut)) applyCut5(d.cut);
 }
 function net4Bind() {
   if (typeof Net === 'undefined') return;
@@ -2464,7 +2507,7 @@ function net4Bind() {
   Net.on('b4req', (d, from) => { if (Net.isHost && isW4() && G && G.b4) Net.sendTo(from, 'b4full', net4Full()); });
   Net.on('b4full', d => { if (Net.guest) net4ApplyFull(d); });
   Net.on('day4', d => { if (Net.guest) net4ApplyDay(d); });
-  Net.on('@start', d => { if (Net.guest && d && d.world === 4) Net.send('b4req', {}); });
+  Net.on('@start', d => { if (Net.guest && d && d.world >= 4) Net.send('b4req', {}); });   // 第四、五世界
   Net.on('whistle4', (d, from) => friendWhistle4(d, from));
 }
 addEventListener('DOMContentLoaded', net4Bind);

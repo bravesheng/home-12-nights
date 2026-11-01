@@ -1164,7 +1164,7 @@ function endVictory3() {
   for (const o of [...G.sockets, ...G.lamps]) if (o.bulb) put('bulb' + o.bulb);
   for (const l of G.lamps) put(lampItemId(l.type));
   nextCarry = { inv, coins: G.coins, flashLv: G.p.flashLv, diff: G.diff, stats: G.stats };
-  $('btnNextWorld').classList.remove('hidden');
+  $('btnNextWorld').textContent = '🏬 走進對面的賣場（第四世界）'; $('btnNextWorld').classList.remove('hidden');
   $('gameover').classList.remove('hidden');
 }
 
