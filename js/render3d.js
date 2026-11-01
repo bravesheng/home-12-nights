@@ -704,6 +704,14 @@ function updateLightmap(dark) {
     const rooms = roomGrid[ty][tx] ? [roomGrid[ty][tx]] : doorGrid[ty][tx] ? doorGrid[ty][tx].rooms : [];
     for (const r of rooms) addLight(p.x, p.y, 2.2, r, [0.55, 0.58, 0.7], 0.2);
   }
+  // 跟朋友一起玩：朋友的手電筒照到的地方（syncFriends 算好的）
+  if (mode !== 'title') for (const L of friendLights) {
+    const col = [toLin(L.col[0]), toLin(L.col[1]), toLin(L.col[2])];
+    if (w4) { addLight4(L, col, L.k); continue; }
+    const tx = Math.floor(L.x), ty = Math.floor(L.y);
+    if (!inMap(tx, ty)) continue;
+    for (const r of roomGrid[ty][tx] ? [roomGrid[ty][tx]] : doorGrid[ty][tx] ? doorGrid[ty][tx].rooms : []) addLight(L.x, L.y, L.r, r, col, L.k);
+  }
   for (let i = 0, n = LMW * LMH; i < n; i++) {
     lmBytes[i * 4] = Math.min(255, lmAcc[i * 3] * 127.5);
     lmBytes[i * 4 + 1] = Math.min(255, lmAcc[i * 3 + 1] * 127.5);
@@ -1762,6 +1770,16 @@ function buildFixture(o) {
     cyl(g, 0.06, 0.15, 0.14, 0, 0.44, 0, metal2, 16, true);
     addBulb(res, g, 0, bh, 0, o.bulb, 0.8);
     addDecor(res, g, bh + 0.02, o.bulb, th);
+  } else if (o.type === 'tv') {
+    // 第四世界的電視（第 6 級以上的燈泡）：黑色矮櫃上一台電視，螢幕亮著燈泡的顏色，就是它的光
+    const black = lm('#1c1d20');
+    const tv = new THREE.Group(); tv.rotation.y = o.face !== undefined ? Math.PI / 2 - o.face : (o.x * 7 + o.y * 3) % 4 * Math.PI / 2; g.add(tv);
+    box(tv, -0.32, 0.32, 0, 0.3, -0.18, 0.18, lm('#3a2e26'));
+    box(tv, -0.06, 0.06, 0.3, 0.36, -0.06, 0.06, black);
+    box(tv, -0.34, 0.34, 0.36, 0.78, -0.03, 0.03, black);
+    const sc = new THREE.Mesh(geo('tvscreen', () => new THREE.PlaneGeometry(0.62, 0.36)), ownBasic({ color: 0xffffff, fog: false, map: tvShowTex(o.bulb) }));
+    sc.position.set(0, 0.57, 0.032); tv.add(sc); res.bulbs.push(sc);
+    const halo = ownSprite(glowTex, 0xffffff); halo.position.set(0, 0.57, 0.15); halo.scale.set(1.3, 0.9, 1); tv.add(halo); res.halos.push(halo);
   } else if (o.type === 'floor') {
     cyl(g, 0.17, 0.18, 0.04, 0, 0, 0, edge);
     cyl(g, 0.018, 0.018, 1.36, 0, 0.04, 0, edge, 6);
@@ -3794,7 +3812,13 @@ function buildItem3D(id) {
     case 'wood': for (let i = 0; i < 3; i++) { const c = cyl(g, 0.035, 0.035, 0.32, 0, 0.035 + (i === 2 ? 0.06 : 0), (i === 2 ? 0 : i - 0.5) * 0.072, lm('#8a5a32'), 8); c.rotation.z = Math.PI / 2; } break;
     case 'charcoal': for (let i = 0; i < 4; i++) sph(g, 0.035, (i - 1.5) * 0.04, 0.03, (i % 2) * 0.03, lm('#222222'), 1.2, 0.8, 1); break;
     default:
-      if (it.kind === 'bulb' || it.kind === 'lamp') {
+      if (it.kind === 'bulb' && isTvTier(it.tier)) {
+        // 電視（第 6 級以上的燈泡）：一台小電視，螢幕是那一級燈泡的顏色
+        box(g, -0.2, 0.2, 0, 0.03, -0.08, 0.08, lm('#2a2c30'));
+        box(g, -0.025, 0.025, 0.03, 0.08, -0.02, 0.02, lm('#2a2c30'));
+        box(g, -0.24, 0.24, 0.08, 0.38, -0.02, 0.02, lm('#1a1b1e'));
+        box(g, -0.22, 0.22, 0.1, 0.36, 0.02, 0.024, ownBasic({ color: bulbCol(it.tier) }), false);
+      } else if (it.kind === 'bulb' || it.kind === 'lamp') {
         // 檯燈（設計師：燈泡不要了，直接就是檯燈）：圓底座、金屬桿、布燈罩，燈泡的顏色看得出等級
         const tier = it.tier || 0, col = it.kind === 'bulb' ? bulbCol(tier) : '#fff4d8', tall = it.lamp === 'floor';
         const H = tall ? 0.62 : 0.3;
@@ -4427,6 +4451,215 @@ function updatePlaceGhost() {
   placeGhost.visible = true;
   placeGhost.scale.set(1, h / 0.9, 1);
   placeGhost.position.set(tt.x + 0.5, floorH(tt.x + 0.5, tt.y + 0.5) + (it.lamp === 'chand' ? 2.3 : h / 2), tt.y + 0.5);
+}
+
+// ====================================================================
+// 朋友（跟朋友一起玩，js/net.js）：寫實的人（不要可愛風），每個朋友一個顏色的 T 恤，配牛仔褲、球鞋，頭上寫名字。
+// 頭借用第三世界乘客的寫實頭（paxHead：畫布畫的臉、立體的頭髮，換成活人的膚色、睜著眼），身體是會動的關節：
+// 走路兩腳一前一後、膝蓋會彎、手臂反著擺；頭先轉向看的方向（最多 65°），身體慢慢跟上；蹲下、坐下、躺下、倒下各有姿勢。
+// 開手電筒時右手舉起來照著看的方向，有一道淡淡的光束，照到的地方光照貼圖也會亮一圈。
+// 位置由 net.js 平滑內插過；只畫同一個世界的朋友；小地圖不畫（第四世界要吹口哨才看得到藍點）
+// ====================================================================
+const FRIEND_HIP = 0.94, FRIEND_PANTS = ['#2f3b52', '#3b3631', '#272b31', '#4a5262'];
+const friendMap = new Map(), friendLights = [];
+const _fv = new THREE.Vector3(), _fv2 = new THREE.Vector3();
+let friendBeamTex = null;
+// 長相（膚色、髮色、褲子）：照名字固定，同一個朋友每次都一樣；男生短髮、女生鮑伯頭
+function friendSpec(f) {
+  const h = hash4(f.name + '|' + f.look), girl = f.look === 'f';
+  const skin = PAX_SKIN[h % PAX_SKIN.length];
+  const hair = (girl ? ['#15110e', '#2b1d14', '#4a3020', '#6b3a22'] : ['#15110e', '#2b1d14', '#3a2616', '#1c1612'])[(h >>> 4) & 3];
+  return { kind: 'friend', sex: girl ? 'f' : 'm', build: girl ? 'f' : 'm', age: 0.1, sc: girl ? 0.95 : 1, skin, deadSkin: skin, hair, style: girl ? 'bob' : 'short', hat: null, pose: 'still',
+    iris: ['#2a1a10', '#3a2414', '#4a3018'][(h >>> 7) % 3], brow: mixHex(hair, '#000000', 0.1), lips: mixHex(skin, girl ? '#b0505a' : '#8a4a44', girl ? 0.45 : 0.35),
+    hd: PAX_HEADS[girl ? 'f' : 'm'], pants: FRIEND_PANTS[(h >>> 9) & 3] };
+}
+const LATHE = (key, pts, seg) => geo(key, () => new THREE.LatheGeometry(pts.map(([x, y]) => new THREE.Vector2(x, y)), seg));
+function buildFriend(f) {
+  const p = friendSpec(f), s0 = seed;   // 畫臉會用到亂數：用完放回去，第三世界的乘客才不會因為朋友來了就變臉
+  const g = new THREE.Group(); scene.add(g);
+  const body = new THREE.Group(); body.scale.setScalar(p.sc); g.add(body);
+  const r = { g, body, p, id: f.id, look: f.look, color: f.color, name: f.name, yaw: faceRot(f.face || 0), ph: 0, walkK: 0, crK: 0, init: false };
+  const sh = { shade: 0.55 };
+  const shirt = withDetail(ownLM(f.color || '#8a8a8a', sh), 'cotton', 5, 0.9);
+  const jeans = withDetail(ownLM(p.pants, sh), 'cotton', 7, 1.1);
+  const skin = withDetail(ownLM(p.skin, sh), 'skin', 8, 1.2);
+  const shoe = ownLM('#2b2420', { shade: 0.5 }), sole = ownLM('#dcd6cb', { shade: 0.5 }), belt = ownLM('#1d1916', { shade: 0.5 }), metal = ownLM('#2a2a2e', { shade: 0.5 }), rim = ownLM('#5a5b60', { shade: 0.5 });
+  // 腰：大腿和上半身都從這裡出發
+  const hips = new THREE.Group(); hips.position.y = FRIEND_HIP; body.add(hips); r.hips = hips;
+  const pelvis = new THREE.Mesh(LATHE('frPelvis', [[0.001, -0.15], [0.07, -0.145], [0.13, -0.11], [0.158, -0.05], [0.16, 0.02], [0.155, 0.06]], 18), jeans);
+  pelvis.scale.set(1.1, 1, 0.7); pelvis.castShadow = true; hips.add(pelvis);
+  cyl(hips, 0.158, 0.16, 0.035, 0, 0.022, 0, belt, 18, true).scale.set(1.1, 1, 0.7);   // 皮帶
+  // 上半身（蹲下、跑步時往前彎）：T 恤、肩膀
+  const torso = new THREE.Group(); hips.add(torso); r.torso = torso;
+  const tm = new THREE.Group(); torso.add(tm);
+  const chest = new THREE.Mesh(LATHE('frTorso', [[0.152, -0.02], [0.148, 0.06], [0.142, 0.13], [0.152, 0.24], [0.17, 0.36], [0.164, 0.43], [0.14, 0.49], [0.1, 0.53], [0.06, 0.555], [0.001, 0.565]], 20), shirt);
+  chest.scale.set(1.1, 1, 0.64); tm.add(chest);
+  for (const s of [-1, 1]) sph(tm, 0.056, s * 0.178, 0.462, 0, shirt, 1.05, 0.9, 1, 12);   // 肩膀（圓圓的，接到袖子）
+  mergeByMat(tm);
+  // 頭：脖子底下 → 轉頭（yaw）→ 抬頭低頭（pose）
+  const neck = new THREE.Group(); neck.position.set(0, 0.548, 0.004); torso.add(neck);
+  r.headYaw = new THREE.Group(); neck.add(r.headYaw);
+  r.headPose = new THREE.Group(); r.headYaw.add(r.headPose);
+  const px = { kind: 'friend', p, g, skins: [], tex: {}, state: 'dead' };
+  paxHead(r.headPose, p, px);
+  paxMerge(r.headPose, px.skins);
+  paxState(px, 'alive');
+  r.px = px;
+  // 手臂：肩膀 → 手肘 → 手（arms[0] 是右手，拿著手電筒）
+  r.arms = [-1, 1].map(s => {
+    const shp = new THREE.Group(); shp.position.set(s * 0.205, 0.47, 0); shp.rotation.order = 'YXZ'; torso.add(shp);
+    const ua = new THREE.Group(); shp.add(ua);
+    taper(ua, [0, 0.025, 0], [0, -0.155, 0], 0.058, 0.054, shirt, 12);   // 短袖
+    taper(ua, [0, -0.13, 0], [0, -0.285, 0], 0.046, 0.039, skin, 10);
+    const el = new THREE.Group(); el.position.set(0, -0.285, 0); shp.add(el);
+    const fa = new THREE.Group(); el.add(fa);
+    taper(fa, [0, 0.01, 0], [0, -0.24, 0], 0.039, 0.03, skin, 10);
+    sph(fa, 0.03, 0, -0.285, 0.006, skin, 1.1, 1.85, 0.72, 10);   // 手掌
+    mergeByMat(fa);
+    return { sh: shp, el, fa };
+  });
+  const hand = r.arms[0].fa;
+  cyl(hand, 0.017, 0.015, 0.15, 0, -0.39, 0.012, metal, 10);   // 手電筒
+  cyl(hand, 0.022, 0.018, 0.03, 0, -0.42, 0.012, rim, 10);
+  r.tip = new THREE.Object3D(); r.tip.position.set(0, -0.43, 0.012); hand.add(r.tip);
+  r.lens = ownSprite(glowTex, 0xfff0d0); r.lens.scale.setScalar(0.22); r.tip.add(r.lens);
+  // 腳：大腿 → 膝蓋 → 小腿 → 腳踝和球鞋（腳踝會轉回來，腳底板才會平平地踩在地上；legs[0] 是右腳）
+  r.legs = [-1, 1].map(s => {
+    const hp = new THREE.Group(); hp.position.set(s * 0.09, -0.04, 0); hips.add(hp);
+    taper(hp, [0, 0.02, 0], [0, -0.43, 0], 0.079, 0.057, jeans, 12);
+    const kn = new THREE.Group(); kn.position.set(0, -0.43, 0); hp.add(kn);
+    taper(kn, [0, 0.02, 0], [0, -0.385, 0], 0.056, 0.044, jeans, 12);
+    const an = new THREE.Group(); an.position.set(0, -0.385, 0); kn.add(an);
+    box(an, -0.048, 0.048, -0.07, 0, -0.06, 0.17, shoe);
+    box(an, -0.051, 0.051, -0.09, -0.067, -0.065, 0.178, sole);   // 白色的鞋底
+    return { hp, kn, an };
+  });
+  // 手電筒的光束：放在場景裡（不跟著手臂轉），每一幀照著看的方向擺；尖端亮、越遠越淡
+  if (!friendBeamTex) friendBeamTex = canvasTex(8, 128, (c, w, h) => { const gr = c.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.3, 'rgba(255,255,255,.4)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = gr; c.fillRect(0, 0, w, h); });
+  r.beam = new THREE.Mesh(geo('frBeam', () => new THREE.ConeGeometry(1.25, 5.5, 20, 1, true).translate(0, -2.75, 0).rotateX(-Math.PI / 2)),
+    ownBasic({ map: friendBeamTex, color: 0xfff0d8, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+  r.beam.renderOrder = 4; r.beam.visible = false; scene.add(r.beam);
+  seed = s0;
+  return r;
+}
+// 頭上的名字（倒下時前面加 💤）
+function friendLabel(r, text, color) {
+  if (r.label) { r.g.remove(r.label); r.label.material.map.dispose(); r.label.material.dispose(); }
+  const font = n => `bold ${n}px "PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif`;
+  const tex = canvasTex(256, 64, (c, w) => {
+    c.font = font(34);
+    const tw = c.measureText(text).width;
+    if (tw > 236) c.font = font(Math.floor(34 * 236 / tw));
+    c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round';
+    c.lineWidth = 7; c.strokeStyle = 'rgba(0,0,0,.8)'; c.strokeText(text, w / 2, 27);
+    c.fillStyle = '#ffffff'; c.fillText(text, w / 2, 27);
+    c.fillStyle = color || '#888888'; c.fillRect(w / 2 - 28, 50, 56, 7);   // 衣服的顏色
+  });
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  s.scale.set(0.84, 0.21, 1); s.renderOrder = 6;
+  r.g.add(s); r.label = s; r.labelKey = text;
+}
+function disposeFriend(r) {
+  disposeGroup(r.g);
+  for (const t of (r.px && r.px.headMat && r.px.headMat.userData.maps) || []) t.dispose();
+  if (r.label) { r.label.material.map.dispose(); r.label.material.dispose(); }
+  scene.remove(r.beam); r.beam.material.dispose();
+}
+function poseFriend(f, r, t, dt, darkK) {
+  const p = r.p, fh = floorH(f.x, f.y), lying = f.down || f.pose === 'lie', sit = !f.down && f.pose === 'sit';
+  const dx = r.init ? f.x - r.lx : 0, dy = r.init ? f.y - r.ly : 0, dist = Math.hypot(dx, dy);
+  r.lx = f.x; r.ly = f.y; r.init = true;
+  const sp = dist > 1 ? 0 : dist / Math.max(dt, 1e-3);   // 瞬間移動（爬梯子、醒過來）不算走路
+  r.walkK += ((lying || sit ? 0 : clamp(sp / 3.2, 0, 1.35)) - r.walkK) * Math.min(1, dt * 8);
+  if (dist < 1) r.ph += dist * 4.4;
+  r.crK += ((f.crouch && !lying && !sit ? 1 : 0) - r.crK) * Math.min(1, dt * 10);
+  // 頭先轉、身體慢慢跟上（走路時跟得快）；頭最多轉 65°
+  const target = faceRot(f.face), HEAD = 1.13;
+  let diff = wrapA(target - r.yaw);
+  if (Math.abs(diff) > HEAD) { r.yaw = wrapA(r.yaw + diff - Math.sign(diff) * HEAD); diff = Math.sign(diff) * HEAD; }
+  r.yaw = wrapA(r.yaw + diff * Math.min(1, dt * (r.walkK > 0.15 || lying || sit ? 9 : 2.2)));
+  diff = wrapA(target - r.yaw);
+  const A = 0.42 * Math.min(1, r.walkK), run = clamp(r.walkK - 1, 0, 0.35) * 1.4, cr = r.crK, armR = r.arms[0];
+  let y = fh + (f.z || 0), lean = 0;
+  r.body.rotation.set(0, 0, 0); r.body.position.set(0, 0, 0);
+  if (lying) {
+    // 躺著（倒下是躺在地上）：臉朝上，頭在玩家的位置，身體往面向的方向伸出去
+    r.yaw = target; diff = 0;
+    r.body.rotation.x = -Math.PI / 2; r.body.position.set(0, 0.12, 1.6 * p.sc);
+    for (const L of r.legs) { L.hp.rotation.x = 0; L.kn.rotation.x = 0.06; L.an.rotation.x = 0.3; }
+    r.arms.forEach((a, i) => { a.sh.rotation.set(0.06, 0, (i ? 1 : -1) * 0.12); a.el.rotation.x = -0.15; });
+    r.headYaw.rotation.y = f.down ? 0.45 : 0; r.headPose.rotation.set(0, 0, 0);
+    if (f.down) y = fh;
+  } else if (sit) {
+    // 坐著：大腿往前平放、小腿垂下來，手放在腿上
+    y += 0.07 - FRIEND_HIP * p.sc;
+    for (const L of r.legs) { L.hp.rotation.x = -Math.PI / 2 + 0.05; L.kn.rotation.x = Math.PI / 2 - 0.05; L.an.rotation.x = 0; }
+    r.arms.forEach((a, i) => { a.sh.rotation.set(-0.35, 0, (i ? 1 : -1) * 0.1); a.el.rotation.x = -0.95; });
+    lean = -0.05;
+  } else {
+    // 走路：兩腳一前一後（跑步步伐大一點）；蹲下：屁股往下、膝蓋往前，腳底板還是平的
+    y += Math.abs(Math.cos(r.ph)) * 0.025 * r.walkK - cr * 0.31 * p.sc;
+    r.legs.forEach((L, i) => {
+      const ph = r.ph + (i ? Math.PI : 0), s = Math.sin(ph);
+      L.hp.rotation.x = -s * A * (1 + run) - cr * 1.05;
+      L.kn.rotation.x = Math.max(0, Math.sin(ph + 1.9)) * (0.7 + run * 0.6) * Math.min(1, r.walkK) + cr * 1.75 + 0.04;
+      L.an.rotation.x = -(L.hp.rotation.x + L.kn.rotation.x) * (0.75 + 0.25 * cr);
+    });
+    lean = cr * 0.3 + r.walkK * 0.04 + run * 0.12;
+    r.arms.forEach((a, i) => {
+      const s = Math.sin(r.ph + (i ? Math.PI : 0));
+      a.sh.rotation.set(s * A * 0.8, 0, (i ? 1 : -1) * 0.07);   // 跟同一邊的腳反著擺
+      a.el.rotation.x = -0.18 - 0.45 * Math.min(1, r.walkK) - cr * 0.4;
+    });
+  }
+  r.torso.rotation.x = lean;
+  // 手電筒：右手舉起來照著看的方向（上下也跟著看的方向）
+  const flash = f.flash && !lying;
+  if (flash) { armR.sh.rotation.set(-Math.PI / 2 - clamp(f.pitch, -1.1, 1.1) * 0.95 - lean, diff * 0.9, 0); armR.el.rotation.x = -0.05; }
+  // 頭：轉向看的方向、抬頭低頭（身體往前彎時頭抬回來）
+  if (!lying) { r.headYaw.rotation.y = diff; r.headPose.rotation.set(clamp(-f.pitch * 0.75, -0.6, 0.5) - lean * 0.7, 0, 0); }
+  r.g.position.set(f.x, y, f.y); r.g.rotation.y = r.yaw;
+  const key = f.down ? '💤 ' + f.name : f.name;
+  if (key !== r.labelKey) friendLabel(r, key, f.color);
+  r.label.position.set(0, lying ? 0.55 : (FRIEND_HIP + 0.93 - cr * 0.27 - (sit ? 0.42 : 0)) * p.sc, 0);
+  r.lens.visible = flash; r.beam.visible = flash;
+  if (!flash) return;
+  r.g.updateMatrixWorld(true);
+  r.tip.getWorldPosition(_fv);
+  const cp = Math.cos(f.pitch), dir = _fv2.set(Math.cos(f.face) * cp, Math.sin(f.pitch), Math.sin(f.face) * cp);
+  r.beam.position.copy(_fv); r.beam.lookAt(_fv.x + dir.x, _fv.y + dir.y, _fv.z + dir.z);
+  const ft = FLASH_TIERS[clamp(f.flashLv || 1, 1, FLASH_MAX)], col = ft.beam ? ft.beam[0] : [255, 240, 216];   // 第四世界的手電筒 4～7 級有顏色
+  r.beam.material.color.setRGB(col[0] / 255, col[1] / 255, col[2] / 255, SRGB); r.lens.material.color.copy(r.beam.material.color);
+  r.beam.material.opacity = (0.025 + 0.12 * darkK) * (0.93 + 0.07 * Math.sin(t * 13 + r.ph));
+  // 照到的地方（往下照：照在腳前面的地上；往前照：牆前面一點）在光照貼圖上亮一圈
+  let d = Math.min(castRay(f.x, f.y, f.face, 6.5) - 0.35, 3.4);
+  if (f.pitch < -0.12) d = Math.min(d, 1.35 / Math.tan(-f.pitch));
+  if (f.pitch < 0.6 && d > 0.3) friendLights.push({ x: f.x + Math.cos(f.face) * d, y: f.y + Math.sin(f.face) * d, r: 2.3, col, k: 0.5 });
+}
+function syncFriends(t, dt, dark) {
+  friendLights.length = 0;
+  const active = typeof Net !== 'undefined' && Net.active;
+  const show = active && !!G && mode !== 'title' && mode !== 'cutscene';
+  const list = active ? Net.friends() : [], seen = new Set(), darkK = clamp(dark / NIGHT_DARK, 0, 1);
+  if (show) for (const f of list) {
+    if (!f.ingame || f.world !== curWorld) continue;
+    let r = friendMap.get(f.id);
+    if (r && (r.look !== f.look || r.color !== f.color || r.name !== f.name)) { disposeFriend(r); friendMap.delete(f.id); r = null; }
+    if (!r) { r = buildFriend(f); friendMap.set(f.id, r); }
+    seen.add(f.id);
+    r.g.visible = true;
+    poseFriend(f, r, t, dt, darkK);
+  }
+  for (const [id, r] of friendMap) {
+    if (seen.has(id)) continue;
+    if (active && list.some(f => f.id === id)) { r.g.visible = false; r.beam.visible = false; r.init = false; }   // 不在同一個世界、回到主選單、過場動畫：先藏起來
+    else { disposeFriend(r); friendMap.delete(id); }   // 離開房間了
+  }
+}
+// 試玩測試用：畫面上的朋友
+function friendStats() {
+  return [...friendMap.values()].map(r => { let n = 0; r.g.traverse(o => { if (o.isMesh) n++; }); return { id: r.id, name: r.name, visible: r.g.visible, x: r.g.position.x, y: r.g.position.z, h: r.g.position.y, beam: r.beam.visible, meshes: n }; });
 }
 
 // ====================================================================
@@ -6249,7 +6482,7 @@ function updateTrainFurniture(t) {
 // 自己蓋的牆、門、屋頂、地上的板子、板材堆；拿著東西時前面的預覽
 // ====================================================================
 let store4Tex = null, plankMats = null, panel4 = null, panel4Info = [], grass4Mesh = null, ghostMesh4 = null, handPlank4 = null;
-const wall4Map = new Map(), roof4Map = new Map(), loose4Map = new Map();
+const wall4Map = new Map(), roof4Map = new Map(), loose4Map = new Map(), ramp4Map = new Map();
 let build4Ver = -1;
 // 賣場的貼圖（全部用程式畫）
 function makeStoreTextures() {
@@ -6384,8 +6617,9 @@ function buildWall4(w) {
   // 斜放的牆（free）：外層放在中心、照角度轉，裡面跟水平的牆（h）一樣從 0 到 1 公尺
   const g0 = new THREE.Group(); scene.add(g0);
   const g = new THREE.Group(); g0.add(g);
-  if (w.free) { g0.position.set(w.cx, 0, w.cy); g0.rotation.y = -w.ang; g.position.x = -0.5; } else g0.position.set(w.x, 0, w.y);
-  const H = ROOF4_H, mat = plankMats[w.tier], edge = lm(PLANK_EDGE[w.tier]);
+  if (w.free) { g0.position.set(w.cx, w.lv || 0, w.cy); g0.rotation.y = -w.ang; g.position.x = -0.5; } else g0.position.set(w.x, w.lv || 0, w.y);
+  // 一片 1×1 公尺的正方形板子（門是 2 公尺高），整片放在第 lv 公尺的高度（下面的被打破就往下掉，見 syncBuild4）
+  const H = w.door ? 2 : 1, mat = plankMats[w.tier], edge = lm(PLANK_EDGE[w.tier]);
   const res = { g: g0, w };
   const piv = new THREE.Group(); g.add(piv); res.piv = piv;
   const hz = w.free || w.o === 'h';
@@ -6396,16 +6630,19 @@ function buildWall4(w) {
   if (w.door) {
     // 木門：門框 + 可以轉的門板（門把是黃銅）
     const frame = (x0, x1, y0, y1) => (hz ? box(g, x0, x1, y0, y1, -0.07, 0.07, edge) : box(g, -0.07, 0.07, y0, y1, x0, x1, edge));
-    frame(0.0, 0.06, 0, H); frame(0.94, 1.0, 0, H); frame(0.0, 1.0, 2.2, H);
+    frame(0.0, 0.06, 0, H); frame(0.94, 1.0, 0, H); frame(0.0, 1.0, H - 0.06, H);
     if (hz) piv.position.x = 0.06; else piv.position.z = 0.06;
-    const dp = hz ? box(piv, 0, 0.88, 0, 2.18, -0.035, 0.035, mat) : box(piv, -0.035, 0.035, 0, 2.18, 0, 0.88, mat);
+    const dp = hz ? box(piv, 0, 0.88, 0, H - 0.07, -0.035, 0.035, mat) : box(piv, -0.035, 0.035, 0, H - 0.07, 0, 0.88, mat);
     const kn = lm('#d6a84a');
     for (const s of [-1, 1]) sph(piv, 0.03, hz ? 0.78 : s * 0.06, 1.0, hz ? s * 0.06 : 0.78, kn);
     res.panel = dp;
   } else {
-    panel(0.02, 0.98, 0, H);
-    // 上下的收邊條
-    if (w.tier !== 5) { if (hz) { box(piv, 0.02, 0.98, H - 0.05, H, -0.055, 0.055, edge); box(piv, 0.02, 0.98, 0, 0.05, -0.055, 0.055, edge); } else { box(piv, -0.055, 0.055, H - 0.05, H, 0.02, 0.98, edge); box(piv, -0.055, 0.055, 0, 0.05, 0.02, 0.98, edge); } }
+    panel(0.02, 0.98, 0.01, H - 0.01);
+    // 四邊的收邊條（看得出是一片一片的正方形）
+    if (w.tier !== 5) {
+      const bar = (x0, x1, y0, y1) => (hz ? box(piv, x0, x1, y0, y1, -0.055, 0.055, edge, false) : box(piv, -0.055, 0.055, y0, y1, x0, x1, edge, false));
+      bar(0.02, 0.98, H - 0.05, H - 0.01); bar(0.02, 0.98, 0.01, 0.05); bar(0.02, 0.06, 0.01, H - 0.01); bar(0.94, 0.98, 0.01, H - 0.01);
+    }
     else {   // 玻璃：細細的鋁框
       const al = lm('#c8ccd0');
       if (hz) { box(piv, 0.0, 0.03, 0, H, -0.04, 0.04, al); box(piv, 0.97, 1.0, 0, H, -0.04, 0.04, al); box(piv, 0, 1, H - 0.04, H, -0.04, 0.04, al); box(piv, 0, 1, 0, 0.04, -0.04, 0.04, al); }
@@ -6416,13 +6653,13 @@ function buildWall4(w) {
   if (w.tier !== 5) {
     const cm = ownBasic({ map: store4Tex.crack, transparent: true, opacity: 0, depthWrite: false });
     for (const s of [-1, 1]) {
-      const pl = new THREE.Mesh(geo('crack4', () => new THREE.PlaneGeometry(0.9, H * 0.9)), cm);
+      const pl = new THREE.Mesh(geo('crack4' + H, () => new THREE.PlaneGeometry(0.9, H * 0.9)), cm);
       if (hz) { pl.position.set(0.5, H * 0.48, s * 0.056); pl.rotation.y = s > 0 ? 0 : Math.PI; } else { pl.position.set(s * 0.056, H * 0.48, 0.5); pl.rotation.y = s > 0 ? Math.PI / 2 : -Math.PI / 2; }
       piv.add(pl);
     }
     res.crack = cm;
   }
-  res.fire = ownSprite(glowTex, 0xff7a20); res.fire.scale.set(1.4, 2.6, 1); res.fire.position.set(hz ? 0.5 : 0, 1.3, hz ? 0 : 0.5); res.fire.visible = false; g.add(res.fire);
+  res.fire = ownSprite(glowTex, 0xff7a20); res.fire.scale.set(1.4, 1.4, 1); res.fire.position.set(hz ? 0.5 : 0, 0.5, hz ? 0 : 0.5); res.fire.visible = false; g.add(res.fire);
   return res;
 }
 function buildRoof4(r) {
@@ -6433,13 +6670,24 @@ function buildRoof4(r) {
   box(g, -0.5, 0.5, 0.04, 0.06, -0.02, 0.02, lm(PLANK_EDGE[r.tier]));
   return { g, r };
 }
+// 斜坡：一片板子斜 45° 放在一格裡，從 lv 公尺往 dir 的方向升高 1 公尺（可以走上去）
+function buildRamp4(rp) {
+  const g = new THREE.Group(); g.position.set(rp.x + 0.5, rp.lv + 0.5, rp.y + 0.5); scene.add(g);
+  g.rotation.y = { e: -Math.PI / 2, w: Math.PI / 2, s: Math.PI, n: 0 }[rp.dir];
+  const b = new THREE.Group(); b.rotation.x = Math.PI / 4; g.add(b);   // 往 -z（dir 的方向）翹起來
+  const L = Math.SQRT2, mat = plankMats[rp.tier], edge = lm(PLANK_EDGE[rp.tier]);
+  box(b, -0.48, 0.48, -0.03, 0.02, -L / 2, L / 2, mat, rp.tier !== 5);
+  for (const x of [-0.48, 0.44]) box(b, x, x + 0.04, 0.02, 0.04, -L / 2, L / 2, edge, false);
+  for (let i = 1; i < 5; i++) box(b, -0.45, 0.45, 0.02, 0.035, -L / 2 + i * L / 5 - 0.015, -L / 2 + i * L / 5 + 0.015, edge, false);   // 防滑條，看得出是可以走的斜坡
+  return { g };
+}
 // 地上的板子（設計師：木板就是木板）：一片真的大小的板子平躺在地上（1 公尺寬、2.6 公尺長），旁邊是稀有度顏色的收邊
 function buildLoose4(l) {
   const g = new THREE.Group(); g.position.set(l.x, 0, l.y); g.rotation.y = l.a || 0; scene.add(g);
-  const L = ROOF4_H * 0.6;
-  box(g, -L / 2, L / 2, 0, 0.035, -0.32, 0.32, plankMats[l.tier], false);
-  box(g, -L / 2, L / 2, 0.035, 0.04, -0.33, -0.3, lm(RARITY[PLANKS[l.tier].rar].color), false);
-  box(g, -L / 2, L / 2, 0.035, 0.04, 0.3, 0.33, lm(RARITY[PLANKS[l.tier].rar].color), false);
+  const L = l.door ? 1.4 : 0.7, Wd = 0.7;   // 正方形的板子（門是長方形），縮小一點平躺在地上
+  box(g, -L / 2, L / 2, 0, 0.035, -Wd / 2, Wd / 2, plankMats[l.tier], false);
+  box(g, -L / 2, L / 2, 0.035, 0.04, -Wd / 2 - 0.01, -Wd / 2 + 0.02, lm(RARITY[PLANKS[l.tier].rar].color), false);
+  box(g, -L / 2, L / 2, 0.035, 0.04, Wd / 2 - 0.02, Wd / 2 + 0.01, lm(RARITY[PLANKS[l.tier].rar].color), false);
   if (l.door) sph(g, 0.03, L / 2 - 0.2, 0.06, 0.2, lm('#d6a84a'));
   return { g };
 }
@@ -6454,12 +6702,15 @@ function syncBuild4(t) {
   };
   sync(wall4Map, G.b4.list, buildWall4);
   sync(roof4Map, [...G.b4.roofs.values()], buildRoof4);
+  sync(ramp4Map, [...G.b4.ramps.values()], buildRamp4);
   sync(loose4Map, G.loose4, buildLoose4);
   for (const [w, r] of wall4Map) {
     const k = w.tier === 5 ? 1 : clamp(w.hp / PLANKS[w.tier].hp, 0, 1);
     if (r.crack) r.crack.opacity = k < 0.85 ? Math.min(0.9, (1 - k) * 1.2) : 0;
     const sh = w.hitT > 0 ? (Math.random() - 0.5) * 0.03 : 0;
-    if (w.free) r.g.position.set(w.cx + sh, 0, w.cy); else r.g.position.set(w.x + (w.o === 'v' ? sh : 0), 0, w.y + (w.o === 'h' ? sh : 0));
+    // 下面的板子被打破時，上面的慢慢掉下來（lv 變小）
+    r.y = r.y === undefined ? w.lv : r.y > w.lv ? Math.max(w.lv, r.y - 0.15) : w.lv;
+    if (w.free) r.g.position.set(w.cx + sh, r.y, w.cy); else r.g.position.set(w.x + (w.o === 'v' ? sh : 0), r.y, w.y + (w.o === 'h' ? sh : 0));
     if (w.door) { const a = w.open ? -1.45 : 0; r.piv.rotation.y += (a - r.piv.rotation.y) * 0.25; }
     r.fire.visible = w.burn > 0;
     if (r.fire.visible) r.fire.material.opacity = 0.5 + 0.4 * Math.random();
@@ -6483,7 +6734,9 @@ function syncWhistle4(t) {
     if (!d) return;
     s.position.set(d.x, d.h, d.y);
     s.material.color.setHex(d.red ? 0xff2a2a : 0x3a8aff);
-    s.scale.setScalar(0.05 * (1 + 0.15 * Math.sin(t * 8 + i)));
+    // 點越大代表離你越近（設計師：紅、藍點越大代表距離越近）：3 公尺內最大，越遠越小
+    const dist = Math.hypot(d.x - camera.position.x, d.y - camera.position.z);
+    s.scale.setScalar((0.022 + 0.09 * clamp(1 - (dist - 3) / 38, 0, 1)) * (1 + 0.12 * Math.sin(t * 8 + i)));
     s.material.opacity = fade;
   });
 }
@@ -6500,16 +6753,20 @@ function syncGhost4() {
   if (!g) return;
   const col = g.ok ? 0x60ff80 : 0xff5050;
   ghostMesh4.box.material.color.setHex(col); ghostMesh4.edge.material.color.setHex(g.ok ? 0xb0ffc0 : 0xff9a9a);
-  const H = ROOF4_H;
   ghostMesh4.rotation.set(0, 0, 0, 'YXZ');
   if (g.kind === 'wall' || g.kind === 'free') {
-    // 牆：沿著牆的方向 0.96 公尺長；斜靠的話從底部倒下去（中心跟著移）
+    // 一片正方形的板子（門 2 公尺高），疊在第 lv 公尺；斜靠的話從底部倒下去（中心跟著移）
+    const H = G.hand.door ? 2 : 1, y0 = g.lv || 0;
     const th = g.kind === 'free' ? -g.ang : g.o === 'h' ? 0 : -Math.PI / 2, lean = (g.lean || 0) * Math.PI / 180;
     const cx = g.kind === 'free' ? g.cx : g.o === 'h' ? g.x + 0.5 : g.x, cz = g.kind === 'free' ? g.cy : g.o === 'h' ? g.y : g.y + 0.5;
     ghostMesh4.rotation.set(lean, th, 0, 'YXZ');
-    ghostMesh4.position.set(cx + Math.sin(th) * Math.sin(lean) * H / 2, Math.cos(lean) * H / 2, cz + Math.cos(th) * Math.sin(lean) * H / 2);
+    ghostMesh4.position.set(cx + Math.sin(th) * Math.sin(lean) * H / 2, y0 + Math.cos(lean) * H / 2, cz + Math.cos(th) * Math.sin(lean) * H / 2);
     ghostMesh4.scale.set(0.96, H, 0.1);
-  } else if (g.kind === 'roof') { ghostMesh4.position.set(g.x + 0.5, H, g.y + 0.5); ghostMesh4.scale.set(1, 0.08, 1); if (g.tilt) ghostMesh4.rotation[g.tax === 'z' ? 'z' : 'x'] = g.tilt * Math.PI / 180; }
+  } else if (g.kind === 'ramp') {
+    // 斜坡：一格裡斜 45°，往 dir 的方向升高
+    ghostMesh4.rotation.set(Math.PI / 4, { e: -Math.PI / 2, w: Math.PI / 2, s: Math.PI, n: 0 }[g.dir], 0, 'YXZ');
+    ghostMesh4.position.set(g.x + 0.5, g.lv + 0.5, g.y + 0.5); ghostMesh4.scale.set(0.96, 0.06, Math.SQRT2);
+  } else if (g.kind === 'roof') { ghostMesh4.position.set(g.x + 0.5, ROOF4_H, g.y + 0.5); ghostMesh4.scale.set(1, 0.08, 1); if (g.tilt) ghostMesh4.rotation[g.tax === 'z' ? 'z' : 'x'] = g.tilt * Math.PI / 180; }
   else { const fh = G.hand.f.solid === false ? 0.05 : 1.0; ghostMesh4.position.set(g.x + g.w / 2, fh / 2, g.y + g.h / 2); ghostMesh4.scale.set(g.w, fh, g.h); ghostMesh4.rotation.y = -(g.yaw || 0) * Math.PI / 180; }
 }
 // 手上拿的板子（畫面右下角）
@@ -6523,7 +6780,7 @@ function syncHand4() {
   if (handPlank4.userData.key !== key) {
     handPlank4.userData.key = key;
     while (handPlank4.children.length) { const c = handPlank4.children[0]; handPlank4.remove(c); }
-    if (h && h.k === 'plank') { if (!plankMats) makePlankMats(); box(handPlank4, -0.16, 0.16, -0.32, 0.32, -0.015, 0.015, plankMats[h.tier], false); }
+    if (h && h.k === 'plank') { if (!plankMats) makePlankMats(); const hh = h.door ? 0.4 : 0.2; box(handPlank4, -0.2, 0.2, -hh, hh, -0.015, 0.015, plankMats[h.tier], false); }   // 正方形的板子（門是長的）
     else if (h) box(handPlank4, -0.14, 0.14, -0.1, 0.1, -0.1, 0.1, lm('#b08a5a'), false);
   }
   handPlank4.visible = !!h;
@@ -6664,22 +6921,14 @@ function store4Furniture(f, g, r, W, D, side, len, cabinet) {
       r.top = tv + sh;
       break;
     }
-    case 'tvwall4': {
-      // 電器區的電視展示牆（設計師：要有電視）：黑色的展示櫃上一排三台大電視，白天開著（展示畫面），晚上停電就黑掉
+    case 'tvshelf4': {
+      // 電器區的電視展示台：黑色的兩層台子，上面擺的電視是真的東西（world4.js 的 shelfSlots4），後面一塊「電視・特價中」的看板
       const cab = lm('#2a2c30'), top = lm('#3a3c40');
-      F(0.02, len - 0.02, 0, 0.75, dep - 0.6, dep - 0.03, cab); F(0, len, 0.75, 0.78, dep - 0.62, dep, top);
-      F(0.02, len - 0.02, 0.78, 2.6, dep - 0.08, dep - 0.03, lm('#1e2024'));
-      r.screens = [];
-      const n = 3, sw = (len - 0.3) / n;
-      for (let i = 0; i < n; i++) {
-        const u0 = 0.15 + i * sw + 0.06, u1 = u0 + sw - 0.12, h = (u1 - u0) * 0.5625, y0 = 0.9 + (i % 2) * 0.05;
-        F(u0 - 0.03, u1 + 0.03, y0 - 0.03, y0 + h + 0.03, dep - 0.2, dep - 0.12, black);
-        F((u0 + u1) / 2 - 0.03, (u0 + u1) / 2 + 0.03, 0.78, y0, dep - 0.16, dep - 0.14, black, false);
-        const sc = F(u0, u1, y0, y0 + h, dep - 0.205, dep - 0.2, ownBasic({ map: tvShowTex(i), color: 0xffffff, fog: false }), false);
-        sc.userData.keep = true; r.screens.push(sc);
-      }
-      F(0.3, len - 0.3, 2.25, 2.55, dep - 0.13, dep - 0.08, ownBasic({ map: sign4Tex('電視・特價中', '#4ab0e8') }), false).userData.keep = true;
-      r.top = 0.78;
+      F(0.02, len - 0.02, 0, TVSHELF4_LEVELS[0], 0.15, dep - 0.15, cab);
+      F(0, len, TVSHELF4_LEVELS[0], TVSHELF4_LEVELS[0] + 0.03, 0.1, dep - 0.1, top);
+      F(0.3, len - 0.3, 1.9, 2.2, dep / 2 - 0.02, dep / 2 + 0.02, ownBasic({ map: sign4Tex('電視・特價中', '#4ab0e8') }), false).userData.keep = true;
+      for (const u of [0.25, len - 0.25]) F(u - 0.02, u + 0.02, TVSHELF4_LEVELS[0], 1.9, dep / 2 - 0.02, dep / 2 + 0.02, top, false);
+      r.top = TVSHELF4_LEVELS[0] + 0.03;
       break;
     }
     case 'bookcase4': {
@@ -6980,16 +7229,27 @@ function store4Furniture(f, g, r, W, D, side, len, cabinet) {
             for (let k = 0; k < n; k++) F(ub + 0.03, ue - 0.03 - (k % 2) * 0.04, y + 0.13 + k * 0.045, y + 0.17 + k * 0.045, 0.2 + (k % 3) * 0.02, dep - 0.2, m, k === n - 1);
             continue;
           }
-          // 第二層前面 1 公尺留給真的東西；其他地方堆紙箱
+          // 第二層前面 1 公尺留給真的東西；其他地方疊幾個紙箱（設計師：紙箱少一點），最上層是空的（爬上來站的地方）
+          if (lv === RACK4_LEVELS.length - 1) continue;
           const v0 = lv === 1 ? 1.0 : 0.18;
           let u = ub;
           while (u < ue - 0.3) {
-            const bw = Math.min(ue - u, 0.45 + R() * 0.6), bh = 0.3 + R() * (lv === RACK4_LEVELS.length - 1 ? 0.3 : 0.7), bd = Math.min(dep - 0.2 - v0, 0.45 + R() * (dep - 0.75));
-            if (R() < 0.85) F(u, u + bw - 0.03, y + 0.13, y + 0.13 + bh, v0, v0 + bd, cb);
+            const bw = Math.min(ue - u, 0.45 + R() * 0.6), bh = 0.3 + R() * 0.6, bd = Math.min(dep - 0.2 - v0, 0.45 + R() * (dep - 0.75));
+            if (R() < 0.4) F(u, u + bw - 0.03, y + 0.13, y + 0.13 + bh, v0, v0 + bd, cb);
             u += bw;
           }
         }
       });
+      // 貨架頂上鋪一層木板（爬上來站的地方，高 RACK4_H）
+      F(0.05, len - 0.05, H - 0.04, H, 0.08, dep - 0.08, ply);
+      // 正面中間一把靠在貨架上的長鋁梯（可以爬：world4.js 的 ladders4），從地上一直到貨架頂
+      const al = lm('#c8ccd0'), foot = lm('#2a2a2a');
+      for (const du of [-0.24, 0.24]) {
+        const a = fpt4(f, side, len / 2 + du, 0, -0.6), b = fpt4(f, side, len / 2 + du, H + 0.4, 0.02);
+        beam4(g, a.x, a.y, a.z, b.x, b.y, b.z, 0.06, al, 0.035);
+        F(len / 2 + du - 0.05, len / 2 + du + 0.05, 0, 0.05, -0.66, -0.54, foot);
+      }
+      for (let i = 1; i < 16; i++) { const k = i / 16; F(len / 2 - 0.24, len / 2 + 0.24, k * (H + 0.4) - 0.015, k * (H + 0.4) + 0.015, -0.6 + k * 0.62 - 0.03, -0.6 + k * 0.62 + 0.03, al, false); }
       r.top = H;
       break;
     }
@@ -7054,8 +7314,8 @@ function store4Furniture(f, g, r, W, D, side, len, cabinet) {
       for (let i = 0; i < 8; i++) {
         const p = new THREE.Group(); p.userData.i = i; r.stack.add(p);
         // 板子底部離貨架 0.75 公尺、頂端靠在貨架上；一片一片往外疊
-        p.position.set((i % 3 - 1) * 0.015, 0, -0.5 + 0.75 - i * 0.045); p.rotation.x = -tilt;
-        box(p, -0.48, 0.48, 0, ROOF4_H * 0.98, -0.02, 0.02, mat, i === 0);
+        p.position.set((i % 3 - 1) * 0.015, 0, -0.5 + 0.35 - i * 0.045); p.rotation.x = -tilt;
+        box(p, -0.48, 0.48, 0, 0.96, -0.02, 0.02, mat, i === 0);   // 1×1 公尺的正方形板子
         box(p, -0.49, 0.49, 0, 0.04, -0.025, 0.025, edge, false);
       }
       const tag = box(o, -0.15, 0.15, 0.02, 0.24, 0.3, 0.32, ownBasic({ color: new THREE.Color(RARITY[PLANKS[f.tier].rar].color) }), false);
@@ -7212,11 +7472,7 @@ function updateStoreFurniture4(t) {
       for (const m of r.stack.children) m.visible = m.userData.i < n;
       if (r.spGlow) r.spGlow.material.opacity = 0.5 + 0.3 * Math.sin(t * 3);
     } else if (r.vlight) r.vlight.material.color.setHex(G.power ? 0xe8f0f4 : 0x1a1c1e);
-    else if (r.screens) {
-      // 展示牆的電視：白天開著，晚上燈熄了就黑掉（偶爾閃一下雜訊，比較恐怖）
-      const on = G.power && G.phase === 'day', k = on ? 0.85 + 0.15 * Math.sin(t * 3 + f.x) : Math.random() < 0.004 ? 0.4 : 0.02;
-      for (const sc of r.screens) sc.material.color.setRGB(k, k, k * (on ? 1 : 1.3));
-    }
+
   }
 }
 // 蓋賣場：地板、天花板和日光燈板、外牆、柱子、樣品間的彩色隔間牆、小房間、入口的玻璃門、招牌、地上的箭頭
@@ -7313,7 +7569,7 @@ function buildStore4() {
     const fog = new THREE.Mesh(geo('fog4', () => new THREE.PlaneGeometry(8, 4)), ownBasic({ color: 0xf4f6f8, fog: false }));
     fog.position.set(3, 1.6, 2.2); fog.rotation.y = Math.PI; g.add(fog);
     const glow = ownSprite(glowTex, 0xffffff); glow.position.set(3, 1.4, 1.2); glow.scale.set(9, 4, 1); g.add(glow);
-    const logo = new THREE.Mesh(geo('logo4', () => new THREE.PlaneGeometry(3.2, 0.8)), ownBasic({ map: sign4Tex('3008  家居', '#3a8fd8') }));
+    const logo = new THREE.Mesh(geo('logo4', () => new THREE.PlaneGeometry(3.2, 0.8)), ownBasic({ map: sign4Tex('無盡賣場', '#3a8fd8') }));
     logo.position.set(3, CEIL_W4 - 0.65, -0.02); logo.rotation.y = Math.PI; g.add(logo);
     const exit = new THREE.Mesh(geo('exit4', () => new THREE.PlaneGeometry(1.0, 0.3)), ownBasic({ map: exitTex4() }));
     exit.position.set(3, CEIL_W4 - 1.55, -0.03); exit.rotation.y = Math.PI; g.add(exit);
@@ -7718,6 +7974,7 @@ function render(dt) {
   syncFlowers(t);
   syncAngels(t);
   syncExtras(t);
+  syncFriends(t, dt, dark);   // 跟朋友一起玩：朋友的人物（要在光照貼圖前面：手電筒照到的地方）
   syncFireballs(t);
   syncProjectiles(t);
   syncWorld2(t);
@@ -7784,7 +8041,7 @@ function init() {
   buildExtras();
   glowPts = makePoints(0.07, THREE.AdditiveBlending);
   smokePts = makePoints(0.3, THREE.NormalBlending);
-  window.Renderer = { render, resize, setWorld, furn4: furnChanged4, dbg: () => ({ scene, camera, THREE }), book: { ok: bookOk, show: bookShow, stats: book.stats }, pax: paxStats, photos: () => ({ loaded: Object.keys(photos), total: PHOTO_TEX.length }) };
+  window.Renderer = { render, resize, setWorld, furn4: furnChanged4, dbg: () => ({ scene, camera, THREE }), book: { ok: bookOk, show: bookShow, stats: book.stats }, pax: paxStats, friends: friendStats, photos: () => ({ loaded: Object.keys(photos), total: PHOTO_TEX.length }) };
   resize();
 }
 loadPhotos().then(init);   // 照片貼圖載入好才開始（最多等 5 秒）
