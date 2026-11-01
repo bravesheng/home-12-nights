@@ -234,7 +234,7 @@ function newGame(diff = 'normal', world = 1, carry = null) {
   if (world === 3) addItem('wood', 3);   // 第三世界：第 1 夜要燒的木柴，不然會不夠
   saveGame();
   startPlay();
-  if (world === 4) showBig('第四世界：3008 無盡賣場', '第 1 天：拿板子蓋一間房子、找食物');
+  if (world === 4) showBig('第四世界：無盡賣場', '第 1 天：拿板子蓋一間房子、找食物');
   else if (world === 3) showBig('第三世界：末班列車', '第 1 天：下車去車站找燃料和物資');
   else if (world === 2) showBig('第二世界：夢核花園', '第 1 天：白天趕快找燈泡');
   else showBig('第 1 天', '白天趕快找燈泡');
@@ -259,7 +259,7 @@ function saveGame() {
     p: { x: G.p.x, y: G.p.y, hp: G.p.hp, san: G.p.san, hunger: G.p.hunger, bat: G.p.bat, flashLv: G.p.flashLv },
     inv: G.inv, selId: G.selId,
     sockets: G.sockets.map(s => s.bulb), socketIds: G.sockets.map(s => s.id),   // 燈座用 id 對，地圖改版燈泡才不會裝錯位置
-    lamps: G.lamps.map(l => ({ type: l.type, x: l.x, y: l.y, bulb: l.bulb, free: l.free ? 1 : undefined })),
+    lamps: G.lamps.map(l => ({ type: l.type, x: l.x, y: l.y, bulb: l.bulb, free: l.free ? 1 : undefined, face: l.face })),
     containers: G.containers, stats: G.stats,
     flowers: G.flowers.map(f => ({ x: f.x, y: f.y, lv: f.lv, pt: f.ptype || 'eye', g: Math.round(f.grow * 100) / 100 })),
     coins: G.coins, chests: G.chests, gift: G.gift, treasure: G.treasure, stock: G.stock,
@@ -368,13 +368,13 @@ function refillContainers(chance = 0.35) {
 // 名字和說明會跟著世界變（第二世界的花、樹、水燈泡）
 const bulbVariant = t => (isW3() ? BULBS_W3[t] : isW2() ? BULBS_W2[t] : null);
 // 第四世界沒有燈泡、直接就是檯燈（設計師：燈泡不要了，我要直接就是檯燈）：名字的「燈泡」換成「檯燈」
-const bulbName = t => { const n = bulbVariant(t) ? bulbVariant(t).name : BULBS[t].name; return isW4() ? n.replace('燈泡', '檯燈') : n; };
+const bulbName = t => { const n = bulbVariant(t) ? bulbVariant(t).name : BULBS[t].name; return isW4() ? n.replace('燈泡', isTvTier(t) ? '電視' : '檯燈') : n; };   // 第 6 級以上是電視
 function itemName(id) { const it = ITEMS[id]; return it.kind === 'bulb' ? bulbName(it.tier) : it.name; }
 function itemDesc(id) {
   const it = ITEMS[id];
   if (it.kind !== 'bulb') return it.desc + ((isW3() || isW4()) && it.warm ? `、體溫 +${it.warm}` : '');
   const t = it.tier, v = bulbVariant(t);
-  return `${RARITY[bulbRarity(t)].name}${isW4() ? '檯燈' : '燈泡'}・` + (BULBS[t].special ? '特殊燈泡。' : `第 ${t} 級。`) + (v ? v.desc : BULBS[t].desc);
+  return `${RARITY[bulbRarity(t)].name}${isW4() ? (isTvTier(t) ? '電視' : '檯燈') : '燈泡'}・` + (BULBS[t].special ? '特殊燈泡。' : `第 ${t} 級。`) + (v ? v.desc : BULBS[t].desc);
 }
 // 燈泡的稀有度標籤（視窗、物品欄用）
 const rarityOfItem = id => (ITEMS[id] && ITEMS[id].kind === 'bulb' ? bulbRarity(ITEMS[id].tier) : null);
@@ -393,7 +393,7 @@ function nextCard() {
   if (t === undefined) return;
   const r = bulbRarity(t), el = document.createElement('div');
   el.className = 'bcard r-' + r;
-  el.innerHTML = `<div class="bc-ic">${bulbSVG(t)}</div><div class="bc-tx"><span class="rar r-${r}">${RARITY[r].name}${isW4() ? '檯燈' : '燈泡'}</span>` +
+  el.innerHTML = `<div class="bc-ic">${bulbSVG(t)}</div><div class="bc-tx"><span class="rar r-${r}">${RARITY[r].name}${isW4() ? (isTvTier(t) ? '電視' : '檯燈') : '燈泡'}</span>` +
     `<b>${bulbName(t)}</b><small>${BULBS[t].special ? '特殊燈泡' : `第 ${t} 級`}</small></div>`;
   $('cards').appendChild(el);
   placeBelowToasts($('cards'));
@@ -623,6 +623,7 @@ function groundUnder(x, y, r = PLAYER_R) {
       const nx = clamp(x, tx, tx + 1), ny = clamp(y, ty, ty + 1);
       if ((x - nx) ** 2 + (y - ny) ** 2 < r * r && top > h) h = top;
     }
+  if (isW4() && G.b4) h = Math.max(h, surf4(x, y, G.p.z || 0));   // 第四世界：自己放的斜坡、屋頂上也站得住
   return h;
 }
 // 在空中（跳起來、從家具上掉下來）
@@ -2956,7 +2957,7 @@ function updatePlayer(dt) {
   if (sticky && !G.ev.trailTip) { G.ev.trailTip = 1; toast('🐌 踩到黏液了，走不快！跳過去就不會變慢。', 'warn'); }
   const sp = (sprint ? 4.8 : 3.0) * (sneakKey && !sprint ? 0.45 : 1) * (sticky ? 0.45 : 1) * (isW3() ? speedMult3() : 1) * (w4 ? speedMult4() : 1);
   if (p.stunT > 0) { p.stunT -= dt; fwd = 0; str = 0; }   // 被震倒、被打飛：動不了
-  if (ride) { updateSlide(dt); fwd = 0; str = 0; }          // 正在玩溜滑梯：照固定路線走
+  if (ride) { if (ride.climb) updateClimb4(dt); else updateSlide(dt); fwd = 0; str = 0; }   // 正在玩溜滑梯、爬梯子（第四世界）：照固定路線走
   if (p.pose) { if (moving || p.stunT > 0) standUp(); fwd = 0; str = 0; }   // 坐著、躺著：一走動（或被打飛）就起來
   if (sprint) p.stam -= 28 * dt; else p.stam = Math.min(100, p.stam + 16 * dt);
   const c = Math.cos(p.face), s = Math.sin(p.face);
@@ -3059,7 +3060,7 @@ function getTarget() {
     const d = fixtureScore(fx) - 0.35;
     const sel = G.selId && ITEMS[G.selId].kind === 'bulb' ? ITEMS[G.selId] : null;
     const bulbTxt = fx.bulb ? bulbName(fx.bulb) : '沒有燈泡';
-    if (sel && sel.tier !== fx.bulb) cands.push({ d, id: 'fx', label: `安裝 ${bulbName(sel.tier)}`, sub: `${fixtureName(fx)}：${bulbTxt}${fx.bulb ? '（換下來的會收回背包）' : ''}`, hold: 0, action: () => installBulb(fx, sel.tier) });
+    if (sel && sel.tier !== fx.bulb) cands.push({ d, id: 'fx', label: `${isW4() && fx.free ? '換成' : '安裝'} ${bulbName(sel.tier)}`, sub: `${fixtureName(fx)}：${bulbTxt}${fx.bulb ? '（換下來的會收回背包）' : ''}`, hold: 0, action: () => installBulb(fx, sel.tier) });
     else if (fx.kind === 'lamp') cands.push({ d, id: 'fx', label: `拿起${fixtureName(fx)}`, sub: fx.bulb ? `上面的${bulbTxt}會一起收回背包` : '', hold: 0, action: pickUp });
     else if (fx.bulb) cands.push({ d, id: 'fx', label: `拆下${bulbTxt}`, sub: fixtureName(fx), hold: 0, action: pickUp });
     else cands.push({ d, id: 'fx', label: `${fixtureName(fx)}：沒有燈泡`, sub: '在物品欄選燈泡，再按 E 安裝' });
@@ -3260,6 +3261,12 @@ function installBulb(fx, tier) {
   fx.bulb = tier; fx.dying = 0;
   removeItem('bulb' + tier);
   Sound.play('install');
+  if (isW4() && fx.free && (fx.type === 'tv' || fx.type === 'desk')) {
+    // 第四世界的燈泡就是整盞檯燈或整台電視：換成另一個（換下來的收回背包）
+    fx.type = isTvTier(tier) ? 'tv' : 'desk';
+    toast(`💡 換成${bulbName(tier)}了${old ? `（${bulbName(old)}收回背包）` : ''}。`, 'good');
+    return;
+  }
   let msg = `💡 在${fixtureName(fx)}裝上了${bulbName(tier)}`;
   if (old) msg += `（換下${bulbName(old)}）`;
   if (!G.power) msg += '，但現在停電了';
@@ -3493,7 +3500,7 @@ function updateFx(dt) {
 }
 // 燈泡在 3D 空間的位置（h = 離地高度）
 function bulbPos(o) {
-  const h = { socket: isW3() ? 2.7 : 2.3, chand: 2.2, floor: 1.5, desk: 0.48 }[o.type];   // 第三世界的天花板比較高，天花板的燈也掛高一點
+  const h = { socket: isW3() ? 2.7 : 2.3, chand: 2.2, floor: 1.5, desk: 0.48, tv: 0.62 }[o.type];   // 第三世界的天花板比較高，天花板的燈也掛高一點
   return { x: o.x + 0.5, y: o.y + 0.5, h };
 }
 
@@ -3757,6 +3764,13 @@ function updatePrompt() {
 // 介面
 // ====================================================================
 // 第四世界的檯燈圖示：燈罩下面亮著那一級燈泡的顏色
+// 第四世界的電視圖示：螢幕亮著那一級燈泡的顏色
+function tierTvSVG(t) {
+  const c = BULBS[t].color, col = c === 'rainbow' ? '#ffd0ff' : `rgb(${c.join(',')})`;
+  return `<svg viewBox="0 0 36 36"><defs><radialGradient id="tg${t}"><stop offset="0" stop-color="${col}" stop-opacity=".85"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></radialGradient></defs>` +
+    `<circle cx="18" cy="15" r="15" fill="url(#tg${t})"/><rect x="4" y="6" width="28" height="18" rx="1.5" fill="#1a1c20"/><rect x="6" y="8" width="24" height="14" fill="${col}"/>` +
+    `<rect x="16" y="24" width="4" height="4" fill="#2a2c30"/><rect x="11" y="28" width="14" height="2.5" rx="1" fill="#2a2c30"/></svg>`;
+}
 function tierLampSVG(t) {
   const c = BULBS[t].color, col = c === 'rainbow' ? '#ffd0ff' : `rgb(${c.join(',')})`;
   return `<svg viewBox="0 0 36 36"><defs><radialGradient id="lg${t}"><stop offset="0" stop-color="${col}" stop-opacity=".9"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></radialGradient></defs>` +
@@ -3764,7 +3778,7 @@ function tierLampSVG(t) {
     `<circle cx="18" cy="18" r="3.4" fill="${col}"/><rect x="17" y="18" width="2" height="11" fill="#b8a070"/><ellipse cx="18" cy="30.5" rx="7" ry="2.5" fill="#3a3c40"/></svg>`;
 }
 function bulbSVG(t) {
-  if (isW4() && mode === 'play') return tierLampSVG(t);   // 第四世界：燈泡就是檯燈
+  if (isW4() && mode === 'play') return isTvTier(t) ? tierTvSVG(t) : tierLampSVG(t);   // 第四世界：燈泡就是檯燈（第 6 級以上是電視）
   const c = BULBS[t].color;
   const col = c === 'rainbow' ? `url(#rb${t})` : `rgb(${c.join(',')})`;
   const defs = `<defs><radialGradient id="gl${t}"><stop offset="0" stop-color="${c === 'rainbow' ? '#fff' : `rgb(${c.join(',')})`}" stop-opacity=".8"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>` +

@@ -788,7 +788,7 @@ await scenario('cut2', '第二到第三世界的過場動畫（?cut=2）：月�
   await shot('3-day1');
 });
 
-await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：100×76 的大賣場、架上真的東西（拿起、放下再撿回來）、撿板子蓋牆圍成家、屋頂、斜放 45° 的牆、檯燈的光不穿牆、搬家具、背包 16 格、火爐、存檔讀檔、舊存檔', {}, async ({ page, shot, check }) => {
+await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：100×76 的大賣場、架上真的東西（拿起、放下再撿回來）、正方形板子疊高蓋牆圍成家、屋頂、斜放 45° 的牆、45° 斜坡走到屋頂、爬貨架的梯子、電視、檯燈的光不穿牆、搬家具、背包 16 格、火爐、存檔讀檔、舊存檔', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=4&kit=1', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
   await sleep(2000);
@@ -851,16 +851,18 @@ await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：100×76 的大
       place4();
       if (G.hand) G.hand = null;
     };
+    // 板子是 1 公尺的正方形：每面牆疊 2 片（門本身就 2 公尺高）才算圍起來
     const tiers = [1, 2, 3, 4, 1, 2, 5, 3];
     let i = 0;
-    for (const x of [51, 52]) { put(tiers[i++], false, { x: x + 0.5, y: 69 - 1.1, face: Math.PI / 2 }); put(tiers[i++], x === 52, { x: x + 0.5, y: 71 - 1.1, face: Math.PI / 2 }); }
-    for (const y of [69, 70]) { put(tiers[i++], false, { x: 51 - 1.1, y: y + 0.5, face: 0 }); put(tiers[i++], false, { x: 53 - 1.1, y: y + 0.5, face: 0 }); }
+    const put2 = (tier, door, pos) => { put(tier, door, pos); if (!door) put(tier, false, pos); };
+    for (const x of [51, 52]) { put2(tiers[i++], false, { x: x + 0.5, y: 69 - 1.1, face: Math.PI / 2 }); put2(tiers[i++], x === 52, { x: x + 0.5, y: 71 - 1.1, face: Math.PI / 2 }); }
+    for (const y of [69, 70]) { put2(tiers[i++], false, { x: 51 - 1.1, y: y + 0.5, face: 0 }); put2(tiers[i++], false, { x: 53 - 1.1, y: y + 0.5, face: 0 }); }
     for (const x of [51, 52]) for (const y of [69, 70]) put(1, false, { x: x + 0.5, y: y + 1.6, face: -Math.PI / 2 }, 90);
     Object.assign(G.p, { x: 51.6, y: 69.6, face: 0 });
     return { bad: out.filter(Boolean), walls: G.b4.n, roofs: G.b4.roofs.size, home: atHome4(), cover: sheltered4(G.p.x, G.p.y) };
   });
   check(house.bad.length === 0, '每片板子都要放得下：' + house.bad.join('；'));
-  check(house.walls === 9 && house.roofs === 4, `要有 9 片牆、4 片屋頂（${house.walls}／${house.roofs}）`);
+  check(house.walls === 16 && house.roofs === 4, `要有 16 片正方形板子（7 面牆各 2 片、1 扇門、1 片第一片）、4 片屋頂（${house.walls}／${house.roofs}）`);
   check(house.home && house.cover, `站在圍起來、有屋頂的地方要算「在家裡」、淋不到雨（在家 ${house.home}、遮著 ${house.cover}）`);
   // 檯燈：選燈泡按 Q 會在前面放一盞檯燈；家裡的燈不會穿過牆照到外面（玻璃透光）
   const lamp = await page.evaluate(() => {
@@ -911,7 +913,7 @@ await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：100×76 的大
     const f = FURN.find(f => f.type === 'chair4' && f.x === 57 && f.y === 70);
     return { walls: G.b4.n, roofs: G.b4.roofs.size, chair: !!f, home: !!G.home, glass: G.b4.list.some(w => w.tier === 5 && w.hp === Infinity), door: G.b4.list.some(w => w.door) };
   });
-  check(sv.walls === 9 && sv.roofs === 4 && sv.chair && sv.home && sv.glass && sv.door, `存檔讀回來牆、屋頂、家具、家都要在（${JSON.stringify(sv)}）`);
+  check(sv.walls === 16 && sv.roofs === 4 && sv.chair && sv.home && sv.glass && sv.door, `存檔讀回來牆、屋頂、家具、家都要在（${JSON.stringify(sv)}）`);
   // 斜放的牆（XYZ 也要有分 15°、45°、90°）：一次轉 45°，放下去是斜的、擋得住人，存檔讀回來還是斜的；吹口哨會看到紅點
   const free = await page.evaluate(() => {
     holdThing({ k: 'plank', tier: 1 });
@@ -927,12 +929,45 @@ await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：100×76 的大
   });
   check(free.kind === 'free' && free.ok && free.deg % 90 !== 0 && free.hit && free.back, `一次轉 45° 要放得下斜的牆、擋得住人、存檔讀回來（${JSON.stringify(free)}）`);
   check(free.dots > 0, `吹口哨要看到怪物的紅點（${free.dots} 個）`);
+  // 正方形板子往上疊、矮牆跳得過去、45° 的斜坡一格接一格走到屋頂上、貨架的梯子爬得上去、第 6 級以上的燈泡是電視
+  const sq = await page.evaluate(() => {
+    const put = (tier, pos, rx = 0) => { holdThing({ k: 'plank', tier }); Object.assign(G.p, pos); Object.assign(G.bld, { dist: 1.0, rx, ry: 0, rz: 0 }); const g = ghost4(); place4(); G.hand = null; return g; };
+    const a = put(1, { x: 44.3, y: 54.5, face: 0 }), b = put(1, { x: 44.3, y: 54.5, face: 0 });
+    const s1 = stackAt('v', 45, 54), lvs = s1 ? s1.map(p => p.lv) : [];
+    removeWall(s1[1]);
+    moveWho = G.p; G.p.z = 0; const low = hitsWall4(45.05, 54.5, PLAYER_R); G.p.z = 1.2; const over = hitsWall4(45.05, 54.5, PLAYER_R); moveWho = null; G.p.z = 0;
+    // 斜坡：主走道往北放三片 45° 的板子，再放一片屋頂，走上去
+    const r = [put(2, { x: 49.5, y: 56.5, face: -Math.PI / 2 }, 45), put(2, { x: 49.5, y: 55.5, face: -Math.PI / 2 }, 45), put(2, { x: 49.5, y: 54.5, face: -Math.PI / 2 }, 45), put(2, { x: 49.5, y: 53.5, face: -Math.PI / 2 }, 90)];
+    Object.assign(G.p, { x: 49.5, y: 58.3, face: -Math.PI / 2, z: 0, vz: 0 });
+    let top = 0; for (let i = 0; i < 120; i++) { keys.w = true; updatePlayer(0.05); top = Math.max(top, G.p.z); } keys.w = false;
+    // 梯子：爬上倉儲貨架
+    const L = ladderList4().find(l => l.f.type === 'rack4');
+    Object.assign(G.p, { x: L.base.x, y: L.base.y, z: 0, vz: 0, face: Math.atan2(L.edge.y - L.base.y, L.edge.x - L.base.x), pitch: 0.2 });
+    const t = getTarget(); if (t && t.action) t.action();
+    for (let i = 0; i < 100 && ride; i++) updateClimb4(0.05);
+    for (let i = 0; i < 5; i++) updatePlayer(0.05);
+    const rackZ = G.p.z;
+    Object.assign(G.p, { x: 49.5, y: 66.5, z: 0, vz: 0 });
+    const jumpVis = getComputedStyle(document.querySelector('#tbtns .tb.jump')).visibility;
+    return { jumpVis, lvs, kinds: [a.lv, b.lv], low, over, ramps: r.map(g => g && g.ok && (g.kind === 'ramp' ? g.lv : g.kind)), top, climb: t && t.label, rackZ, tv: bulbName(7), lamp: bulbName(3) };
+  });
+  check(JSON.stringify(sq.lvs) === '[0,1]' && sq.low && !sq.over, `正方形板子要往上疊（${JSON.stringify(sq.lvs)}）、1 公尺的矮牆擋得住人但跳起來越得過去（地上 ${sq.low}、跳起來 ${sq.over}）`);
+  check(JSON.stringify(sq.ramps) === '[0,1,2,"roof"]' && sq.top > 2.9, `45° 的斜坡要一格接一格往上（${JSON.stringify(sq.ramps)}），走得到屋頂上（最高 ${sq.top.toFixed(2)} 公尺）`);
+  check(sq.climb === '爬上貨架' && Math.abs(sq.rackZ - 5.2) < 0.05, `貨架的梯子要爬得上去（「${sq.climb}」、高度 ${sq.rackZ}）`);
+  check(sq.jumpVis === 'visible', `第四世界平板要有跳的按鈕（${sq.jumpVis}）`);
+  check(sq.tv.endsWith('電視') && sq.lamp.endsWith('檯燈'), `第 6 級以上的燈泡在第四世界是電視、以下是檯燈（${sq.tv}、${sq.lamp}）`);
   // 舊的小賣場存檔（60×44）：蓋的板子要堆在入口旁邊、家要重記，不能壞掉
   const old = await page.evaluate(() => {
     load4({ walls: [['h', 31, 38, 1, 40, 0, 0], ['v', 31, 38, 2, 100, 0, 0]], roofs: [[31, 38, 1, 40]], home: { x: 31.5, y: 38.5 }, loose: [[30, 39, 3, 0]], furn: [] });
     return { walls: G.b4.n, loose: G.loose4.length, home: G.home, x: G.p.x, y: G.p.y, ok: walkable(G.p.x, G.p.y) };
   });
   check(old.walls === 0 && old.loose === 4 && !old.home && old.ok, `舊的小賣場存檔：板子要堆在入口旁邊、家要重記（${JSON.stringify(old)}）`);
+  // 2026/10/31 的存檔（一片牆 2.6 公尺高）：換成疊 3 片的正方形板子，門換成門加上面 1 片
+  const v2 = await page.evaluate(() => {
+    load4({ mv: W4_MAP_VER, walls: [['h', 51, 69, 2, 100, 0, 0], ['v', 51, 69, 1, 40, 1, 0]], roofs: [], furn: [], home: { x: 51.5, y: 69.5 } });
+    return { n: G.b4.n, a: stackAt('h', 51, 69).length, d: stackAt('v', 51, 69).map(p => (p.door ? 'door' : p.lv)).join(',') };
+  });
+  check(v2.n === 5 && v2.a === 3 && v2.d === 'door,2', `舊存檔的長板子要變成疊 3 片的正方形板子（${JSON.stringify(v2)}）`);
 });
 
 await scenario('w4night', '第四世界的晚上（?world=4&night=2&kit=1）：燈熄了、店員巡邏、怪物打破木牆、玻璃打不破；照設計圖重做的 5 隻新怪物和神秘店員排一排（手電筒第 7 級星晃）', {}, async ({ page, shot, check }) => {

@@ -192,7 +192,10 @@ const LAMP_TYPES = {
   desk:   { name: '檯燈',       mult: 0.75 },
   floor:  { name: '落地燈',     mult: 1.0 },
   chand:  { name: '水晶吊燈',   mult: 1.3 },
+  tv:     { name: '電視',       mult: 1.1 },   // 第四世界：第 6 級以上的燈泡就是一台電視（設計師：電視跟檯燈一樣都是燈泡變來的）
 };
+// 第四世界哪幾級的燈泡是電視（第 6～11 級的一般燈泡，火焰燈泡除外；以下是檯燈，特殊燈泡照舊）
+const isTvTier = t => t >= 6 && t <= NORMAL_MAX && t !== FIRE_TIER;
 
 // 物品
 const ITEMS = {
@@ -272,6 +275,7 @@ const LOOT = {
   drink4:   { soda: 5, milk: 2, cocoa: 2, coin: 1 },
   store4:   { bulb: 2.5, battery: 3, candle: 1.5, coin: 3, chocolate: 1, snack: 1.5, marble: 1, firecracker: 0.6, key: 0.2, salt: 0.6 },
   lamps4:   { bulb: 8, battery: 1 },   // 第四世界沒有燈泡，「燈泡」就是一整盞檯燈（設計師：燈泡不要了，直接就是檯燈）
+  tvs4:     { bulb: 1 },                // 電器區的電視（第 6 級以上的燈泡，world4.js 的 stockShelves4 會把等級拉高）
   clothes4: { battery: 2, candle: 1, coin: 3, bandage: 1, amulet: 0.2, marble: 1, slingshot: 0.3, cocoa: 1 },
   tools4:   { battery: 3, wood: 3, charcoal: 1.2, coin: 2, firecracker: 1.5, marble: 1, watergun: 0.3, strongflash: 0.2, holywater: 1, key: 0.3 },
   kids4:    { marble: 3, slingshot: 0.6, chocolate: 2, candle: 1, coin: 2, firecracker: 1, soda: 1 },
@@ -288,7 +292,7 @@ const DIFFS = {
 // ====================================================================
 // 第二世界：夢核花園。房間和門的位置都跟第一世界一樣，只換名字、地板和家具
 // ====================================================================
-const WORLD_NAMES = { 1: '第一世界：家', 2: '第二世界：夢核花園', 3: '第三世界：末班列車', 4: '第四世界：3008 無盡賣場' };
+const WORLD_NAMES = { 1: '第一世界：家', 2: '第二世界：夢核花園', 3: '第三世界：末班列車', 4: '第四世界：無盡賣場' };
 const ROOMS_W2 = {
   attic:    { name: '紫藤花架', floor: 'grass2', dayDark: 0.25 },
   study:    { name: '樹洞書屋', floor: 'grass' },
@@ -514,8 +518,9 @@ const FURN_TOP_H = {
   dining: (f, dx) => (dx === 0 || dx === f.w - 1 ? 0.45 : 0.78),   // 兩端是椅子、中間是桌子
   table3: 0.75, telegraph: 0.78, bed: 0.56, trunks: 0.5, crates3: 0.75,
   // 第四世界的家具（賣場）
-  chair4: 0.46, armchair: 0.44, sofa4: 0.44, coffee4: 0.45, table4: 0.77, desk4: 0.76, bed4: 0.55, bunk4: 0.5, nightstand4: 0.55,
+  chair4: 0.46, armchair: 0.44, sofa4: 0.44, coffee4: 0.45, table4: 0.77, desk4: 0.76, bed4: 0.55, nightstand4: 0.55,
   toybox: 0.5, crate4: 0.92, sideboard4: 0.8, cart4: 0.9,
+  bunk4: 1.62, ladder4: 1.95, rack4: 5.2,   // 上鋪、A 字梯頂、倉儲貨架頂：跳不上去，要爬梯子（world4.js 的 ladders4）
 };
 const FURN_SIT = {
   seats: { face: 'w' },                                                  // 普通車廂的座位都面向車頭
@@ -570,20 +575,21 @@ const SCENERY_W3 = ['plain', 'plain', 'snow', 'plain', 'bridge', 'plain', 'snow'
 const BAYMAX_MAX = 2;   // 整個遊戲最多拿到幾顆大白燈
 
 // ====================================================================
-// 第四世界：3008 無盡賣場（照 Roblox 的《3008》：一間走不完的家具賣場，白天燈亮、晚上燈熄，沒有臉的店員出來巡邏）
+// 第四世界：無盡賣場（設計師 2026/11/01 改名，原本叫 3008 無盡賣場；照 Roblox 的《3008》：一間走不完的家具賣場，白天燈亮、晚上燈熄，沒有臉的店員出來巡邏）
 // 地圖 60×44：整間賣場是一個大房間（store），西南角的洗手間、東南角的員工專用區有門、有自己的天花板（ceil）。
 // 樣品間是三面有牆、一面開向走道的展示間；柱子每隔幾格一根；主走道是十字形（x 29～30、y 21～22）
 // 房子要自己蓋：板子放在格子的邊上（world4.js）；家具大部分可以搬（FURN4 的 move）
 // ====================================================================
-const CEIL_W4 = 6.2;      // 賣場的天花板高度（設計師：天花板太低 → 6.2 公尺；小房間是一般的 2.7）
-const ROOF4_H = 2.6;      // 自己蓋的牆有多高、屋頂（躺平的板子）放多高
-// 板子五級（設計師：木頭、水泥、黃金、岩漿、玻璃；普通、稀有、史詩、傳奇、神話）。hp 是怪物要打多久才打得破（玻璃打不破）
+const CEIL_W4 = 7.5;      // 賣場的天花板高度（設計師：天花板太低 → 7.5 公尺，爬到 5.2 公尺高的貨架頂上也站得直；小房間是一般的 2.7）
+const ROOF4_H = 3.0;      // 屋頂（躺平的板子）放多高：疊 3 片 1 公尺的正方形板子剛好碰到屋頂
+// 板子五級（設計師：木頭、水泥、黃金、岩漿、玻璃；普通、稀有、史詩、傳奇、神話）。板子是 1×1 公尺的正方形（2026/11/01 設計師：
+// 全部板子變成正方形），一面牆要疊 2～3 片；hp 是一片要打多久才打得破（玻璃打不破）
 const PLANKS = [null,
-  { key: 'wood',   name: '木頭板子', rar: 'common', hp: 40,  price: 2,  color: '#b08458', desc: '最常見的板子。被酸雨淋到會慢慢腐蝕。' },
-  { key: 'cement', name: '水泥板子', rar: 'rare',   hp: 100, price: 4,  color: '#e8e4dc', desc: '像普通人家裡的白色牆壁，比木頭耐打很多。' },
-  { key: 'gold',   name: '黃金板子', rar: 'epic',   hp: 200, price: 8,  color: '#e2b23c', desc: '閃閃發亮的金屬板，非常耐打。' },
-  { key: 'lava',   name: '岩漿板子', rar: 'legend', hp: 320, price: 14, color: '#5a2414', desc: '黑色岩石裡流著岩漿：會發光、旁邊 2 格很溫暖，怪物打它會被燙到。' },
-  { key: 'glass',  name: '玻璃板子', rar: 'mythic', hp: Infinity, price: 20, color: '#cfe8f0', desc: '透明的強化玻璃：看得清外面、光透得過去，怪物完全打不破。' },
+  { key: 'wood',   name: '木頭板子', rar: 'common', hp: 20,  price: 1,  color: '#b08458', desc: '最常見的板子。被酸雨淋到會慢慢腐蝕。' },
+  { key: 'cement', name: '水泥板子', rar: 'rare',   hp: 50,  price: 2,  color: '#e8e4dc', desc: '像普通人家裡的白色牆壁，比木頭耐打很多。' },
+  { key: 'gold',   name: '黃金板子', rar: 'epic',   hp: 100, price: 4,  color: '#e2b23c', desc: '閃閃發亮的金屬板，非常耐打。' },
+  { key: 'lava',   name: '岩漿板子', rar: 'legend', hp: 160, price: 7, color: '#5a2414', desc: '黑色岩石裡流著岩漿：會發光、旁邊 2 格很溫暖，怪物打它會被燙到。' },
+  { key: 'glass',  name: '玻璃板子', rar: 'mythic', hp: Infinity, price: 10, color: '#cfe8f0', desc: '透明的強化玻璃：看得清外面、光透得過去，怪物完全打不破。' },
 ];
 const PLANK_MAX = PLANKS.length - 1, GLASS_TIER = 5, LAVA_TIER = 4;
 // 貨架的高度和每一層的高度（3D 模型和 world4.js 擺真的東西的位置共用）：倉儲貨架 5.2 公尺（設計師：鐵架太矮了）
@@ -591,8 +597,9 @@ const RACK4_H = 5.2, RACK4_LEVELS = [0.12, 1.3, 2.5, 3.7, 4.85];
 const GOODS4_H = 2.15, GOODS4_LEVELS = [0.12, 0.6, 1.08, 1.56, 2.0];
 const LAMPSHELF4_LEVELS = [0.1, 0.7, 1.3];
 // 真的東西擺在架子上（不是只有一團光，要一個一個拿）：這幾種架子的物資會變成擺在架上的東西（world4.js 的 stockShelves4）
-const DISPLAY4 = { rack4: 1, goods4: 1, lampshelf: 1, foodcounter: 1, drink4: 1, coldcase: 1 };
-const DOOR_HP = 40;   // 木門跟木頭板子一樣耐打
+const DISPLAY4 = { rack4: 1, goods4: 1, lampshelf: 1, foodcounter: 1, drink4: 1, coldcase: 1, tvshelf4: 1 };
+const TVSHELF4_LEVELS = [0.85];   // 電器區的電視展示台：台面上擺真的電視（可以拿）
+const DOOR_HP = 40;   // 木門（2 公尺高）跟兩片木頭板子一樣耐打
 // 家具：move 可以搬、store 可以收納（櫃子）、solid false 是踩得過去的（地毯、毯子）、fn 是有功能的家具
 const FURN4 = {
   sofa4: { name: '布沙發', move: true }, armchair: { name: '單人沙發', move: true }, coffee4: { name: '茶几', move: true },
@@ -604,7 +611,7 @@ const FURN4 = {
   table4: { name: '桌子', move: true }, sideboard4: { name: '矮櫃', move: true, store: true }, cart4: { name: '購物車', move: true }, cabinet4: { name: '櫃子', move: true, store: true },
   // 搬不動的
   counter4: { name: '流理台' }, stove4: { name: '爐子' }, sink4: { name: '洗手台' }, fridge4: { name: '冰箱' }, bathtub4: { name: '浴缸' }, toilet4: { name: '馬桶' },
-  rack4: { name: '倉儲貨架' }, tvwall4: { name: '電視展示牆' }, goods4: { name: '雜貨架' }, lampshelf: { name: '燈具架' }, bedding4: { name: '寢具架' }, crate4: { name: '紙箱' },
+  rack4: { name: '倉儲貨架' }, tvshelf4: { name: '電視展示台' }, goods4: { name: '雜貨架' }, lampshelf: { name: '燈具架' }, bedding4: { name: '寢具架' }, crate4: { name: '紙箱' },
   plankpile: { name: '板材堆' }, foodcounter: { name: '熱食櫃台' }, drink4: { name: '飲料機' }, coldcase: { name: '冷藏櫃' },
   locker4: { name: '員工置物櫃' }, vending4: { name: '販賣機' }, bagrack: { name: '提袋架' }, infodesk: { name: '服務台' },
   breaker: { name: '電箱' }, workbench: { name: '工作台' }, gacha: { name: '扭蛋機' },
@@ -686,7 +693,6 @@ const W4MAP = (() => {
   // 板材堆：靠在貨架的頭尾（木頭最多，水泥、黃金少；岩漿、玻璃要靠神秘店員、禮物和偶爾出現的特別板材堆）
   const tiers = [1, 1, 2, 1, 1, 3, 1, 2, 1, 1, 1, 2, 1, 1, 1];
   racks.forEach((r, i) => F('plankpile', r.x + (i % 2), i % 3 === 1 ? r.y + r.h : r.y - 1, 1, 1, { tier: tiers[i], lean: i % 3 === 1 ? 'n' : 's' }));
-  for (const [x, y] of [[5, 8], [17, 19], [23, 30], [11, 30], [29, 19]]) F('ladder4', x, y, 1, 1, { side: 'w' });
   for (const [x, y] of [[1, 1], [30, 1], [1, 35], [7, 12], [19, 23], [30, 34], [13, 34]]) F('crate4', x, y, 1, 1, { loot: 'tools4' });
   // 西北的雜貨區：一排一排雙面的貨架（上面是真的商品，可以一個一個拿）
   Z('雜貨區', 31, 7, 18, 30);
@@ -695,8 +701,8 @@ const W4MAP = (() => {
   Z('燈具區', 51, 16, 11, 9);
   for (const [x, y] of [[53, 18], [57, 18], [53, 22], [57, 22]]) F('lampshelf', x, y, 3, 1, { side: 's', loot: 'lamps4' });
   Z('電器區', 63, 16, 12, 9);
-  for (const y of [18, 22]) F('tvwall4', 64, y, 4, 1, { side: 's' });
-  for (const [x, y] of [[70, 18], [72, 18], [70, 22], [72, 22]]) F('tv4', x, y, 1, 1, { side: 's', on: true });   // 展示機白天開著
+  // 電視展示台上擺著真的電視（設計師：不要做假的擺設，看得到就拿得到；第 6 級以上的燈泡在第四世界就是電視）
+  for (const y of [18, 22]) for (const x of [64, 69]) F('tvshelf4', x, y, 4, 1, { side: 's', loot: 'tvs4' });
   Z('布料寢具區', 75, 16, 12, 9);
   for (const x of [77, 81]) F('bedding4', x, 18, 3, 1, { side: 's', loot: 'clothes4' });
   F('blanket4', 77, 21, 2, 2); F('blanket4', 81, 21, 2, 2);
@@ -756,7 +762,7 @@ const W4 = {
   start: { x: W4AX + 0.5, y: W4H - 3.5, face: -Math.PI / 2 },
   staffOut: { x: 91.5, y: 71.5 },
   patrol: [{ x: W4AX + 0.5, y: 1.5 }, { x: W4AX + 0.5, y: W4H - 2.5 }, { x: 1.5, y: W4AY + 0.5 }, { x: W4W - 1.5, y: W4AY + 0.5 }],
-  starterPlanks: [[W4AX - 1.5, W4H - 5.5], [W4AX - 1, W4H - 5.5], [W4AX + 2.5, W4H - 5.5], [W4AX + 3, W4H - 5.5]],   // 新遊戲送的 4 片木頭板子（放在入口旁邊的地上）
+  starterPlanks: [-1.5, -1, -0.5, 2.5, 3, 3.5].flatMap(dx => [[W4AX + dx, W4H - 5.5], [W4AX + dx, W4H - 6.3]]),   // 新遊戲送的 12 片木頭板子（放在入口旁邊的地上）
 };
 // 天氣：紅月（2 天）、寒寂之境（4 天）、酸雨（每局隨機 2～3 次，開新遊戲時排好）
 const RED_MOON_W4 = [5, 11], COLD_DAYS_W4 = [3, 6, 9, 12];
