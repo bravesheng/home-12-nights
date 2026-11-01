@@ -4,7 +4,7 @@
 // 一個人「開房間」，畫面上顯示 4 個字的房間代碼（PeerJS 的 id 是 home12- 加代碼），朋友輸入代碼加入，最多 4 個人。
 // 房主當中繼（星狀）：客人送出的訊息都先到房主，房主再轉給其他客人。
 // 同步的東西：同一個世界、同一天、同一個時間（房主說了算），每個人的位置、名字、蹲下、手電筒；
-// 怪物各自在自己的畫面上算（不同步）。第四世界蓋的牆、搬的家具由別的程式用下面的事件 API 同步。
+// 怪物（netmon.js：每隻由離牠最近的人的平板算，再送給大家）、第四世界蓋的牆、搬的家具由別的程式用下面的事件 API 同步。
 // 客人用新遊戲的起始物品開始，不讀也不寫自己的存檔（game.js 的 saveGame 會跳過）；
 // 客人倒下了不會卡在結束畫面：晚上倒下天亮時醒來、白天倒下 20 秒後醒來，醒在房主旁邊。
 // 暫停同步：有人暫停（暫停鈕、Esc、切到別的 App）大家都進暫停畫面，寫著是誰暫停的；有人按「繼續」大家一起繼續。
@@ -20,8 +20,10 @@
 // 給其他程式用的 API（例如第四世界同步蓋房子）：
 //   Net.active：在房間裡（開了房間或已經加入）；Net.isHost：是房主；Net.guest：是客人；Net.ready：在遊戲裡、而且客人已經進到房主的世界
 //   Net.myId、Net.name、Net.code（房間代碼）
-//   Net.friends() → 其他人最新的位置（已經平滑內插過）：[{ id, name, x, y, z, face, pitch, world, day, color, look, crouch, flash, flashLv, pose, down, ingame, away, host }]
+//   Net.friends() → 其他人最新的位置（已經平滑內插過）：[{ id, name, x, y, z, face, pitch, world, day, color, look, crouch, flash, flashLv, pose, down, busy, ingame, away, host }]
 //     ingame：在遊戲裡、而且畫面開著（回到主選單、切到別的 App、2.5 秒沒有位置都是 false，不要畫他）
+//     busy：開著商店、書包的視窗或暫停畫面（不在玩，怪物先不要交給他算）；hp：血量（頭上的血量條）；
+//     hand：手上拿的東西（game.js 的 handCode：武器、蠟燭，第四世界的板子 P1～P5、門 D1～D5、家具 F）；swing：正在揮武器
 //   Net.paused → 房間現在是暫停的：{ on, by, name, gone }（by 是誰暫停的、gone 是暫停的人已經離開了）
 //   Net.roster() → 房間裡的每個人（包括自己）：[{ id, name, color, look, host, me }]
 //   Net.send(type, data)：廣播給房間裡其他人（客人送的由房主轉給其他客人）
@@ -31,7 +33,7 @@
 //     '@start' { world, day }（客人進到房主的世界；房主換世界時客人跟著換，會再發一次）、'@close' { why }（自己離開房間或斷線）
 //   type 不能用 _ 或 @ 開頭（內部用）；data 要能 JSON 化；大的訊息會自動切塊（PeerJS 一次只能送 16KB）
 
-const NET_VER = 2;                      // 連線的訊息格式版本：改了就加 1（版本不一樣的平板會被擋下來，請它更新）
+const NET_VER = 3;                      // 連線的訊息格式版本：改了就加 1（版本不一樣的平板會被擋下來，請它更新）
 const NET_PREFIX = 'home12-';           // PeerJS 的 id：home12-ABCD
 const NET_MAX = 4;                      // 一個房間最多幾個人（房主加 3 個客人）
 const NET_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // 房間代碼：大寫字母和數字，不用 0/O、1/I（看起來很像）
@@ -477,7 +479,7 @@ const Net = (() => {
     placeNearHost(true);
     S.entered = true;
     showBig(`跟 ${hostName()} 一起玩`, `${WORLD_NAMES[curWorld]}・第 ${G.day} ${G.phase === 'night' ? '夜' : '天'}`);
-    if (!carry) toast('👥 你用新遊戲的東西開始，玩完你自己的存檔不會變。怪物每個人各自看到的不一樣。', 'good');
+    if (!carry) toast('👥 你用新遊戲的東西開始，玩完你自己的存檔不會變。大家看到的是同一批怪物，一起打吧！', 'good');
     emit('@start', { world: curWorld, day: G.day });
   }
   // 房主換了白天晚上或換天（客人自己不會換）
@@ -607,19 +609,22 @@ const Net = (() => {
     el('netDownText').textContent = d.night ? `天亮時會在 ${hostName()} 旁邊醒來（還有 ${Math.ceil(left)} 秒）` : `${Math.ceil(left)} 秒後會在 ${hostName()} 旁邊醒來`;
     if (!d.night && left <= 0) revive();
   }
-  function revive() {
+  // by：扶你起來的朋友的 id（就在原地起來，血少一點）；沒有的話是天亮了或時間到了，在房主旁邊醒來
+  function revive(by) {
     if (!S.downed) return;
     S.downed = null;
     hideDown();
-    const p = G.p;
-    Object.assign(p, { hp: 60, san: Math.max(p.san, 60), hunger: Math.max(p.hunger, 50), temp: Math.max(p.temp || 0, 80), camDrop: 0, pitch: 0, pose: null, grabbed: null, stunT: 0, slowT: 0, z: 0, vz: 0, inv: 3, hurt: 0 });
-    if (!placeNearHost(false)) Object.assign(p, startPos());
+    const p = G.p, who = by && rosterOf(by);
+    Object.assign(p, { hp: who ? 40 : 60, san: Math.max(p.san, 60), hunger: Math.max(p.hunger, 50), temp: Math.max(p.temp || 0, 80), camDrop: 0, pitch: 0, pose: null, grabbed: null, stunT: 0, slowT: 0, z: 0, vz: 0, inv: 3, hurt: 0 });
+    if (!who || !walkable(p.x, p.y)) { if (!placeNearHost(false)) Object.assign(p, startPos()); }
     mode = 'play';
     invDirty = true;
     lockPointer();
-    showBig('你醒過來了', `在 ${hostName()} 旁邊`);
+    showBig('你醒過來了', who ? `${who.name} 把你扶起來了` : `在 ${hostName()} 旁邊`);
     sendAll('_pos', myPos());
   }
+  // 朋友按住 E 把你扶起來（game.js 收到 'revive' 事件時呼叫）
+  function wake(by) { if (S.downed && mode === 'down' && rosterOf(by)) revive(by); }
   const hideDown = () => el('netDown').classList.add('hidden');
 
   // ====================================================================
@@ -628,7 +633,8 @@ const Net = (() => {
   function myPos() {
     const p = G.p;
     return { x: r2(p.x), y: r2(p.y), z: r2(p.z), f: r2(p.face), p: r2(p.pitch), w: curWorld, d: G.day, c: p.crouch ? 1 : 0,
-      fl: !S.downed && flashOn() ? p.flashLv || 1 : 0, dn: S.downed ? 1 : 0, ps: p.pose ? p.pose.kind : 0 };
+      fl: !S.downed && flashOn() ? p.flashLv || 1 : 0, dn: S.downed ? 1 : 0, ps: p.pose ? p.pose.kind : 0, b: mode === 'play' || S.downed ? 0 : 1,
+      h: S.downed ? 0 : Math.round(clamp(p.hp, 0, 100)), hd: handCode(), sw: G.swingT > 0.05 ? 1 : 0 };
   }
   function gotPos(id, d) {
     if (!id || id === S.myId || typeof d.x !== 'number' || typeof d.y !== 'number') return;
@@ -650,7 +656,8 @@ const Net = (() => {
       if (Math.hypot(d.x - f.sx, d.y - f.sy) > 2.5) f.snap = true;
     } else f.snap = true;
     const wasDown = !!f.down;
-    Object.assign(f, { sx: d.x, sy: d.y, sz: +d.z || 0, sf: +d.f || 0, sp: +d.p || 0, at: t, world, day: d.d | 0, crouch: !!d.c, flash: d.fl > 0, flashLv: d.fl || 1, down: !!d.dn, pose: d.ps || null, last: d });
+    Object.assign(f, { sx: d.x, sy: d.y, sz: +d.z || 0, sf: +d.f || 0, sp: +d.p || 0, at: t, world, day: d.d | 0, crouch: !!d.c, flash: d.fl > 0, flashLv: d.fl || 1, down: !!d.dn, busy: !!d.b, pose: d.ps || null,
+      hp: typeof d.h === 'number' ? d.h : 100, hand: typeof d.hd === 'string' ? d.hd.slice(0, 12) : '', swing: !!d.sw, last: d });
     if (f.down && !wasDown) note(`💀 ${f.name}倒下了……天亮時會醒來`);
     else if (!f.down && wasDown) note(`✨ ${f.name}醒過來了`);
   }
@@ -668,7 +675,7 @@ const Net = (() => {
     for (const f of S.friends.values()) {
       if (f.x === undefined) continue;
       out.push({ id: f.id, name: f.name, x: f.x, y: f.y, z: f.z, face: f.face, pitch: f.pitch, world: f.world, day: f.day, color: f.color, colorIdx: f.colorIdx, look: f.look,
-        crouch: f.crouch, flash: f.flash, flashLv: f.flashLv, pose: f.pose, down: f.down, host: f.host, away: !!f.away, ingame: f.at > 0 && t - f.at < 2500 && !f.away });
+        crouch: f.crouch, flash: f.flash, flashLv: f.flashLv, pose: f.pose, down: f.down, busy: !!f.busy, hp: f.hp, hand: f.hand, swing: f.swing, host: f.host, away: !!f.away, ingame: f.at > 0 && t - f.at < 2500 && !f.away });
     }
     return out;
   }
@@ -896,7 +903,7 @@ const Net = (() => {
     off(type, fn) { if (handlers.has(type)) handlers.get(type).delete(fn); },
     host, join, leave, available,
     // game.js 用的
-    tick, clock, down, onTitle, onPause, busy, pause,
+    tick, clock, down, wake, onTitle, onPause, busy, pause,
     colors: NET_COLORS, test: NET_TEST,
   };
 })();

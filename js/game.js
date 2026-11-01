@@ -575,7 +575,8 @@ function castRay(x, y, a, maxD) {
   }
   return maxD;
 }
-function inBeam(e) {
+// 自己的手電筒照著 e
+function inMyBeam(e) {
   if (!flashOn()) return false;
   const p = G.p, dx = e.x - p.x, dy = e.y - p.y, d = Math.hypot(dx, dy);
   if (d > flRange()) return false;
@@ -586,6 +587,8 @@ function inBeam(e) {
   if (Math.abs(da) > flHalf() + 0.1) return false;
   return castRay(p.x, p.y, a, d) >= d - 0.05;
 }
+// 怪物被手電筒照著：自己的，或是朋友的（跟朋友一起玩時朋友照著自己算的怪物，netmon.js 會設 fbT）
+const inBeam = e => inMyBeam(e) || e.fbT > 0;
 
 // ====================================================================
 // 移動與尋路
@@ -705,6 +708,7 @@ function findSpawn(minDist = 9) {
     if (isSolid(x, y)) continue;
     const d = flow[y][x];
     if (d === Infinity || d < minDist) continue;
+    if (NetMon.nearFriend(x + 0.5, y + 0.5, minDist * 0.7)) continue;   // 也不要生在朋友旁邊
     return { x: x + 0.5, y: y + 0.5 };
   }
   return null;
@@ -746,6 +750,7 @@ const initHp = (m, kind) => setLevel(m, kind, rollLevel());
 // src：是哪種攻擊（flash 手電筒、pan、shot 彈珠、spray 聖水槍、salt、bomb 鞭炮、fire 火球、angel 天使）；第三世界的怪物各有弱點
 function hurtMonster(t, dmg, src = 'flash') {
   if (t.dead || !(t.hp > 0)) return;
+  if (t.rm) { NetMon.hit(t, dmg, src); return; }   // 朋友算的怪物：傷害交給朋友扣（netmon.js）
   if (t.kind && (GRADE3[t.kind] || GRADE4[t.kind])) { dmg *= monsterDmgMult(t, src); if (dmg <= 0) return; }
   t.hp -= dmg * (kindOf(t) === 'tall' ? 0.5 : 1); // 「它」很耐打
   t.hitT = 0.3;
@@ -753,13 +758,24 @@ function hurtMonster(t, dmg, src = 'flash') {
 }
 // 手電筒照著怪物時每一幀呼叫
 function flashHurt(t, dt) {
-  hurtMonster(t, FL_DPS * flTier().dmg * dt, 'flash');
+  hurtMonster(t, FL_DPS * ((inMyBeam(t) ? flTier().dmg : 0) + (t.fbT > 0 ? t.fbD || 1 : 0)) * dt, 'flash');   // 兩支手電筒一起照，傷害加起來
+  beamSpark(t, dt);
+}
+function beamSpark(t, dt) {
   if (Math.random() < dt * 12) G.fx.push({ type: 'spark', x: t.x + rand(-0.2, 0.2), y: t.y + rand(-0.2, 0.2), h: targetH(t) + rand(-0.3, 0.3), vx: rand(-0.4, 0.4), vy: rand(-0.4, 0.4), vh: rand(0, 0.8), life: 0.4, max: 0.4, color: [255, 240, 200] });
 }
 function defeatMonster(t) {
   const kind = kindOf(t);
   t.hp = 0; t.dead = true;
-  G.stats.dissolved++;
+  defeatFx(t);
+  if (kind === 'blob' && t.target) t.target.eaten = 0;
+  if (kind === 'crawler') { G.ev.tvOn = false; G.ev.tvT = 0; }
+  if (G.p.grabbed === t) G.p.grabbed = null;
+  killCredit(t);
+}
+// 打倒怪物的煙、聲音（跟朋友一起玩時，朋友算的怪物被打倒了也是用這個）
+function defeatFx(t) {
+  const kind = kindOf(t);
   if (kind === 'flower') { puff(t.x, t.y, [70, 110, 60], 14, 1.2); Sound.play('dissolve'); }
   else if (kind === 'sunflower') { puff(t.x, t.y, [230, 200, 60], 16, 1.3); Sound.play('dissolve'); }
   else if (kind === 'shroom') { puff(t.x, t.y, [210, 60, 80], 20, 1.4); Sound.play('dissolve'); }
@@ -767,7 +783,7 @@ function defeatMonster(t) {
   else if (kind === 'snail') { puff(t.x, t.y, [235, 150, 175], 24, 0.6); Sound.play('dissolve'); }
   else if (kind === 'balloon') { puff(t.x, t.y, [200, 20, 30], 12, 1.8); Sound.play('pop'); }
   else if (kind === 'stick') { puff(t.x, t.y, [40, 30, 20], 16, 1); Sound.play('burn'); }
-  else if (kind === 'kronos') { puff(t.x, t.y, [120, 70, 170], 18, 1.2); Sound.play('crack'); for (let i = 0; i < 2; i++) G.pickups.push({ x: t.x + rand(-0.4, 0.4), y: t.y + rand(-0.4, 0.4), id: 'charcoal', n: 1, t: Math.random() * 6 }); }
+  else if (kind === 'kronos') { puff(t.x, t.y, [120, 70, 170], 18, 1.2); Sound.play('crack'); }
   else if (kind === 'tyrant') { puff(t.x, t.y, [60, 40, 30], 26, 1.5); Sound.play('crack'); Sound.play('hiss', 0.5); G.shake = Math.max(G.shake, 0.6); }
   else if (kind === 'warlord') { puff(t.x, t.y, [200, 195, 185], 20, 1.4); Sound.play('armor'); Sound.play('dissolve'); }
   else if (kind === 'taowu') { puff(t.x, t.y, [90, 40, 120], 30, 1.4); Sound.play('roar', 0.5); Sound.play('dissolve'); }
@@ -777,10 +793,13 @@ function defeatMonster(t) {
   else if (kind === 'hubert') { puff(t.x, t.y, [150, 150, 155], 26, 1.2); Sound.play('crack'); G.shake = Math.max(G.shake, 0.5); }
   else if (kind === 'ember') { puff(t.x, t.y, [200, 40, 30], 34, 1.6); Sound.play('roar', 0.5); Sound.play('dissolve'); for (let i = 0; i < 30; i++) G.fx.push({ type: 'ember', x: t.x, y: t.y, h: rand(0.5, 2.5), vx: rand(-2, 2), vy: rand(-2, 2), vh: rand(0, 2), life: 1, max: 1, color: pick([[255, 200, 60], [255, 120, 30], [255, 80, 20]]) }); }
   else { puff(t.x, t.y, [10, 6, 16], 18, targetH(t)); Sound.play('dissolve'); }
-  if (kind === 'blob' && t.target) t.target.eaten = 0;
-  if (kind === 'crawler') { G.ev.tvOn = false; G.ev.tvT = 0; }
-  if (G.p.grabbed === t) G.p.grabbed = null;
+}
+// 算你打倒了一隻：統計、掉東西、第一次打倒的提示
+function killCredit(t) {
+  const kind = kindOf(t);
+  G.stats.dissolved++;
   onKill(t);
+  if (kind === 'kronos') for (let i = 0; i < 2; i++) G.pickups.push({ x: t.x + rand(-0.4, 0.4), y: t.y + rand(-0.4, 0.4), id: 'charcoal', n: 1, t: Math.random() * 6 });
   const msg = {
     blob: '⚫ 黑球被打散了！', stick: '✏️ 火柴人被燒掉了！', balloon: '🎈 氣球破了！小丑找不到你了。', flower: '🌼 眼球花枯萎了。',
     woman: '😢 血淚女消散了！', momo: '🐦 鳥腳女被打跑了！', crawler: '📺 爬行女被打倒了，電視也關掉了！', clown: '🤡 小丑被打倒了！', tall: '👁️ 你打倒了「它」！',
@@ -832,7 +851,10 @@ function updateEnemies(dt) {
   const p = G.p, n = diffN();
   G.stare = Math.max(0, (G.stare || 0) - dt * 1.5);
   for (const e of G.enemies) {
+    if (e.rm) { NetMon.remote(e, dt); continue; }   // 跟朋友一起玩：朋友算的怪物，照朋友送來的畫（netmon.js）
+    NetMon.cur = e;   // 牠發出的聲音也送給朋友
     e.wob += dt;
+    if (e.fbT > 0) e.fbT -= dt;
     if (e.spawn > 0) e.spawn = Math.max(0, e.spawn - dt);
     if (e.stunT > 0) { // 被武器敲暈了：站著不動，也不會抓人
       e.stunT -= dt;
@@ -854,6 +876,7 @@ function updateEnemies(dt) {
     if (isW4()) bash4(e, edt);
     if (Math.hypot(e.x - p.x, e.y - p.y) < 0.62 && e.spawn <= 0 && p.inv <= 0 && !(isW4() && wallBetweenPts4(e.x, e.y, p.x, p.y))) hurtPlayer(e);
   }
+  NetMon.cur = null;
   G.enemies = G.enemies.filter(e => !e.dead);
 }
 function hurtPlayer(e) {
@@ -1277,7 +1300,7 @@ function pullFlower(f) {
 function tvOff() {
   G.ev.tvOn = false; G.ev.tvT = 0;
   Sound.play('click');
-  const c = G.enemies.find(e => e.kind === 'crawler');
+  const c = G.enemies.find(e => e.kind === 'crawler' && !e.rm);   // 朋友的電視爬出來的不算
   if (c) { c.dead = true; puff(c.x, c.y, [20, 20, 30], 14, 0.4); toast('📺 你關掉了電視，她被吸回螢幕裡了！', 'good'); }
   else toast('📺 你把電視關掉了。', 'good');
 }
@@ -1285,7 +1308,7 @@ function updateTV(dt) {
   const ev = G.ev;
   if (!ev.tvOn) return;
   ev.tvT += dt;
-  if (!G.enemies.some(e => e.kind === 'crawler') && ev.tvT >= tvEmergeTime()) {
+  if (!G.enemies.some(e => e.kind === 'crawler' && !e.rm) && ev.tvT >= tvEmergeTime()) {
     const e = spawnEnemy('crawler', { x: TV_FLOOR.x, y: TV_FLOOR.y });
     if (e) {
       e.emerge = 2.2; e.spawn = 0;
@@ -2036,7 +2059,8 @@ function angelSmite(t, a) {
   // 大怪物沒被打倒的話會被撞開
   if (!t.dead && t.kind && BOSSES.includes(t.kind)) {
     const r = Math.atan2(t.y - a.y, t.x - a.x);
-    move(t, Math.cos(r) * 1.5, Math.sin(r) * 1.5, ENEMY_R);
+    if (t.rm) NetMon.hit(t, 0, 'angel', 0, [Math.cos(r) * 1.5, Math.sin(r) * 1.5]);
+    else move(t, Math.cos(r) * 1.5, Math.sin(r) * 1.5, ENEMY_R);
   }
   if (!G.ev.angelTip) { G.ev.angelTip = 1; toast('😇 天使飛出去打怪物了！', 'good'); }
 }
@@ -2115,14 +2139,14 @@ function whack(t, dmg, stun, kb, fx, fy, src = 'pan') {
   const h = targetH(t);
   for (let i = 0; i < 8; i++) G.fx.push({ type: 'spark', x: t.x + rand(-0.15, 0.15), y: t.y + rand(-0.15, 0.15), h: h + rand(-0.3, 0.3), vx: rand(-1.5, 1.5), vy: rand(-1.5, 1.5), vh: rand(-0.5, 1.5), life: rand(0.25, 0.5), max: 0.5, color: [255, 245, 200] });
   if (t.dead || !t.kind) return;
-  if (stun) {
-    t.stunT = Math.max(t.stunT || 0, stun * (t.kind === 'tall' ? 0.5 : 1));
-    if (t.kind === 'momo') { t.hopping = 0; t.air = 0; }
-  }
-  if (kb) {
-    const a = Math.atan2(t.y - fy, t.x - fx);
-    move(t, Math.cos(a) * kb, Math.sin(a) * kb, ENEMY_R);
-  }
+  const a = Math.atan2(t.y - fy, t.x - fx);
+  if (t.rm) { NetMon.hit(t, 0, src, stun, kb ? [Math.cos(a) * kb, Math.sin(a) * kb] : null); return; }   // 朋友算的怪物：敲暈、推開也交給朋友
+  if (stun) stunMonster(t, stun);
+  if (kb) move(t, Math.cos(a) * kb, Math.sin(a) * kb, ENEMY_R);
+}
+function stunMonster(t, stun) {
+  t.stunT = Math.max(t.stunT || 0, stun * (t.kind === 'tall' ? 0.5 : 1));
+  if (t.kind === 'momo') { t.hopping = 0; t.air = 0; }
 }
 // 自動瞄準：前方角度最小、看得到的怪物
 function aimTarget(range, arc) {
@@ -2592,7 +2616,8 @@ function updateSpawns(dt) {
   const n = diffN(), ev = G.ev;
   const mult = ev.blood ? 1.5 : 1;
   // 第二世界的特殊怪物比較多，黑影就少一點
-  const maxS = Math.max(2, Math.round((G.day === 1 ? 4 : Math.min(5 + Math.floor(n / 2.5), 24)) * mult * D().maxS * (isW2() ? 0.75 : 1)));
+  // 跟朋友一起玩：朋友的黑影也算在裡面，上限照人數高一點（NetMon.crowd）
+  const maxS = Math.max(2, Math.round((G.day === 1 ? 4 : Math.min(5 + Math.floor(n / 2.5), 24)) * mult * D().maxS * (isW2() ? 0.75 : 1) * NetMon.crowd()));
   const interval = Math.max(1.4, 6 - n * 0.12) / mult / (G.power ? 1 : 1.4) / D().spawn;
   G.spawnT -= dt;
   if (G.spawnT <= 0) {
@@ -2675,8 +2700,8 @@ function startNight() {
   if (night === 1) toast(w4 ? '🌙 夜晚來了。燈光擋不住怪物，但待在亮處理智不會掉；待在自己蓋的家裡比較安全。按 F 開手電筒！' : '🌙 夜晚來了。燈光擋不住怪物，但待在亮處理智不會掉。按 F 開手電筒，照著怪物可以扣牠的血！', 'warn');
   if ((w2 || w3 || w4 || night > 1) && Object.values(w4 ? INTRO4 : w3 ? INTRO3 : w2 ? INTRO2 : INTRO).includes(night)) toast('📖 今晚會有新的怪物出現……可以先去「生物圖鑑」看看怎麼對付牠們。', 'warn');
 }
-// 第二、三世界同一時間最多 3 隻大怪物，免得太擠
-const bossFull = () => curWorld >= 2 && G.enemies.filter(e => BOSSES.includes(e.kind)).length >= 3;
+// 第二、三世界同一時間最多 3 隻大怪物，免得太擠（跟朋友一起玩時朋友的也算，每多一個朋友多 1 隻）
+const bossFull = () => curWorld >= 2 && G.enemies.filter(e => BOSSES.includes(e.kind)).length >= 3 + NetMon.friendsHere();
 // 房間名字（會跟著世界變）
 const RN = id => (ROOMS.find(r => r.id === id) || { name: id }).name;
 function startDay(d) {
@@ -3059,12 +3084,85 @@ function nearestFixture() {
 }
 function fixtureName(o) { return LAMP_TYPES[o.type].name; }
 
+// ====================================================================
+// 跟朋友一起玩：看著身邊的朋友按 E 送東西（點一下送選著的東西 1 個、按住給 5 枚硬幣）；朋友倒下了按住 E 把他扶起來
+// ====================================================================
+const GIFT_COINS = 5;
+// 手上拿的東西（朋友的畫面畫在你的人物手上，net.js 送）：武器、蠟燭；第四世界拿著的板子 P1～P5、門 D1～D5、家具 F
+function handCode() {
+  if (!G || mode === 'title') return '';
+  if (isW4() && G.hand && G.hand.k !== 'item') return G.hand.k === 'furn' ? 'F' : (G.hand.door ? 'D' : 'P') + (G.hand.tier || 1);
+  const id = G.selId;
+  return id && G.inv[id] > 0 && ITEMS[id] && (ITEMS[id].kind === 'weapon' || id === 'candle') ? id : '';
+}
+function friendTargets(cands) {
+  if (!NET_OK || !Net.active) return;
+  const p = G.p;
+  for (const f of Net.friends()) {
+    if (!f.ingame || f.world !== curWorld) continue;
+    const d = Math.hypot(f.x - p.x, f.y - p.y);
+    if (d > 1.8 || (d > 0.6 && lookAngle(f.x, f.y) > 0.55)) continue;
+    if (f.down) { cands.push({ d: d - 1, id: 'revive:' + f.id, label: `扶${f.name}起來`, sub: '按住 E', hold: 2.5, action: () => reviveFriend(f) }); continue; }
+    const sel = G.selId && G.inv[G.selId] > 0 ? G.selId : null, coins = (G.coins || 0) >= GIFT_COINS;
+    if (!sel && !coins) continue;
+    const giveSel = () => giveFriend(f, sel), giveCoins = () => giveFriend(f, 'coin');
+    cands.push({ d: d - 0.2, id: 'gift:' + f.id, label: sel ? `送${itemName(sel)}給${f.name}` : `給${f.name} ${GIFT_COINS} 枚硬幣`,
+      sub: sel ? (coins ? `點一下 E 送 1 個；按住 E 給 ${GIFT_COINS} 枚硬幣` : '按 E 送 1 個') : '按住 E',
+      ...(sel && coins ? { hold: 0.8, tap: giveSel, action: giveCoins } : sel ? { hold: 0, action: giveSel } : { hold: 0.8, action: giveCoins }) });
+  }
+}
+function giveFriend(f, id) {
+  const n = id === 'coin' ? GIFT_COINS : 1;
+  if (id === 'coin') { if ((G.coins || 0) < n) return; G.coins -= n; }
+  else { if (!(G.inv[id] > 0)) return; removeItem(id, 1); }
+  Net.sendTo(f.id, 'gift', { id, n });
+  Sound.play('pickup');
+  toast(`🎁 把${id === 'coin' ? `${n} 枚硬幣` : itemName(id)}送給${f.name}了。`, 'good');
+  invDirty = true;
+}
+function reviveFriend(f) {
+  Net.sendTo(f.id, 'revive', {});
+  Sound.play('heal');
+  toast(`🤝 你把${f.name}扶起來了！`, 'good');
+}
+// 朋友送東西來：收進背包（第四世界背包滿了、已經有一把一樣的武器就退回去）
+function gotGift(d, from) {
+  const fr = Net.friends().find(x => x.id === from), name = fr ? fr.name : '朋友';
+  const id = d && d.id, n = clamp(Math.floor(+d.n) || 1, 1, 99);
+  const back = why => Net.sendTo(from, 'giftback', { id, n, why });
+  if (id !== 'coin' && (!ITEMS[id] || FLASH_UP[id])) return;
+  if (!G || mode === 'title' || mode === 'cutscene') { back('busy'); return; }
+  if (id === 'coin') { addCoins(n); toast(`🎁 ${name}給你 ${n} 枚硬幣。`, 'good'); }
+  else {
+    if (UNIQUE_CONV[id] && G.inv[id]) { back('has'); return; }
+    if (isW4() && !G.inv[id] && bagUsed() >= BAG_SLOTS) { back('full'); toast(`🎒 ${name}想送你${itemName(id)}，可是你的背包滿了。`, 'warn'); return; }
+    addItem(id, n);
+    toast(`🎁 ${name}送你${itemName(id)}${n > 1 ? ' ×' + n : ''}。`, 'good');
+  }
+  Sound.play('pickup');
+  invDirty = true;
+  if (mode === 'modal') refreshModal();
+}
+// 朋友收不下：東西退回來
+function gotGiftBack(d, from) {
+  if (!G || mode === 'title' || !d) return;
+  const fr = Net.friends().find(x => x.id === from), name = fr ? fr.name : '朋友', id = d.id, n = clamp(Math.floor(+d.n) || 1, 1, 99);
+  if (id === 'coin') addCoins(n); else if (ITEMS[id]) addItem(id, n); else return;
+  toast(`🎒 ${{ has: `${name}已經有${itemName(id)}了`, full: `${name}的背包滿了`, busy: `${name}現在不在遊戲裡` }[d.why] || '送不過去'}，${id === 'coin' ? '硬幣' : itemName(id)}退回來了。`, 'warn');
+  invDirty = true;
+}
+if (NET_OK) {
+  Net.on('gift', gotGift);
+  Net.on('giftback', gotGiftBack);
+  Net.on('revive', (d, from) => Net.wake(from));
+}
 function getTarget() {
   const p = G.p, ev = G.ev;
   const cands = [];
   if (isW4() && handBig()) { addTargets4(cands); return cands[0]; }   // 第四世界拿著板子或家具：E 就是放下
   if (p.pose) { poseTargets(cands); return cands[0] || null; }       // 坐著、躺著：E 就是起來
   poseTargets(cands);   // 坐下、躺下
+  friendTargets(cands);   // 跟朋友一起玩：送東西、扶起倒下的朋友
   const fx = nearestFixture();
   if (fx) {
     // 拿起和安裝同一顆按鈕：手上選著（不一樣的）燈泡就裝上，不然就拿起來
@@ -4371,7 +4469,7 @@ function frame(ts) {
   else if (mode === 'title') { G.time += dt; for (const e of G.enemies) e.wob += dt; buildLights(); }
   else if (mode === 'cutscene') { updateCutscene(dt); if (mode === 'cutscene') buildLights(); }
   else buildLights();
-  if (NET_OK) Net.tick(dt);   // 朋友的位置平滑內插、客人跟著房主換世界和時間
+  if (NET_OK) { Net.tick(dt); NetMon.tick(); }   // 朋友的位置平滑內插、客人跟著房主換世界和時間；怪物同步（netmon.js）
   Sound.music(musicState(), mode === 'play' ? musicIntensity() : 0, mode === 'title' ? 1 : curWorld);
   Sound.setStatic(mode === 'play' && G.ev.tvOn ? nearVol(Math.hypot(G.p.x - 15, G.p.y - 16)) : 0);
   if (window.Renderer) Renderer.render(dt);
