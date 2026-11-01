@@ -5108,25 +5108,77 @@ function buildFriend(f) {
   seed = s0;
   return r;
 }
-// 頭上的名字（倒下時前面加 💤）
-function friendLabel(r, text, color) {
+// 頭上的名字（倒下時前面加 💤），底下是衣服的顏色和血量條（綠 → 黃 → 紅）
+function friendLabel(r, text, color, hp, key) {
   if (r.label) { r.g.remove(r.label); r.label.material.map.dispose(); r.label.material.dispose(); }
   const font = n => `bold ${n}px "PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif`;
-  const tex = canvasTex(256, 64, (c, w) => {
+  const tex = canvasTex(256, 80, (c, w) => {
     c.font = font(34);
     const tw = c.measureText(text).width;
     if (tw > 236) c.font = font(Math.floor(34 * 236 / tw));
     c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round';
     c.lineWidth = 7; c.strokeStyle = 'rgba(0,0,0,.8)'; c.strokeText(text, w / 2, 27);
     c.fillStyle = '#ffffff'; c.fillText(text, w / 2, 27);
-    c.fillStyle = color || '#888888'; c.fillRect(w / 2 - 28, 50, 56, 7);   // 衣服的顏色
+    c.fillStyle = color || '#888888'; c.fillRect(w / 2 - 28, 50, 56, 6);   // 衣服的顏色
+    const k = clamp(hp / 100, 0, 1), bw = 112;
+    c.fillStyle = 'rgba(0,0,0,.75)'; c.fillRect(w / 2 - bw / 2 - 3, 61, bw + 6, 14);
+    c.fillStyle = k > 0.5 ? '#3fd16b' : k > 0.25 ? '#f2c230' : '#e8413c'; c.fillRect(w / 2 - bw / 2, 64, bw * k, 8);
   });
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
-  s.scale.set(0.84, 0.21, 1); s.renderOrder = 6;
-  r.g.add(s); r.label = s; r.labelKey = text;
+  s.scale.set(0.84, 0.2625, 1); s.renderOrder = 6;
+  r.g.add(s); r.label = s; r.labelKey = key;
+}
+// 朋友手上拿的東西（net.js 的 hand）：武器、蠟燭拿在左手（握的地方在原點，往手指的方向（-y）伸出去；蠟燭是直立的），
+// 第四世界的板子（P 加等級，門是 D）夾在左手臂下、家具（F）兩手抱在胸前
+function friendHeld(r, code) {
+  const g = new THREE.Group(), D = FR_DIM[r.p.sex], k = D.k, dark = lm('#26262a'), wood = lm('#7a4a22');
+  if (code === 'F') {
+    box(g, -0.3, 0.3, -0.22, 0.22, -0.24, 0.24, lm('#b98d5a'));                 // 搬著的家具：用一個紙箱代表
+    box(g, -0.301, 0.301, 0.02, 0.06, -0.241, 0.241, lm('#d8c39a'), false);       // 封箱膠帶
+    g.position.set(0, 1.0, 0.42); r.g.add(g);
+    return g;
+  }
+  if (code[0] === 'P' || code[0] === 'D') {
+    // 真的板子是 2×2 公尺，整片畫出來會把朋友整個擋住：夾在手臂下的畫成 1.1 公尺
+    const tier = clamp(+code.slice(1) || 1, 1, PLANK_MAX), S = 1.1, col = code[0] === 'D' ? '#8a5a32' : PLANKS[tier].color;
+    box(g, -0.025, 0.025, 0, S, -S / 2, S / 2, lm(col, tier === GLASS_TIER ? { transparent: true, opacity: 0.45 } : undefined));
+    if (code[0] === 'D') sph(g, 0.03, 0.04, S * 0.48, S * 0.35, lm('#d4b24a'), 1, 1, 1, 8);   // 門把
+    g.position.set(0.34, 0.25, 0.08); r.g.add(g);
+    return g;
+  }
+  if (code === 'pan') {
+    cyl(g, 0.012, 0.014, 0.17, 0, -0.17, 0, dark, 8);                           // 握把
+    const pan = cyl(g, 0.115, 0.1, 0.03, 0, -0.3, 0, lm('#3a3a40'), 18);        // 鍋子（鍋面朝側邊）
+    pan.rotation.z = Math.PI / 2; pan.position.set(0, -0.28, 0);
+  } else if (code === 'slingshot') {
+    cyl(g, 0.013, 0.013, 0.1, 0, -0.1, 0, wood, 8);
+    for (const sx of [-1, 1]) { const m = cyl(g, 0.009, 0.009, 0.08, sx * 0.02, -0.17, 0, wood, 6); m.rotation.z = sx * 0.45; }
+    box(g, -0.04, 0.04, -0.205, -0.195, -0.004, 0.004, lm('#c9a46a'), false);   // 橡皮筋
+  } else if (code === 'watergun') {
+    box(g, -0.022, 0.022, -0.2, -0.02, -0.03, 0.03, lm('#e8e8ee'));
+    cyl(g, 0.03, 0.03, 0.09, 0, -0.13, 0.05, lm('#4aa3ff', { transparent: true, opacity: 0.75 }), 12);   // 聖水的水箱
+    box(g, -0.015, 0.015, -0.05, 0.02, -0.06, -0.02, lm('#3a78c2'));          // 握把
+  } else if (code === 'salt') {
+    cyl(g, 0.028, 0.03, 0.09, 0, -0.1, 0, lm('#f2f2f2'), 12);
+    cyl(g, 0.029, 0.029, 0.022, 0, -0.122, 0, lm('#aeb4bd'), 12);
+    box(g, -0.031, 0.031, -0.07, -0.04, -0.031, 0.031, lm('#3a78c2'), false);
+  } else if (code === 'firecracker') {
+    for (const [x, z] of [[-0.013, 0], [0.013, 0], [0, -0.012]]) cyl(g, 0.011, 0.011, 0.09, x, -0.1, z, lm('#d62828'), 8);
+    cyl(g, 0.0025, 0.0025, 0.04, 0, -0.14, -0.004, lm('#3a2a1a'), 5);
+  } else if (code === 'candle') {
+    cyl(g, 0.045, 0.035, 0.012, 0, 0, 0, lm('#8a6a2a'), 12);                    // 銅燭台
+    cyl(g, 0.016, 0.016, 0.13, 0, 0.012, 0, lm('#efe6cf'), 10);                 // 白蠟燭
+    const flame = new THREE.Mesh(geo('frFlame', () => new THREE.ConeGeometry(0.012, 0.045, 8)), ownBasic({ color: 0xffc860, fog: false }));
+    flame.position.set(0, 0.17, 0); g.add(flame); g.userData.flame = flame;
+    const glow = ownSprite(glowTex, 0xffa040); glow.position.set(0, 0.17, 0); glow.scale.setScalar(0.3); g.add(glow); g.userData.glow = glow;
+  }
+  g.position.set(0, -D.fa - 0.075 * k - 0.02, 0.012);
+  r.arms[1].fa.add(g);
+  return g;
 }
 function disposeFriend(r) {
+  if (r.held) disposeGroup(r.held);
   disposeGroup(r.g);
   for (const t of (r.px && r.px.headMat && r.px.headMat.userData.maps) || []) t.dispose();
   for (const t of r.texs || []) t.dispose();   // T 恤、牛仔褲的貼圖
@@ -5181,14 +5233,33 @@ function poseFriend(f, r, t, dt, darkK) {
     });
   }
   r.torso.rotation.x = lean;
+  // 手上拿的東西（左手）：拿武器時手臂稍微舉起來，揮的時候往前上方一甩；蠟燭舉在胸前；板子夾在手臂下；家具兩手抱著
+  const hold = lying || sit ? '' : f.hand || '', armL = r.arms[1];
+  if (hold !== r.holdKey) { if (r.held) disposeGroup(r.held); r.held = hold ? friendHeld(r, hold) : null; r.holdKey = hold; }
+  if (f.swing && !r.swPrev) r.swT = 1;   // 朋友那邊揮了一下
+  r.swPrev = !!f.swing;
+  r.swT = Math.max(0, (r.swT || 0) - dt * 3.5);
+  if (hold === 'F') for (const a of r.arms) { a.sh.rotation.set(-1.15 - lean, 0, 0); a.el.rotation.x = -0.4; }
+  else if (hold[0] === 'P' || hold[0] === 'D') { armL.sh.rotation.set(-0.1, 0, 0.32); armL.el.rotation.x = -0.25; }
+  else if (hold === 'candle') {
+    armL.sh.rotation.set(-0.5 - lean, 0, 0.1); armL.el.rotation.x = -1.05;
+    r.held.rotation.x = -(lean + armL.sh.rotation.x + armL.el.rotation.x);   // 蠟燭要直立
+    const fl = r.held.userData.flame;
+    fl.scale.set(1, 0.85 + 0.25 * Math.sin(t * 17 + r.ph), 1);
+    r.held.userData.glow.material.opacity = 0.55 + 0.15 * Math.sin(t * 11);
+    friendLights.push({ x: f.x, y: f.y, r: 1.8, col: [255, 170, 90], k: 0.35 });
+  } else if (hold) {
+    const ph = r.swT > 0 ? Math.sin((1 - r.swT) * Math.PI) : 0;
+    armL.sh.rotation.set(-0.3 - ph * 1.5 - lean, 0, 0.12); armL.el.rotation.x = -0.55 + ph * 0.35;
+  }
   // 手電筒：右手舉起來照著看的方向（上下也跟著看的方向）
-  const flash = f.flash && !lying;
+  const flash = f.flash && !lying && hold !== 'F';
   if (flash) { armR.sh.rotation.set(-Math.PI / 2 - clamp(f.pitch, -1.1, 1.1) * 0.95 - lean, diff * 0.9, 0); armR.el.rotation.x = -0.05; }
   // 頭：轉向看的方向、抬頭低頭（身體往前彎時頭抬回來）
   if (!lying) { r.headYaw.rotation.y = diff; r.headPose.rotation.set(clamp(-f.pitch * 0.75, -0.6, 0.5) - lean * 0.7, 0, 0); }
   r.g.position.set(f.x, y, f.y); r.g.rotation.y = r.yaw;
-  const key = f.down ? '💤 ' + f.name : f.name;
-  if (key !== r.labelKey) friendLabel(r, key, f.color);
+  const text = f.down ? '💤 ' + f.name : f.name, hp = f.down ? 0 : clamp(f.hp === undefined ? 100 : f.hp, 0, 100), key = text + '|' + Math.ceil(hp / 5);
+  if (key !== r.labelKey) friendLabel(r, text, f.color, hp, key);
   r.label.position.set(0, lying ? 0.55 : (FRIEND_HIP + 0.93 - cr * 0.27 - (sit ? 0.42 : 0)) * p.sc, 0);
   r.lens.visible = flash; r.beam.visible = flash;
   if (!flash) return;
@@ -5226,7 +5297,12 @@ function syncFriends(t, dt, dark) {
 }
 // 試玩測試用：畫面上的朋友
 function friendStats() {
-  return [...friendMap.values()].map(r => { let n = 0; r.g.traverse(o => { if (o.isMesh) n++; }); return { id: r.id, name: r.name, visible: r.g.visible, x: r.g.position.x, y: r.g.position.z, h: r.g.position.y, beam: r.beam.visible, meshes: n }; });
+  return [...friendMap.values()].map(r => {
+    let n = 0, held = 0;
+    r.g.traverse(o => { if (o.isMesh) n++; });
+    if (r.held) r.held.traverse(o => { if (o.isMesh) held++; });
+    return { id: r.id, name: r.name, visible: r.g.visible, x: r.g.position.x, y: r.g.position.z, h: r.g.position.y, beam: r.beam.visible, meshes: n - held, held: r.holdKey || '', label: r.labelKey || '' };   // meshes 不算手上拿的東西
+  });
 }
 
 // ====================================================================

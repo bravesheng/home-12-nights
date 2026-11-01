@@ -1146,7 +1146,7 @@ await scenario('cut3', '第三到第四世界（?cut=3）：第三世界的結�
   check(await page.evaluate(() => curWorld === 4 && bagUsed() > 0), '要進第四世界、背包要帶過去');
 });
 
-await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩個分頁，用 BroadcastChannel 互連，不用上網）：遊戲中開房間、用代碼加入、客人進到房主的世界和天數、時間對齊、看得到彼此的 3D 人物和手電筒、自訂事件（大訊息切塊）、換白天晚上、客人倒下天亮時醒來、客人的存檔不變、暫停同步（有人暫停大家都暫停、寫著是誰、誰按繼續大家一起繼續、開書包不算暫停）、切到別的 App 時藏起人物、離開房間（人物馬上消失）、在主選單等房主開始、關掉分頁馬上算離開、第四世界一起蓋房子（板子、家具、架上的東西、斜坡同步）', { limit: 300000 }, async ({ page, ctx, shot, check }) => {
+await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩個分頁，用 BroadcastChannel 互連，不用上網）：遊戲中開房間、用代碼加入、客人進到房主的世界和天數、時間對齊、看得到彼此的 3D 人物和手電筒、自訂事件（大訊息切塊）、換白天晚上、客人倒下天亮時醒來、客人的存檔不變、暫停同步（有人暫停大家都暫停、寫著是誰、誰按繼續大家一起繼續、開書包不算暫停）、切到別的 App 時藏起人物、離開房間（人物馬上消失）、在主選單等房主開始、關掉分頁馬上算離開、第四世界一起蓋房子（板子、家具、架上的東西、斜坡同步）、怪物同步（交給離牠最近的人算、打朋友算的怪物、用手電筒照，第一和第四世界）', { limit: 300000 }, async ({ page, ctx, shot, check }) => {
   // 房主用測試版（不存檔，不會蓋掉客人的存檔；兩個分頁共用 localStorage），客人用正式版
   const guest = await ctx.newPage();
   guest.on('pageerror', e => check(false, '客人的分頁 JS 錯誤：' + e.message));
@@ -1256,6 +1256,86 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   await page.waitForFunction(() => G.b4.ramps.size > 0, null, { timeout: 8000 }).catch(() => {});
   const b3 = await page.evaluate(uid => ({ gone: !G.pickups.some(p => p.uid === uid), ramp: G.b4.ramps.has('52,63') }), b1.uid);
   check(b3.gone && b3.ramp, `客人拿走的架上東西、放的斜坡，房主那邊也要同步（${JSON.stringify(b3)}）`);
+  // 電視開關、火爐的燃料、櫃子裡放的東西、第 3 天以後才出現的特別板材堆（岩漿、玻璃）也要同步
+  const s1 = await page.evaluate(() => {
+    const tv = FURN.find(f => f.type === 'tv4'), fire = FURN.find(f => f.type === 'fireplace4'), cab = FURN.find(f => (FURN4[f.type] || {}).store);
+    if (tv.on) toggleTv4(tv);
+    toggleTv4(tv);
+    G.inv.wood = 2; fuelFire4(fire, 'wood');
+    G.inv.marble = 3; openStore4(cab); modalAct('put:marble'); closeModal();
+    G.hand = null;
+    const sp = addSpecialPile4('pile_sp99', Math.floor(W4AX + 3), Math.floor(W4H - 9), LAVA_TIER); net4Day();
+    return { tv: tv.id, fire: fire.id, cab: cab.id, sp: sp.id };
+  });
+  await guest.waitForFunction(s => FURN_BY_ID[s.sp] && (G.containers[s.cab] || { items: [] }).items.length > 0, s1, { timeout: 6000 }).catch(() => {});
+  const s2 = await guest.evaluate(s => ({ tv: FURN_BY_ID[s.tv].on, fuel: (FURN_BY_ID[s.fire].fuel || []).length, cab: ((G.containers[s.cab] || {}).items || []).join(), sp: !!FURN_BY_ID[s.sp] }), s1);
+  check(s2.tv && s2.fuel === 1 && s2.cab.includes('marble') && s2.sp, `房主開電視、丟木柴進火爐、把彈珠放進櫃子、出現特別板材堆，客人那邊要一樣（${JSON.stringify(s2)}）`);
+  // 客人把彈珠從櫃子拿出來；房主拿走特別板材堆的最後一片：兩邊都要跟著變
+  await guest.evaluate(s => { G.hand = null; const f = FURN_BY_ID[s.cab]; openStore4(f); modalAct('take:marble'); closeModal(); }, s1);
+  await page.evaluate(s => { G.hand = null; takeFromPile4(FURN_BY_ID[s.sp]); G.hand = null; }, s1);
+  await sleep(1200);
+  const s3 = { h: await page.evaluate(s => ((G.containers[s.cab] || {}).items || []).join(), s1), g: await guest.evaluate(s => ({ cab: ((G.containers[s.cab] || {}).items || []).join(), sp: !!FURN_BY_ID[s.sp], marble: G.inv.marble || 0 }), s1) };
+  check(!s3.h.includes('marble') && s3.h === s3.g.cab && !s3.g.sp && s3.g.marble > 0, `客人從櫃子拿走的彈珠、房主拿完的特別板材堆，另一邊也要跟著變（櫃子裡原本可能就有東西）（${JSON.stringify(s3)}）`);
+  // 朋友頭上的血量條、手上拿的東西：客人拿著平底鍋、血剩 37 → 房主看得到；客人揮平底鍋，房主那邊的手臂也揮
+  await guest.evaluate(() => { G.inv.pan = 1; G.selId = 'pan'; G.p.hp = 37; invDirty = true; });
+  await page.waitForFunction(() => { const f = Net.friends()[0]; return f && f.hand === 'pan' && f.hp === 37; }, null, { timeout: 5000 }).catch(() => {});
+  await sleep(800);
+  const hf = await page.evaluate(() => ({ f: Net.friends().map(f => ({ hand: f.hand, hp: f.hp })), r: Renderer.friends().map(r => ({ held: r.held, label: r.label })) }));
+  check(hf.f[0] && hf.f[0].hand === 'pan' && hf.f[0].hp === 37 && hf.r[0] && hf.r[0].held === 'pan' && hf.r[0].label.endsWith('|8'), `房主要看到客人手上的平底鍋和血量（${JSON.stringify(hf)}）`);
+  await page.evaluate(() => Object.assign(G.p, { x: W4AX + 0.5, y: W4H - 3.6, face: -Math.PI / 2, pitch: -0.1 }));
+  await guest.evaluate(() => { Object.assign(G.p, { x: W4AX + 0.5, y: W4H - 5.4, face: Math.PI / 2, pitch: 0, flash: false }); G.swingT = 1; G.swingId = 'pan'; });
+  await sleep(250);
+  await shot('2d-guest-holds-pan');
+  // 送東西：客人看著房主按 E（點一下）送平底鍋；房主已經有平底鍋了就退回來；按住 E 給 5 枚硬幣
+  await page.evaluate(() => { delete G.inv.pan; G.coins = 0; Object.assign(G.p, { x: W4AX + 0.5, y: W4H - 14, face: -Math.PI / 2 }); });   // 離早晨禮物遠一點
+  await guest.evaluate(() => { Object.assign(G.p, { x: W4AX + 0.5, y: W4H - 15.1, face: Math.PI / 2, pitch: 0, hp: 100 }); G.coins = 12; G.inv.pan = 1; G.selId = 'pan'; });
+  await guest.waitForFunction(() => Net.friends().some(f => f.ingame && Math.hypot(f.x - G.p.x, f.y - G.p.y) < 1.5), null, { timeout: 5000 }).catch(() => {});
+  const gt = await guest.evaluate(() => { const t = getTarget(); return t ? t.label : ''; });
+  check(gt.startsWith('送平底鍋給'), `看著朋友時 E 要是「送平底鍋給…」（${gt}）`);
+  await guest.evaluate(() => { const f = Net.friends()[0]; giveFriend(f, 'pan'); giveFriend(f, 'coin'); });
+  await page.waitForFunction(() => G.inv.pan === 1 && G.coins === 5, null, { timeout: 5000 }).catch(() => {});
+  const gv = { h: await page.evaluate(() => ({ pan: G.inv.pan || 0, coins: G.coins })), g: await guest.evaluate(() => ({ pan: G.inv.pan || 0, coins: G.coins })) };
+  check(gv.h.pan === 1 && gv.h.coins === 5 && gv.g.pan === 0 && gv.g.coins === 7, `客人送平底鍋和 5 枚硬幣給房主（${JSON.stringify(gv)}）`);
+  await guest.evaluate(() => { G.inv.pan = 1; giveFriend(Net.friends()[0], 'pan'); });
+  await guest.waitForFunction(() => G.inv.pan === 1, null, { timeout: 5000 }).catch(() => {});
+  check(await guest.evaluate(() => G.inv.pan === 1) && await page.evaluate(() => G.inv.pan === 1), '房主已經有平底鍋了，送過去的要退回來');
+  await guest.evaluate(() => { G.selId = null; G.swingT = 0; invDirty = true; });
+  // 怪物同步（netmon.js）：每隻怪物由離牠最近的人算，別人照著畫；打別人算的怪物、用手電筒照，傷害交給牠的主人
+  const monIds = pg => pg.evaluate(() => G.enemies.filter(e => !e.dead && e.nid).map(e => e.nid).sort().join());
+  await page.waitForFunction(() => G.enemies.every(e => e.nid), null, { timeout: 3000 }).catch(() => {});
+  await sleep(1500);
+  const st1 = await page.evaluate(() => G.enemies.filter(e => e.kind === 'staff').length), mh = await monIds(page), mg = await monIds(guest);
+  check(st1 > 0 && mh === mg, `客人要看到房主那邊白天站著的店員，而且是同一批（房主 ${st1} 隻：${mh}；客人：${mg}）`);
+  const MY = await page.evaluate(() => W4H - 22);
+  await page.evaluate(() => Object.assign(G.p, { x: W4AX + 0.5, y: W4H - 3.5, face: -Math.PI / 2, flash: false }));
+  await guest.evaluate(y => Object.assign(G.p, { x: W4AX + 0.5, y, face: Math.PI / 2, pitch: 0, inv: 999, flash: false }), MY);
+  await sleep(400);
+  // 房主生一隻黑影在客人旁邊：客人比房主近很多，要交給客人算
+  const nid1 = await page.evaluate(y => { const e = spawnEnemy('shadow', { x: W4AX + 0.5, y: y + 2 }); e.spawn = 0; return NetMon.id(e); }, MY);
+  await guest.waitForFunction(id => G.enemies.some(e => e.nid === id && !e.rm), nid1, { timeout: 6000 }).catch(() => {});
+  await sleep(600);
+  const g1 = await guest.evaluate(id => { const e = G.enemies.find(e => e.nid === id); return e && { mine: !e.rm, x: e.x, y: e.y }; }, nid1);
+  const h1 = await page.evaluate(id => { const e = G.enemies.find(e => e.nid === id); return e && { rm: e.rm, x: e.x, y: e.y }; }, nid1);
+  check(nid1 && g1 && g1.mine && h1 && h1.rm === gid, `房主生在客人旁邊的怪物要交給客人算（客人 ${JSON.stringify(g1)}、房主 ${JSON.stringify(h1)}）`);
+  check(g1 && h1 && Math.hypot(g1.x - h1.x, g1.y - h1.y) < 1.2, `房主畫面上的怪物要在客人那邊的位置（差 ${g1 && h1 && Math.hypot(g1.x - h1.x, g1.y - h1.y).toFixed(2)} 格）`);
+  // 房主用平底鍋打客人算的怪物：客人那邊扣血打倒，兩邊都不見；房主也算打倒了一隻
+  const k0 = await page.evaluate(() => G.stats.dissolved);
+  await page.evaluate(id => { const e = G.enemies.find(e => e.nid === id); if (e) hurtMonster(e, 50, 'pan'); }, nid1);
+  await guest.waitForFunction(id => !G.enemies.some(e => e.nid === id), nid1, { timeout: 4000 }).catch(() => {});
+  await page.waitForFunction(id => !G.enemies.some(e => e.nid === id), nid1, { timeout: 4000 }).catch(() => {});
+  const gone = { g: await guest.evaluate(id => G.enemies.some(e => e.nid === id), nid1), h: await page.evaluate(id => G.enemies.some(e => e.nid === id), nid1), k: await page.evaluate(() => G.stats.dissolved) };
+  check(!gone.g && !gone.h && gone.k === k0 + 1, `房主打客人算的怪物：要在客人那邊打倒，兩邊都不見，房主也算打倒一隻（${JSON.stringify({ ...gone, k0 })}）`);
+  // 客人那邊的怪物被敲暈站著，房主走過去用手電筒照：客人那邊的血要一直掉
+  const nid2 = await guest.evaluate(y => { const e = spawnEnemy('shadow', { x: W4AX + 0.5, y: y + 2.5 }); Object.assign(e, { spawn: 0, stunT: 60, hp: 50, maxHp: 50 }); return NetMon.id(e); }, MY);
+  await page.evaluate(y => Object.assign(G.p, { x: W4AX + 0.5, y: y + 6, face: -Math.PI / 2, pitch: 0, flash: true, bat: 100 }), MY);
+  await page.waitForFunction(id => G.enemies.some(e => e.nid === id && e.rm), nid2, { timeout: 4000 }).catch(() => {});
+  const hp0 = await guest.evaluate(id => (G.enemies.find(e => e.nid === id) || {}).hp, nid2);
+  await sleep(2500);
+  const hp1 = await guest.evaluate(id => { const e = G.enemies.find(e => e.nid === id); return e ? { hp: e.hp, mine: !e.rm } : null; }, nid2);
+  check(hp1 && hp1.mine && hp1.hp < hp0 - 0.3, `房主的手電筒照著客人算的怪物，客人那邊的血要掉（${hp0} → ${JSON.stringify(hp1)}）`);
+  await shot('2c-host-lights-guest-monster');
+  await guest.evaluate(id => { const e = G.enemies.find(e => e.nid === id); if (e) e.dead = true; G.p.inv = 0; }, nid2);
+  await page.evaluate(() => { G.p.flash = false; });
   // 房主天黑 → 客人跟著天黑
   await page.evaluate(() => { G.t = DAY_LEN - 0.05; });
   await guest.waitForFunction(() => G.phase === 'night' && G.day === 2, null, { timeout: 20000 });
@@ -1265,6 +1345,19 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   const dn = await guest.evaluate(() => ({ mode, over: !document.getElementById('gameover').classList.contains('hidden'), down: !document.getElementById('netDown').classList.contains('hidden'), text: document.getElementById('netDownText').textContent }));
   check(dn.mode === 'down' && !dn.over && dn.down && dn.text.includes('天亮'), `客人倒下要顯示「天亮時會醒來」、不是結束畫面（${JSON.stringify(dn)}）`);
   await gshot('4-guest-down');
+  // 房主走到倒下的客人旁邊按住 E：把他扶起來（在原地起來）；再倒下一次，接著測天亮時醒來
+  const gpos = await guest.evaluate(() => ({ x: G.p.x, y: G.p.y }));
+  await page.waitForFunction(() => Net.friends().some(f => f.down), null, { timeout: 5000 }).catch(() => {});
+  await page.evaluate(g => Object.assign(G.p, { x: g.x, y: g.y + 1, face: -Math.PI / 2, pitch: 0.3 }), gpos);
+  await page.waitForFunction(() => Net.friends().some(f => f.down && Math.hypot(f.x - G.p.x, f.y - G.p.y) < 1.5), null, { timeout: 5000 }).catch(() => {});
+  const rt = await page.evaluate(() => { const t = getTarget(); return t ? { label: t.label, hold: t.hold } : null; });
+  check(rt && rt.label.startsWith('扶') && rt.hold > 1, `朋友倒下了，走到旁邊 E 要是「扶…起來」（按住）（${JSON.stringify(rt)}）`);
+  await page.evaluate(() => reviveFriend(Net.friends().find(f => f.down)));
+  await guest.waitForFunction(() => mode === 'play', null, { timeout: 5000 }).catch(() => {});
+  const rv = await guest.evaluate(g => ({ mode, hp: G.p.hp, moved: Math.hypot(G.p.x - g.x, G.p.y - g.y), big: document.getElementById('bigText').textContent }), gpos);
+  check(rv.mode === 'play' && rv.hp === 40 && rv.moved < 0.5 && rv.big.includes('扶起來'), `朋友把客人扶起來：在原地醒來、血 40（${JSON.stringify(rv)}）`);
+  await guest.evaluate(() => gameOver());
+  await guest.waitForFunction(() => mode === 'down', null, { timeout: 5000 }).catch(() => {});
   await page.waitForFunction(() => Net.friends().some(f => f.down), null, { timeout: 5000 }).catch(() => check(false, '房主要看到客人倒下了'));
   // 房主天亮 → 客人在第 3 天醒過來
   await page.evaluate(() => { G.t = NIGHT_LEN - 0.05; });
@@ -1352,6 +1445,17 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   check(w1.mode === 'play' && w1.world === 1 && w1.day === 1 && w1.diff === 'easy' && w1.ready, `房主開新遊戲時，在主選單等的客人要跟著進去（${JSON.stringify(w1)}）`);
   await sleep(1200);
   await gshot('6-guest-w1');
+  // 第一世界的房子也一樣：房主在離自己很遠的房間生一隻黑影，客人站在那裡，要交給客人算，房主畫面上也看得到
+  const far = await page.evaluate(() => { const at = findSpawn(12); return at && { x: at.x, y: at.y }; });
+  if (far) {
+    await guest.evaluate(at => Object.assign(G.p, { x: at.x, y: at.y + 0.6, inv: 999 }), far);
+    await sleep(500);
+    const nid3 = await page.evaluate(at => { const e = spawnEnemy('shadow', at); e.spawn = 0; return NetMon.id(e); }, far);
+    await guest.waitForFunction(id => G.enemies.some(e => e.nid === id && !e.rm), nid3, { timeout: 6000 }).catch(() => {});
+    const w1m = { g: await guest.evaluate(id => G.enemies.some(e => e.nid === id && !e.rm), nid3), h: await page.evaluate(id => (G.enemies.find(e => e.nid === id) || {}).rm || '', nid3) };
+    check(w1m.g && w1m.h === await guest.evaluate(() => Net.myId), `第一世界：房主生在客人旁邊的黑影要交給客人算（${JSON.stringify(w1m)}）`);
+    await guest.evaluate(() => { G.p.inv = 0; });
+  } else check(false, '第一世界找不到離房主很遠的地方');
   // 房主關掉房間：客人回到主選單，有提示
   await page.evaluate(() => Net.leave());
   await guest.waitForFunction(() => mode === 'title' && !Net.active, null, { timeout: 15000 }).catch(() => {});

@@ -623,9 +623,24 @@ function takeFromPile4(f) {
   if (!(f.count > 0)) { toast(`${PLANKS[f.tier].name}堆空了，明天早上會再補。`); Sound.play('empty'); return; }
   f.count--; net4('pile', { id: f.id, count: f.count });
   holdThing({ k: 'plank', tier: f.tier });
-  if (f.special && !f.count) { FURN.splice(FURN.indexOf(f), 1); furnGrid[f.y][f.x] = null; solid[f.y][f.x] = false; b4Changed(); if (Renderer.furn4) Renderer.furn4(f, true); }
+  if (f.special && !f.count) dropSpecialPile4(f);
   Sound.play('pickup');
   if (G.tutorial4 === 1) G.tutorial4 = 2;
+}
+function toggleTv4(f) { f.on = !f.on; Sound.play(f.on ? 'tvOn' : 'click'); net4('tv', { id: f.id, on: f.on ? 1 : 0 }); }
+// 特別板材堆（岩漿、玻璃，只有 1 片）拿完了就不見
+function dropSpecialPile4(f) {
+  const i = FURN.indexOf(f);
+  if (i < 0) return;
+  FURN.splice(i, 1); delete FURN_BY_ID[f.id];
+  if (furnGrid[f.y] && furnGrid[f.y][f.x] === f) { furnGrid[f.y][f.x] = null; solid[f.y][f.x] = false; }
+  b4Changed(); if (Renderer.furn4) Renderer.furn4(f, true);
+}
+// 特別板材堆出現了（startDay4，跟朋友一起玩時客人照房主的 net4ApplyDay）
+function addSpecialPile4(id, x, y, tier, count = 1) {
+  const f = { id, type: 'plankpile', name: '板材堆', x, y, w: 1, h: 1, tier, count, special: true };
+  FURN.push(f); FURN_BY_ID[f.id] = f; addFurn4(f);
+  return f;
 }
 function dropLoose4(x, y, k) {
   for (let i = 0; i < 12; i++) {
@@ -822,8 +837,10 @@ function takePickup4(pk) {
 const STORE_MAX = 12;
 // 櫃子裡的一格：搜到的物資是 'id'（數量照 LOOT_QTY），自己放進去的是 'id:數量'
 const storeEntry = e => { const i = e.indexOf(':'); return i < 0 ? [e, LOOT_QTY[e] || 1] : [e.slice(0, i), +e.slice(i + 1)]; };
+let storeOpen4 = null;   // 正在看哪一個櫃子（朋友放東西進去、拿出來時畫面要跟著變）
 function openStore4(f) {
   const c = G.containers[f.id] || (G.containers[f.id] = { items: [] });
+  storeOpen4 = f.id;
   makeNoise(3);
   if (c.items.length) G.stats.searched++;
   const name = f.name || '櫃子';
@@ -842,6 +859,7 @@ function openStore4(f) {
       if (i < 0 || !bagFits(id)) return;
       const [, n] = storeEntry(c.items[i]);
       c.items.splice(i, 1);
+      net4('store', { id: f.id, items: c.items });   // 跟朋友一起玩：櫃子裡的東西大家一樣
       const got = gainItem(id, n);
       for (const [gid] of got) if (ITEMS[gid] && ITEMS[gid].kind === 'bulb') showBulbCard(ITEMS[gid].tier);
       Sound.play('pickup');
@@ -849,6 +867,7 @@ function openStore4(f) {
       if (!G.inv[id] || c.items.length >= STORE_MAX) return;
       const n = G.inv[id];
       removeItem(id, n); c.items.push(`${id}:${n}`);
+      net4('store', { id: f.id, items: c.items });
       Sound.play('place');
     } else if (a === 'lift') {
       closeModal();
@@ -940,7 +959,7 @@ function addTargets4(cands) {
     else if (spec.fn === 'fire') {
       const sel = G.selId && ITEMS[G.selId].kind === 'fuel' ? G.selId : worstFuel(), left = Math.round((f.fuel || []).reduce((s, q) => s + q.left, 0));
       cands.push({ d, id: 'f4:' + f.id, label: sel ? `丟${ITEMS[sel].name}進火爐` : `火爐：還能燒 ${left} 秒`, sub: (sel ? `還能燒 ${left} 秒・` : '背包裡沒有木柴或煤炭・') + sub, hold: 0.6, tap: () => sel && fuelFire4(f, sel), action: lift });
-    } else if (spec.fn === 'tv') cands.push({ d, id: 'f4:' + f.id, label: f.on ? '關掉電視' : '打開電視', sub, hold: 0.6, tap: () => { f.on = !f.on; Sound.play(f.on ? 'tvOn' : 'click'); }, action: lift });
+    } else if (spec.fn === 'tv') cands.push({ d, id: 'f4:' + f.id, label: f.on ? '關掉電視' : '打開電視', sub, hold: 0.6, tap: () => toggleTv4(f), action: lift });
     else cands.push({ d, id: 'f4:' + f.id, label: `拿起${f.name}`, sub: `按住 E${f.solid === false ? '' : '（可以搬回家，讓家更溫馨）'}`, hold: 0.6, action: lift });
   }
 }
@@ -972,6 +991,7 @@ function useBulb4(tier) {
 // 火爐（可以搬回家的家具）：丟木柴、煤炭進去燒，會發光、3 格內回體溫（抵禦寒寂之境）
 // ====================================================================
 const FIRE4_SLOTS = 4;
+const fuelSpec4 = f => (f.fuel || []).map(q => ({ id: q.id, left: Math.round(q.left * 10) / 10 }));
 const fireLeft4 = f => (f.fuel || []).reduce((s, q) => s + q.left, 0);
 function fuelFire4(f, id) {
   const it = ITEMS[id];
@@ -980,6 +1000,7 @@ function fuelFire4(f, id) {
   if (f.fuel.length >= FIRE4_SLOTS) { toast(`🔥 火爐已經放了 ${FIRE4_SLOTS} 份燃料，燒完才能再放。`, 'warn'); Sound.play('empty'); return; }
   removeItem(id);
   f.fuel.push({ id, left: it.burn });
+  net4('fuel', { id: f.id, fuel: fuelSpec4(f) });   // 跟朋友一起玩：火爐的燃料大家一樣
   Sound.play('fuelIn'); makeNoise(3);
   toast(`🔥 把${itemName(id)}丟進了火爐（還能燒 ${Math.round(fireLeft4(f))} 秒）。火爐 3 格內很溫暖。`, 'good');
 }
@@ -1041,6 +1062,7 @@ function bash4(e, dt) {
 function damageWall4(w, amt, e, dt = 0) {
   if (w.tier === GLASS_TIER) return;
   w.hp -= amt; w.hitT = 0.25;
+  if (w.hp > 0 && G.time - (w.whpT || -9) > 0.4) { w.whpT = G.time; net4('whp', { pid: w.pid, hp: Math.ceil(w.hp * 10) / 10 }); }   // 跟朋友一起玩：牆被打掉多少也告訴大家（每 0.4 秒）
   if (e && w.tier === LAVA_TIER && dt) { hurtMonster(e, 1.2 * dt, 'lava'); if (Math.random() < dt * 8) G.fx.push({ type: 'ember', x: e.x, y: e.y, h: rand(0.5, 1.6), vx: rand(-0.4, 0.4), vy: rand(-0.4, 0.4), vh: rand(0.3, 1), life: 0.5, max: 0.5, color: pick(EMBER_COLORS) }); }
   w.sndT = (w.sndT || 0) - (dt || 0.3);
   if (w.sndT <= 0) {
@@ -1072,8 +1094,7 @@ function startDay4(d) {
   if (d >= 3 && !isGuest4() && Math.random() < 0.4) {
     const sp = randomSpot4(14);
     if (sp) {
-      const tier = Math.random() < 0.3 ? GLASS_TIER : LAVA_TIER, f = { id: 'pile_sp' + d, type: 'plankpile', name: '板材堆', x: Math.floor(sp.x), y: Math.floor(sp.y), w: 1, h: 1, tier, count: 1, special: true };
-      FURN.push(f); FURN_BY_ID[f.id] = f; addFurn4(f);
+      const tier = Math.random() < 0.3 ? GLASS_TIER : LAVA_TIER, f = addSpecialPile4('pile_sp' + d, Math.floor(sp.x), Math.floor(sp.y), tier);
       toast(`✨ 聽說「${zoneName(f.x, f.y)}」出現了一片${PLANKS[tier].name}（${RARITY[PLANKS[tier].rar].name}）！`, 'good');
     }
   }
@@ -1607,6 +1628,7 @@ function seesPlayer4(e, range, fov = 1.25) {
 
 // ---------- SCP-3008-2（店員）：白天站著不動、頭慢慢轉過來看你；天黑後巡邏，看到你就追過來打你，看不到 6 秒就回去巡邏 ----------
 function spawnIdleStaff4() {
+  if (isGuest4()) return;   // 跟朋友一起玩的客人：看到的是房主那邊的店員（netmon.js 同步）
   for (let i = 0, n = 2 + Math.floor(G.day / 4); i < n; i++) {
     const sp = randomSpot4(12);
     if (!sp) continue;
@@ -1934,7 +1956,7 @@ function scheduleNight4(add, again, night, n, hz) {
 function updateSpawns4(dt) {
   if (G.phase !== 'night') return;
   const night = G.day, dk = G.diff === 'easy' ? -1 : G.diff === 'hard' ? 1 : 0;
-  const max = clamp(2 + Math.floor((night - 1) / 3) + dk + (G.ev.blood ? 1 : 0), 1, 6);
+  const max = Math.round(clamp(2 + Math.floor((night - 1) / 3) + dk + (G.ev.blood ? 1 : 0), 1, 6) * NetMon.crowd());   // 跟朋友一起玩：朋友的店員也算，上限高一點
   G.spawnT -= dt;
   if (G.spawnT > 0) return;
   G.spawnT = rand(22, 34) / D().spawn * (G.power ? 1 : 0.8);
@@ -2326,7 +2348,7 @@ function showBulbPage(tab) {
 
 // ====================================================================
 // 跟朋友一起蓋房子（net.js 的 Net）：第四世界自己蓋的牆、門、屋頂、斜坡、搬的家具、板材堆、地上的板子、
-// 架上的東西、放下的檯燈和電視會同步給房間裡的人（怪物照舊各自算）。每一片板子、每個東西有自己的 id（pid／uid），收到時照 id 找。
+// 架上的東西、放下的檯燈和電視會同步給房間裡的人；牆被怪物打掉多少也會送（whp）。怪物在 netmon.js 同步。每一片板子、每個東西有自己的 id（pid／uid），收到時照 id 找。
 // 客人進到房主的第四世界時先要一份完整的資料（b4req → b4full）；之後每一個變動送一個 'b4' 事件；
 // 每天早上的補貨（架上的東西、板材堆）和神秘店員的位置照房主的（day4）
 // ====================================================================
@@ -2350,6 +2372,13 @@ function net4Apply(d) {
     switch (d.a) {
       case 'wall': if (!pieceById4(d.w.pid)) setWall(fromSpec4(d.w)); break;
       case 'rm': { const w = pieceById4(d.pid); if (w) removeWall(w); break; }
+      case 'whp': {   // 朋友那邊的怪物在打牆
+        const w = pieceById4(d.pid);
+        if (!w || !(d.hp < w.hp)) break;
+        w.hp = d.hp; w.hitT = 0.25;
+        if (!w.warned && nearHome4(w.x, w.y, HOME_R + 3)) { w.warned = true; toast(`🔨 有東西在打你家的${plankName(w.tier, w.door)}！（耐打 ${Math.max(0, Math.ceil(w.hp))}/${PLANKS[w.tier].hp}）`, 'warn'); }
+        break;
+      }
       case 'door': { const w = pieceById4(d.pid); if (w) { w.open = !!d.open; b4Changed(); Sound.play(w.open ? 'click' : 'doorSlam', 0.3); } break; }
       case 'roof': if (!G.b4.roofs.has(d.r.x + ',' + d.r.y)) setRoof4({ ...d.r, hp: uninf4(d.r.hp) }); break;
       case 'unroof': { const r = G.b4.roofs.get(d.x + ',' + d.y); if (r) delRoof4(r); break; }
@@ -2364,7 +2393,15 @@ function net4Apply(d) {
         addFurn4(f);
         break;
       }
-      case 'pile': { const f = FURN_BY_ID[d.id]; if (f) f.count = d.count; break; }
+      case 'pile': { const f = FURN_BY_ID[d.id]; if (f) { f.count = d.count; if (f.special && !f.count) dropSpecialPile4(f); } break; }
+      case 'tv': { const f = FURN_BY_ID[d.id]; if (f) f.on = !!d.on; break; }
+      case 'fuel': { const f = FURN_BY_ID[d.id]; if (f && Array.isArray(d.fuel)) { f.fuel = d.fuel.filter(q => q && ITEMS[q.id] && q.left > 0); Sound.play('fuelIn', nearVol(Math.hypot(f.x - G.p.x, f.y - G.p.y)) * 0.6); } break; }
+      case 'store': {
+        if (!FURN_BY_ID[d.id] || !Array.isArray(d.items)) break;
+        G.containers[d.id] = { items: d.items.filter(e => typeof e === 'string' && ITEMS[storeEntry(e)[0]]).slice(0, STORE_MAX) };
+        if (mode === 'modal' && storeOpen4 === d.id) refreshModal();   // 正在看同一個櫃子
+        break;
+      }
       case 'take': { const i = G.pickups.findIndex(p => p.uid === d.uid); if (i >= 0) G.pickups.splice(i, 1); break; }
       case 'drop': if (!G.pickups.some(p => p.uid === d.pk.uid)) G.pickups.push({ ...d.pk, t: 0, keep: 1 }); break;
       case 'tloose': { const i = G.loose4.findIndex(l => l.uid === d.uid); if (i >= 0) G.loose4.splice(i, 1); break; }
@@ -2379,6 +2416,7 @@ function net4Full() {
   return {
     s: save4(), loose: G.loose4.map(l => ({ x: l.x, y: l.y, tier: l.tier, door: l.door, a: l.a, k: 'plank', uid: uidOf4(l) })),
     pk: G.pickups.filter(p => p.s || p.id !== 'coin').map(pkSpec4), lamps: G.lamps.filter(l => l.free).map(lampSpec4),
+    cont: Object.fromEntries(FURN.filter(f => (FURN4[f.type] || {}).store && G.containers[f.id]).map(f => [f.id, G.containers[f.id].items])),   // 櫃子裡放的東西
   };
 }
 function net4ApplyFull(d) {
@@ -2396,19 +2434,29 @@ function net4ApplyFull(d) {
     G.loose4 = (d.loose || []).filter(l => PLANKS[l.tier]);
     G.pickups = G.pickups.filter(p => p.id === 'coin' && !p.s).concat((d.pk || []).map(p => ({ ...p, t: Math.random() * 6, keep: 1 })));
     G.lamps = G.lamps.filter(l => !l.free).concat((d.lamps || []).filter(l => inMap(l.x, l.y)).map(l => ({ kind: 'lamp', ...l, dying: 0, room: roomGrid[l.y][l.x] })));
+    for (const f of FURN) if ((FURN4[f.type] || {}).store) G.containers[f.id] = { items: ((d.cont || {})[f.id] || []).filter(e => typeof e === 'string' && ITEMS[storeEntry(e)[0]]) };
   } finally { net4Mute = false; }
   toast('🏠 跟房主的賣場同步好了：大家蓋的房子、搬的家具、架上的東西都一樣。', 'good');
 }
 // 每天早上：房主補好貨以後，把架上的東西、板材堆、神秘店員的位置送給客人
 function net4Day() {
   if (!net4On() || !Net.isHost) return;
-  Net.send('day4', { pks: shelfList4(), piles: FURN.filter(f => f.type === 'plankpile' && !f.special).map(f => [f.id, f.count || 0]), merchant: { x: MERCHANT_POS.x, y: MERCHANT_POS.y } });
+  Net.send('day4', { pks: shelfList4(), piles: FURN.filter(f => f.type === 'plankpile' && !f.special).map(f => [f.id, f.count || 0]), merchant: { x: MERCHANT_POS.x, y: MERCHANT_POS.y },
+    sp: FURN.filter(f => f.special && f.type === 'plankpile').map(f => [f.id, f.x, f.y, f.tier, f.count || 0, f.held ? 1 : 0]) });   // 特別板材堆（岩漿、玻璃）
 }
 function net4ApplyDay(d) {
   if (!isW4() || !G) return;
   G.pickups = G.pickups.filter(p => !p.s).concat((d.pks || []).map(p => ({ ...p, t: Math.random() * 6, keep: 1 })));
   for (const [id, n] of d.piles || []) { const f = FURN_BY_ID[id]; if (f) f.count = n; }
   if (d.merchant) Object.assign(MERCHANT_POS, d.merchant);
+  // 特別板材堆：房主那邊有、這邊沒有的就放上去（今天新出現的跳提示）；房主那邊沒有了的拿掉
+  const sp = Array.isArray(d.sp) ? d.sp : [];
+  for (const [id, x, y, tier, n, held] of sp) {
+    if (FURN_BY_ID[id] || held || !PLANKS[tier] || !inMap(x, y) || !(n > 0)) continue;
+    addSpecialPile4(id, x, y, tier, n);
+    if (id === 'pile_sp' + G.day) toast(`✨ 聽說「${zoneName(x, y)}」出現了一片${PLANKS[tier].name}（${RARITY[PLANKS[tier].rar].name}）！`, 'good');
+  }
+  for (const f of FURN.filter(f => f.special && f.type === 'plankpile' && !f.held && !sp.some(r => r[0] === f.id))) dropSpecialPile4(f);
 }
 function net4Bind() {
   if (typeof Net === 'undefined') return;
