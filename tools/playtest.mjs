@@ -841,11 +841,11 @@ await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板�
   // 沐浴球：在水邊選它按 Q 丟進水裡，冒泡之後岸邊浮上來 2～4 樣東西
   const bath = await page.evaluate(() => {
     G.inv.bathbomb = 2; G.selId = 'bathbomb';
-    const n0 = G.pickups.length;
+    const n0 = G.pickups.length, c0 = G.coins;
     useSelected();
     const fizz = (G.bath5 || []).length;
     updateBath5(2.1);
-    return { fizz, left: G.inv.bathbomb, washed: G.pickups.length - n0 };
+    return { fizz, left: G.inv.bathbomb, washed: G.pickups.length - n0 + (G.coins - c0) / 2 };   // 洗出來的硬幣直接給丟的人（一次 2 枚）
   });
   check(bath.fizz === 1 && bath.left === 1 && bath.washed >= 2 && bath.washed <= 4, `沐浴球丟進水裡要冒泡、洗出 2～4 樣東西（${JSON.stringify(bath)}）`);
   await sleep(600);
@@ -1659,6 +1659,7 @@ await scenario('net5', '跟朋友一起玩第五世界（?nettest）：客人進
   await guest.click('#btnFriends');
   await guest.fill('#fName', '小華');
   await guest.fill('#fCode', code);
+  await guest.evaluate(() => { window.__left = []; Net.on('@close', d => window.__left.push({ why: d && d.why, t: Math.round(performance.now()), w: curWorld })); });
   await guest.click('#fJoin');
   await guest.waitForFunction(() => (mode === 'play' || mode === 'pause') && curWorld === 5 && Net.ready, null, { timeout: 90000 });
   await page.evaluate(() => { if (mode === 'pause') resumeGame(); });
@@ -1667,7 +1668,7 @@ await scenario('net5', '跟朋友一起玩第五世界（?nettest）：客人進
   await page.waitForFunction(() => Net.friends().some(f => f.ingame && f.world === 5), null, { timeout: 30000 }).catch(() => {});
   await guest.waitForFunction(() => Net.friends().some(f => f.ingame && f.world === 5), null, { timeout: 30000 }).catch(() => {});
   await guest.waitForFunction(id => curWorld === 5 && FURN_BY_ID[id] && FURN_BY_ID[id].cut, first, { timeout: 40000 }).catch(() => {});
-  const g0 = await guest.evaluate(id => ({ world: curWorld, cut: !!(FURN_BY_ID[id] && FURN_BY_ID[id].cut), grown: G.pickups.filter(p => p.s).length }), first);
+  const g0 = await guest.evaluate(id => ({ world: curWorld, cut: !!(FURN_BY_ID[id] && FURN_BY_ID[id].cut), grown: G.pickups.filter(p => p.s).length, left: window.__left, mode }), first);
   const h0 = await page.evaluate(() => G.pickups.filter(p => p.s).length);
   check(g0.world === 5 && g0.cut, `客人要進到房主的草原、房主之前砍倒的樹也是倒的（${JSON.stringify(g0)}）`);
   check(g0.grown === h0 && h0 > 30, `樹上和花上的東西要跟房主一樣（房主 ${h0}、客人 ${g0.grown}）`);

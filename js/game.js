@@ -96,6 +96,7 @@ function applyWorld(w) {
   document.body.classList.toggle('w4', w >= 4);   // 第五世界也用第四世界的按鈕（蓋房子、背包）
   document.body.classList.toggle('w5', w === 5);
   if (window.Renderer && Renderer.setWorld) Renderer.setWorld(w);
+  if (NET_OK) Net.busy();   // 蓋好之後第一次畫（準備新的材質）也會卡一下，再說一次，朋友才不會在這時候把你當成斷線
 }
 // 設定（每台平板自己的，測試版也會記；跟存檔、進度分開）：pickTips 拿到東西的提示要不要顯示
 const OPTS_KEY = 'home99_opts_v1';
