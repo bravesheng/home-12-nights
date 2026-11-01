@@ -3137,12 +3137,23 @@ function syncMonster3(e, r, t, p, d, dt) {
 // SCP-3008-2（店員）、葵氏奶昔、紅涎偽人、Hubert、燼皇；還有神秘店員（不是怪物，是賣東西的）
 // 臉都是 world4.js 的 2D 畫法畫成貼圖（驚嚇畫面、圖鑑縮圖也用同一張）
 // ====================================================================
-let staffShirtTex, staffFaceTex, mimicFaceTex, emberFaceTex, clerkFaceTex, shakeOpenTex, shakeShutTex, cartonTex, emberCapeTex, clerkRobeTex, mimicSkinTex, emberSkinTex, emberWingTex;
+let staffShirtTex, staffFaceTex, mimicFaceTex, emberFaceTex, clerkFaceTex, shakeFrontTex, shakeIrisTex, cartonTex, emberCapeTex, clerkRobeTex, mimicSkinTex, emberSkinTex, emberWingTex;
 function makeMonster4Textures() {
   if (staffShirtTex) return;
   const faceT = (draw, S = 512) => { const t = canvasTex(S, S, c => draw(c, S)); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; return t; };
   staffFaceTex = faceT(drawStaffFace); mimicFaceTex = faceT(drawMimicFace); emberFaceTex = faceT(drawEmberFace); clerkFaceTex = faceT(drawClerkFace, 256);
-  shakeOpenTex = faceT((c, S) => drawShakeFront(c, S, 1), 512); shakeShutTex = faceT((c, S) => drawShakeFront(c, S, 0), 512);
+  shakeFrontTex = faceT((c, S) => drawShakeFront(c, S, 1, true), 512);   // 只有眼窩：眼球和眼皮是 3D 的
+  // 葵氏奶昔的虹膜：淡褐色帶一點綠（照設計圖），一絲一絲的紋路、黑色的瞳孔、反光
+  shakeIrisTex = canvasTex(256, 256, c => {
+    const g = c.createRadialGradient(128, 128, 30, 128, 128, 124); g.addColorStop(0, '#6a4a1c'); g.addColorStop(0.45, '#9a7a3a'); g.addColorStop(0.8, '#6a7a4a'); g.addColorStop(1, '#2a2416');
+    c.fillStyle = g; c.beginPath(); c.arc(128, 128, 124, 0, 7); c.fill();
+    c.lineWidth = 2;
+    for (let i = 0; i < 120; i++) { const a = i / 120 * Math.PI * 2 + rnd() * 0.03; c.strokeStyle = `rgba(${rnd() < 0.5 ? '40,26,8' : '200,170,100'},${0.25 + rnd() * 0.3})`; c.beginPath(); c.moveTo(128 + Math.cos(a) * 46, 128 + Math.sin(a) * 46); c.lineTo(128 + Math.cos(a) * (100 + rnd() * 22), 128 + Math.sin(a) * (100 + rnd() * 22)); c.stroke(); }
+    c.strokeStyle = '#1a140a'; c.lineWidth = 8; c.beginPath(); c.arc(128, 128, 120, 0, 7); c.stroke();
+    c.fillStyle = '#050302'; c.beginPath(); c.arc(128, 128, 44, 0, 7); c.fill();
+    c.fillStyle = 'rgba(255,255,255,.85)'; c.beginPath(); c.arc(98, 96, 15, 0, 7); c.fill();
+    c.fillStyle = 'rgba(255,255,255,.35)'; c.beginPath(); c.arc(156, 160, 7, 0, 7); c.fill();
+  });
   // 店員的制服（照設計圖）：黃色的布、一條一條粗的紫色直條紋，洗舊的皺褶和污漬
   staffShirtTex = canvasTex(256, 256, (c, w, h) => {
     c.fillStyle = '#e8b524'; c.fillRect(0, 0, w, h);
@@ -3250,12 +3261,14 @@ function buildStaff(r, g) {
   r.mats.push(shirt, pants, bone, arm, shoe, sole, badge, badgeTx, faceMat);
 }
 // 葵氏奶昔（照設計圖）：一盒 50 公分高的屋頂形紙盒，米白色、上下各兩條紅條紋，盒頂插著一根白吸管；
-// 正面是一顆真的人眼（有肉色的眼皮、血絲、濕亮的眼球）。平常躺在地上闔著眼
+// 正面嵌著一顆真的人眼（設計師：眼睛要畫出來！）：立體的眼球（眼白有血絲、淡褐色的虹膜、黑瞳孔）、上下肉色的眼皮。
+// 平常站在地上，眼皮半閉、偶爾眨眼；醒過來眼睛睜得很大，一直盯著你
+const _shakeV = new THREE.Vector3();
 function buildShake(r, g) {
   makeMonster4Textures();
   const side = ownLM('#ffffff', { map: cartonTex, shade: 0.5, transparent: true }), top = ownLM('#f2ebe0', { shade: 0.5, transparent: true });
-  r.front = ownLM('#ffffff', { map: shakeShutTex, shade: 0.4, transparent: true });
-  const straw = ownLM('#f4f4f2', { transparent: true }), wet = ownPhong('#ffffff', { specular: 0xffffff, shininess: 120, transparent: true, opacity: 0.18, depthWrite: false });
+  r.front = ownLM('#ffffff', { map: shakeFrontTex, shade: 0.4, transparent: true });
+  const straw = ownLM('#f4f4f2', { transparent: true });
   const W = 0.32, H = 0.5;
   r.body = new THREE.Group(); g.add(r.body);
   r.carton = new THREE.Group(); r.body.add(r.carton);
@@ -3268,9 +3281,16 @@ function buildShake(r, g) {
   roof.position.y = H; r.carton.add(roof);
   box(r.carton, -W / 2, W / 2, H + 0.11, H + 0.17, -0.01, 0.01, top);
   const st = cyl(r.carton, 0.009, 0.009, 0.26, 0, 0, 0, straw, 8); st.position.set(0.05, H + 0.16, 0.04); st.rotation.z = -0.15;
-  // 眼球表面濕濕的反光（眼睛畫在正面的貼圖上）
-  r.wet = sph(r.carton, 0.075, 0, H * 0.52, W / 2 + 0.002, wet, 1.15, 0.85, 0.25, 16);
-  r.mats.push(side, top, r.front, straw, wet);
+  // 眼睛：眼球（往外凸一點）、虹膜、上下眼皮；eyeG 轉向看的方向，眼皮另外開闔
+  const R = 0.084, eyeMat = wetEyeMat(eyeballTex, 0x241818, 0x666666, { transparent: true }), irisMat = wetEyeMat(shakeIrisTex, 0x18120a, 0x888888, { transparent: true });
+  const lidMat = withDetail(ownLM('#c8907c', { shade: 0.6, transparent: true }), 'skin', 10, 1.1);
+  const socket = new THREE.Group(); socket.position.set(0, H * 0.488, W / 2 - R * 0.35); socket.scale.set(1.12, 0.92, 0.75); r.carton.add(socket);
+  r.eyeG = new THREE.Group(); r.eyeG.rotation.order = 'YXZ'; socket.add(r.eyeG);
+  r.eyeG.add(new THREE.Mesh(geo('shakeball', () => new THREE.SphereGeometry(R, 24, 16)), eyeMat));
+  r.eyeG.add(new THREE.Mesh(irisGeo('shakeiris', R, R * 0.48, 0), irisMat));
+  r.lids = [1, -1].map(s => { const l = new THREE.Mesh(lidGeo('shakelid', R * 1.08, 0, 1.15), lidMat); l.scale.y = s; socket.add(l); return l; });
+  r.eyeMat = eyeMat;
+  r.mats.push(side, top, r.front, straw, eyeMat, irisMat, lidMat);
 }
 // 紅涎偽人（照設計圖）：灰白色、皮包骨的人形，全身爬滿龜裂的紋路；大頭、瞪得很大的眼睛，
 // 紅色的涎液從頭頂一道一道流過臉、從嘴巴一路流到胸口；細長的手臂往兩邊張開，長腿
@@ -3451,12 +3471,20 @@ function syncMonster4(e, r, t, p, d, dt) {
     }
     case 'shake': {
       const awake = !!e.awake;
-      r.front.map = awake ? shakeOpenTex : shakeShutTex;
-      r.wet.visible = awake;
       r.g.position.y = floorH(e.x, e.y);
+      // 眼睛：醒著睜得很大、一直盯著你（鏡頭）；睡著眼皮半閉、慢慢飄來飄去，偶爾眨一下
+      const v = _shakeV.copy(camera.position); r.eyeG.parent.worldToLocal(v);
+      const ly = clamp(Math.atan2(v.x, v.z), -0.75, 0.75), lx = clamp(-Math.atan2(v.y, Math.hypot(v.x, v.z)), -0.5, 0.5);
+      const blink = Math.sin(t * 0.8 + (e.x || 0) * 3.1) > 0.985 ? 1 : 0;
+      if (awake) { r.eyeG.rotation.y += (ly - r.eyeG.rotation.y) * Math.min(1, dt * 10); r.eyeG.rotation.x += (lx - r.eyeG.rotation.x) * Math.min(1, dt * 10); }
+      else { r.eyeG.rotation.y = Math.sin(t * 0.4 + (e.y || 0)) * 0.35; r.eyeG.rotation.x = 0.15; }
+      const k = Math.max(blink, awake ? 0 : 0.5);
+      r.lids[0].rotation.x = -0.55 + 1.05 * k; r.lids[1].rotation.x = 0.5 - 0.95 * k;
+      r.eyeMat.emissive.setRGB(awake ? 0.16 : 0.1, awake ? 0.1 : 0.08, awake ? 0.1 : 0.08);
       if (!awake) {
+        // 睡著：像一盒放在地上的奶昔，站著、稍微歪一邊
         r.g.rotation.y = faceRot(e.face || 0);
-        r.carton.rotation.set(-Math.PI / 2, 0, 0); r.carton.position.set(0, 0.16, 0.25); r.carton.scale.set(1, 1, 1);
+        r.carton.rotation.set(0, 0, 0.06); r.carton.position.set(0, 0, 0); r.carton.scale.set(1, 1, 1);
         break;
       }
       const hop = Math.abs(Math.sin((e.hopT || 0) * 7)), spit = e.spitT > 3.6 ? (e.spitT - 3.6) / 0.4 : 0;
@@ -4455,83 +4483,621 @@ function updatePlaceGhost() {
 
 // ====================================================================
 // 朋友（跟朋友一起玩，js/net.js）：寫實的人（不要可愛風），每個朋友一個顏色的 T 恤，配牛仔褲、球鞋，頭上寫名字。
-// 頭借用第三世界乘客的寫實頭（paxHead：畫布畫的臉、立體的頭髮，換成活人的膚色、睜著眼），身體是會動的關節：
-// 走路兩腳一前一後、膝蓋會彎、手臂反著擺；頭先轉向看的方向（最多 65°），身體慢慢跟上；蹲下、坐下、躺下、倒下各有姿勢。
+// 身體是一圈一圈的斷面放樣出來的（loftGeo）：肩膀、胸、腰、臀有真人的形狀，上臂有三角肌和二頭肌、大腿比小腿粗；
+// 衣服的縫線、羅紋領口、下擺、皺褶和牛仔褲的口袋、鉚釘、刷白都畫在每個朋友自己的貼圖上；手有手掌和五根手指（右手握著手電筒）、
+// 球鞋有鞋底、鞋帶、鞋舌。頭借用第三世界乘客的寫實頭（畫布畫的臉、立體的鼻子和耳朵，活人的膚色、睜著眼），脖子和頭髮自己做。
+// 關節：走路兩腳一前一後、膝蓋會彎、手臂反著擺；頭先轉向看的方向（最多 65°），身體慢慢跟上；蹲下、坐下、躺下、倒下各有姿勢。
 // 開手電筒時右手舉起來照著看的方向，有一道淡淡的光束，照到的地方光照貼圖也會亮一圈。
+// 每一節（腰、上半身、頭、上臂、前臂、大腿、小腿、腳）的零件照材質合成一、兩個網格，一個朋友大約 18 個網格。
 // 位置由 net.js 平滑內插過；只畫同一個世界的朋友；小地圖不畫（第四世界要吹口哨才看得到藍點）
 // ====================================================================
 const FRIEND_HIP = 0.94, FRIEND_PANTS = ['#2f3b52', '#3b3631', '#272b31', '#4a5262'];
+// 球鞋：鞋面、鞋帶、鞋底、後跟的小布標
+const FRIEND_SHOES = [['#e4e1da', '#f3f0ea', '#ece8e0', '#3a3a40'], ['#29292d', '#dcdad4', '#ece8e0', '#8a2a2a'], ['#5d626b', '#e6e4de', '#e8e4dc', '#26262a'], ['#6b4c36', '#d8cfc0', '#d6c6a6', '#2a2018']];
 const friendMap = new Map(), friendLights = [];
 const _fv = new THREE.Vector3(), _fv2 = new THREE.Vector3();
 let friendBeamTex = null;
-// 長相（膚色、髮色、褲子）：照名字固定，同一個朋友每次都一樣；男生短髮、女生鮑伯頭
+// 長相（膚色、髮色、褲子、球鞋）：照名字固定，同一個朋友每次都一樣；男生短髮、女生鮑伯頭
 function friendSpec(f) {
   const h = hash4(f.name + '|' + f.look), girl = f.look === 'f';
   const skin = PAX_SKIN[h % PAX_SKIN.length];
   const hair = (girl ? ['#15110e', '#2b1d14', '#4a3020', '#6b3a22'] : ['#15110e', '#2b1d14', '#3a2616', '#1c1612'])[(h >>> 4) & 3];
   return { kind: 'friend', sex: girl ? 'f' : 'm', build: girl ? 'f' : 'm', age: 0.1, sc: girl ? 0.95 : 1, skin, deadSkin: skin, hair, style: girl ? 'bob' : 'short', hat: null, pose: 'still',
     iris: ['#2a1a10', '#3a2414', '#4a3018'][(h >>> 7) % 3], brow: mixHex(hair, '#000000', 0.1), lips: mixHex(skin, girl ? '#b0505a' : '#8a4a44', girl ? 0.45 : 0.35),
-    hd: PAX_HEADS[girl ? 'f' : 'm'], pants: FRIEND_PANTS[(h >>> 9) & 3] };
+    hd: PAX_HEADS[girl ? 'f' : 'm'], pants: FRIEND_PANTS[(h >>> 9) & 3], shoe: FRIEND_SHOES[(h >>> 11) & 3] };
 }
-const LATHE = (key, pts, seg) => geo(key, () => new THREE.LatheGeometry(pts.map(([x, y]) => new THREE.Vector2(x, y)), seg));
+
+// ---------- 放樣：一圈一圈的斷面連成平滑的身體、手腳 ----------
+// 每一圈 ring：y 高度；x、z 中心；xn／xp 往 -x、+x 的半寬（w 兩邊一樣）；f／b 往前（+z）、往後的深度（d 一樣）；
+// p 方圓（1 是橢圓，越小越方）；ty 正前方比正後方低多少（領口）；s 對應 o.bumps 每個鼓包的高度；wv 布料直向的波浪（垂下來的皺褶）；n 名字（畫貼圖用）
+// o：seg 一圈幾個點、sub 每兩圈中間平滑地插幾圈、capA／capB 頭尾收成圓頂的高度、bumps 鼓包（a 角度：0 正前方、往 +x 是正的；w 寬度；sym 左右對稱）、
+//    uv [u0, u1, t0, t1]（貼圖範圍；t 是畫布從上往下的比例，第一圈在 t0、最後一圈在 t1）、flipU 貼圖左右翻（右手、右腳）。
+// 貼圖的 u 繞一圈：0 和 1 是正後方、0.5 是正前方、0.75 是 +x 那一側。geometry.userData.at：有名字的圈在畫布上的高度（比例）
+const angD = (a, b) => { let d = a - b; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return d; };
+function loftBuild(rings, o = {}) {
+  const N = o.seg || 24, sub = o.sub || 3, bumps = o.bumps || [], [u0, u1, t0, t1] = o.uv || [0, 1, 0, 1];
+  const F = ['y', 'x', 'z', 'xn', 'xp', 'f', 'b', 'p', 'ty', 'wv'];
+  const K = rings.map(r => ({ y: r.y, x: r.x || 0, z: r.z || 0, xn: r.xn ?? r.w, xp: r.xp ?? r.w, f: r.f ?? r.d, b: r.b ?? r.d, p: r.p || 1, ty: r.ty || 0, wv: r.wv || 0, s: bumps.map((_, i) => (r.s && r.s[i]) || 0), n: r.n }));
+  const cr = (a, b, c, d, t) => 0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (3 * b - a - 3 * c + d) * t * t * t);
+  let rs = [];
+  K.forEach((B, i) => {
+    rs.push(B);
+    if (i === K.length - 1) return;
+    const A = K[Math.max(0, i - 1)], C = K[i + 1], D = K[Math.min(K.length - 1, i + 2)];
+    for (let j = 1; j < sub; j++) {
+      const t = j / sub, r = { s: B.s.map((_, q) => cr(A.s[q], B.s[q], C.s[q], D.s[q], t)) };
+      for (const k of F) r[k] = cr(A[k], B[k], C[k], D[k], t);
+      rs.push(r);
+    }
+  });
+  // 收成圓頂：斷面照四分之一圓縮到一個點
+  const cap = (e, h, dir) => Array.from({ length: 4 }, (_, j) => {
+    const a = (j + 1) / 4 * Math.PI / 2, k = j === 3 ? 0 : Math.cos(a);
+    return { ...e, n: undefined, y: e.y + dir * Math.sin(a) * h, xn: e.xn * k, xp: e.xp * k, f: e.f * k, b: e.b * k, wv: e.wv * k, s: e.s.map(v => v * k) };
+  });
+  if (o.capA) rs = [...cap(rs[0], o.capA, Math.sign(rs[0].y - rs[1].y)).reverse(), ...rs];
+  if (o.capB) rs = [...rs, ...cap(rs[rs.length - 1], o.capB, Math.sign(rs[rs.length - 1].y - rs[rs.length - 2].y))];
+  const R = rs.length, C1 = N + 1, pos = new Float32Array(R * C1 * 3), uv = new Float32Array(R * C1 * 2);
+  for (let i = 0; i < R; i++) {
+    const r = rs[i];
+    for (let j = 0; j <= N; j++) {
+      const th = -Math.PI + 2 * Math.PI * (j % N) / N, sx = Math.sin(th), cz = Math.cos(th);
+      let X = Math.sign(sx) * Math.abs(sx) ** r.p * (sx < 0 ? r.xn : r.xp), Z = Math.sign(cz) * Math.abs(cz) ** r.p * (cz > 0 ? r.f : r.b);
+      let add = r.wv * (Math.sin(th * 9 + 0.7) + 0.5 * Math.sin(th * 14 + 2.1));
+      bumps.forEach((bp, q) => { if (r.s[q]) for (const a of bp.sym ? [bp.a, -bp.a] : [bp.a]) add += r.s[q] * Math.exp(-((angD(th, a) / bp.w) ** 2)); });
+      if (add) { const l = Math.hypot(X, Z) || 1; X += X / l * add; Z += Z / l * add; }
+      const k = (i * C1 + j) * 3;
+      pos[k] = r.x + X; pos[k + 1] = r.y + r.ty * cz; pos[k + 2] = r.z + Z;
+    }
+  }
+  // 貼圖的 t 照沿著身體的長度分配（領口捲起來的那幾圈也有位置畫）
+  const cum = [0];
+  for (let i = 1; i < R; i++) {
+    let s = 0;
+    for (const j of [0, N >> 2, N >> 1, (3 * N) >> 2]) { const a = ((i - 1) * C1 + j) * 3, b = (i * C1 + j) * 3; s += Math.hypot(pos[a] - pos[b], pos[a + 1] - pos[b + 1], pos[a + 2] - pos[b + 2]); }
+    cum.push(cum[i - 1] + s / 4);
+  }
+  const tot = cum[R - 1] || 1, tOf = i => t0 + (t1 - t0) * cum[i] / tot, at = { first: t0, last: t1 };
+  rs.forEach((r, i) => { if (r.n) at[r.n] = tOf(i); });
+  for (let i = 0; i < R; i++) for (let j = 0; j <= N; j++) { const k = (i * C1 + j) * 2, u = j / N; uv[k] = u0 + (u1 - u0) * (o.flipU ? 1 - u : u); uv[k + 1] = 1 - tOf(i); }
+  const idx = [];
+  for (let i = 0; i < R - 1; i++) for (let j = 0; j < N; j++) { const a = i * C1 + j, b = a + 1, c = a + C1, d = c + 1; idx.push(a, c, b, b, c, d); }
+  // 三角形的方向：中間那一圈的面要朝外，不是的話全部翻過來
+  const mi = R >> 1, ctr = rs[mi], va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
+  let out = 0;
+  for (let j = 0; j < N; j++) {
+    const a = mi * C1 + j;
+    va.fromArray(pos, a * 3); vb.fromArray(pos, (a + 1) * 3).sub(va); vc.fromArray(pos, (a + C1) * 3).sub(va);
+    out += vc.cross(vb).dot(_fv.set(va.x - ctr.x, 0, va.z - ctr.z));
+  }
+  if (out < 0) for (let i = 0; i < idx.length; i += 3) { const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  fixSeam(g, N, R);
+  g.userData.at = at;
+  return g;
+}
+const loftGeo = (key, rings, o) => geo(key, () => loftBuild(rings, o));
+// 一圈一圈排的網格（放樣、球）：接縫兩邊的法線取平均（不然看得到一條線），縮成一點的那圈（圓頂、頭頂）全部朝同一個方向
+function fixSeam(g, N, R) {
+  const Nm = g.attributes.normal, P = g.attributes.position, C1 = N + 1, v = new THREE.Vector3();
+  for (let i = 0; i < R; i++) {
+    const a = i * C1, b = a + N;
+    if (Math.abs(P.getX(a) - P.getX(a + (N >> 1))) + Math.abs(P.getZ(a) - P.getZ(a + (N >> 1))) < 1e-7) {
+      v.set(0, 0, 0);
+      for (let j = 0; j <= N; j++) v.x += Nm.getX(a + j), v.y += Nm.getY(a + j), v.z += Nm.getZ(a + j);
+      v.normalize();
+      for (let j = 0; j <= N; j++) Nm.setXYZ(a + j, v.x, v.y, v.z);
+    } else {
+      v.set(Nm.getX(a) + Nm.getX(b), Nm.getY(a) + Nm.getY(b), Nm.getZ(a) + Nm.getZ(b)).normalize();
+      Nm.setXYZ(a, v.x, v.y, v.z); Nm.setXYZ(b, v.x, v.y, v.z);
+    }
+  }
+  Nm.needsUpdate = true;
+}
+// 左右翻：s = 1 照寫的（+x 是外側），-1 換成右邊的（xn、xp 對調，x 變號）
+const frSide = (s, rings, k = 1) => rings.map(r => {
+  const xn = (r.xn ?? r.w) * k, xp = (r.xp ?? r.w) * k;
+  return { ...r, x: (r.x || 0) * k * s, z: (r.z || 0) * k, xn: s > 0 ? xn : xp, xp: s > 0 ? xp : xn, f: (r.f ?? r.d) * k, b: (r.b ?? r.d) * k };
+});
+// 沿著幾個點掃出來的管子（手指、拇指）：點會連成平滑的曲線，rs 是每個點的半徑（中間照比例內插）
+function tubeGeo(key, pts, rs, seg = 7, n = 10) {
+  return geo(key, () => {
+    const curve = new THREE.CatmullRomCurve3(pts.map(p => new THREE.Vector3(p[0], p[1], p[2])));
+    const g = new THREE.TubeGeometry(curve, n, 1, seg, false), P = g.attributes.position, c = new THREE.Vector3(), v = new THREE.Vector3();
+    for (let i = 0; i <= n; i++) {
+      const u = i / n, x = u * (rs.length - 1), q = Math.min(rs.length - 2, Math.floor(x)), r = rs[q] + (rs[q + 1] - rs[q]) * (x - q);
+      curve.getPointAt(u, c);
+      for (let j = 0; j <= seg; j++) { const k = i * (seg + 1) + j; v.fromBufferAttribute(P, k).sub(c).multiplyScalar(r).add(c); P.setXYZ(k, v.x, v.y, v.z); }
+    }
+    return g;
+  });
+}
+
+// ---------- 身體的尺寸和形狀 ----------
+// 公尺（男生 sc 1 大約 172 公分、女生再乘 0.95）：肩關節、脖子底、髖關節的位置，上臂、前臂的長度；k 手的大小、ar 手臂粗細
+const FR_DIM = {
+  m: { shX: 0.188, shY: 0.442, nkY: 0.535, hipX: 0.09, ua: 0.285, fa: 0.235, k: 1, ar: 1 },
+  f: { shX: 0.166, shY: 0.43, nkY: 0.52, hipX: 0.092, ua: 0.272, fa: 0.225, k: 0.9, ar: 0.86 },
+};
+// 貼圖的位置：T 恤（256×256）上面是身體、下面是袖子；牛仔褲（256×512）從上到下是腰、大腿、小腿
+const FR_UV = { torso: [0, 1, 0.74, 0.004], sleeve: [0, 1, 0.77, 0.996], pelvis: [0, 1, 0.3, 0.004], thigh: [0, 1, 0.31, 0.655], shin: [0, 1, 0.665, 0.996] };
+function friendGeos(sex) {
+  const girl = sex === 'f', D = FR_DIM[sex], key = 'fr' + sex, out = { sleeve: {}, upper: {}, fore: {}, thigh: {}, shin: {} };
+  // T 恤的上半身：下擺（蓋住褲頭，鬆鬆的有波浪）→ 腰 → 胸 → 腋下 → 肩膀斜下來 → 羅紋圓領（前面比後面低，捲一圈收進去）
+  out.torso = loftGeo(key + 'Torso', girl ? [
+    { y: -0.045, w: 0.188, f: 0.114, b: 0.134, z: -0.006, wv: 0.0035, n: 'hem' },
+    { y: -0.025, w: 0.183, f: 0.111, b: 0.128, z: -0.006, wv: 0.003 },
+    { y: 0.04, w: 0.163, f: 0.103, b: 0.111, z: -0.004, wv: 0.0018 },
+    { y: 0.12, w: 0.139, f: 0.096, b: 0.095, z: -0.002, n: 'waist' },
+    { y: 0.2, w: 0.143, f: 0.099, b: 0.095 },
+    { y: 0.26, w: 0.148, f: 0.103, b: 0.097, z: 0.002, s: [0.012, 0] },
+    { y: 0.31, w: 0.152, f: 0.106, b: 0.1, z: 0.004, s: [0.029, 0.003], n: 'chest' },
+    { y: 0.36, w: 0.149, f: 0.103, b: 0.103, z: 0.004, s: [0.021, 0.006], n: 'pit' },
+    { y: 0.41, w: 0.152, f: 0.092, b: 0.098, p: 0.84, s: [0.005, 0.006] },
+    { y: 0.43, w: 0.152, f: 0.084, b: 0.09, z: -0.004, p: 0.78 },
+    { y: 0.456, w: 0.146, f: 0.07, b: 0.078, z: -0.006, p: 0.74, ty: -0.006 },
+    { y: 0.481, w: 0.12, f: 0.06, b: 0.068, z: -0.006, p: 0.78, ty: -0.01 },
+    { y: 0.498, w: 0.094, f: 0.056, b: 0.063, z: -0.006, p: 0.82, ty: -0.013 },
+    { y: 0.512, w: 0.076, f: 0.053, b: 0.058, z: -0.005, ty: -0.017 },
+    { y: 0.52, w: 0.064, f: 0.054, b: 0.055, z: -0.004, ty: -0.021, n: 'collar' },
+    { y: 0.527, w: 0.059, f: 0.05, b: 0.051, z: -0.004, ty: -0.021 },
+    { y: 0.52, w: 0.053, f: 0.045, b: 0.046, z: -0.004, ty: -0.021, n: 'top' },
+  ] : [
+    { y: -0.04, w: 0.18, f: 0.12, b: 0.132, z: -0.005, wv: 0.004, n: 'hem' },
+    { y: -0.02, w: 0.177, f: 0.118, b: 0.127, z: -0.005, wv: 0.003 },
+    { y: 0.05, w: 0.166, f: 0.113, b: 0.114, z: -0.003, wv: 0.002 },
+    { y: 0.13, w: 0.157, f: 0.108, b: 0.104, n: 'waist' },
+    { y: 0.22, w: 0.161, f: 0.115, b: 0.104, z: 0.002 },
+    { y: 0.31, w: 0.166, f: 0.122, b: 0.107, z: 0.004, s: [0.006, 0.004], n: 'chest' },
+    { y: 0.385, w: 0.16, f: 0.116, b: 0.112, z: 0.002, s: [0.004, 0.008], n: 'pit' },
+    { y: 0.435, w: 0.174, f: 0.1, b: 0.106, z: -0.003, p: 0.8, s: [0, 0.006] },
+    { y: 0.467, w: 0.17, f: 0.083, b: 0.091, z: -0.007, p: 0.72, ty: -0.006 },
+    { y: 0.494, w: 0.14, f: 0.069, b: 0.079, z: -0.008, p: 0.76, ty: -0.01 },
+    { y: 0.512, w: 0.11, f: 0.062, b: 0.072, z: -0.008, p: 0.8, ty: -0.014 },
+    { y: 0.526, w: 0.084, f: 0.059, b: 0.066, z: -0.006, ty: -0.018 },
+    { y: 0.533, w: 0.071, f: 0.06, b: 0.061, z: -0.004, ty: -0.023, n: 'collar' },
+    { y: 0.54, w: 0.065, f: 0.056, b: 0.057, z: -0.004, ty: -0.023 },
+    { y: 0.533, w: 0.059, f: 0.05, b: 0.051, z: -0.004, ty: -0.023, n: 'top' },
+  ], { seg: 34, sub: 2, bumps: [{ a: 0.5, w: 0.36, sym: true }, { a: Math.PI - 0.6, w: 0.4, sym: true }], uv: FR_UV.torso });
+  // 牛仔褲的腰和屁股：褲頭 → 臀部（後面兩塊鼓起來、中間一條凹）→ 胯下收成圓頂（大腿從兩邊接上）
+  out.pelvis = loftGeo(key + 'Pelvis', girl ? [
+    { y: -0.14, w: 0.13, f: 0.072, b: 0.092, z: -0.014, n: 'crotch' },
+    { y: -0.11, w: 0.17, f: 0.088, b: 0.112, z: -0.014, s: [0.016, -0.009] },
+    { y: -0.07, w: 0.183, f: 0.096, b: 0.116, z: -0.012, s: [0.021, -0.011], n: 'seat' },
+    { y: -0.03, w: 0.181, f: 0.098, b: 0.113, z: -0.01, s: [0.009, -0.007], n: 'hip' },
+    { y: 0.012, w: 0.162, f: 0.096, b: 0.103, z: -0.008, s: [0.003, -0.003], n: 'wbBot' },
+    { y: 0.045, w: 0.146, f: 0.093, b: 0.095, z: -0.006, n: 'wbTop' },
+    { y: 0.07, w: 0.136, f: 0.088, b: 0.088, z: -0.004 },
+  ] : [
+    { y: -0.14, w: 0.122, f: 0.07, b: 0.086, z: -0.012, n: 'crotch' },
+    { y: -0.11, w: 0.158, f: 0.088, b: 0.106, z: -0.012, s: [0.012, -0.008] },
+    { y: -0.07, w: 0.17, f: 0.096, b: 0.111, z: -0.01, s: [0.015, -0.009], n: 'seat' },
+    { y: -0.03, w: 0.171, f: 0.1, b: 0.11, z: -0.008, s: [0.006, -0.006], n: 'hip' },
+    { y: 0.012, w: 0.165, f: 0.102, b: 0.105, z: -0.006, s: [0.002, -0.003], n: 'wbBot' },
+    { y: 0.045, w: 0.158, f: 0.102, b: 0.101, z: -0.004, n: 'wbTop' },
+    { y: 0.07, w: 0.15, f: 0.097, b: 0.096, z: -0.004 },
+  ], { seg: 30, sub: 2, capA: 0.032, bumps: [{ a: Math.PI - 0.5, w: 0.42, sym: true }, { a: Math.PI, w: 0.12 }], uv: FR_UV.pelvis });
+  const ar = D.ar, lr = girl ? 0.95 : 1;
+  for (const s of [-1, 1]) {
+    // 袖子：上面是三角肌（圓圓的、往外鼓，頂端往脖子那邊斜上去，接上肩膀的斜度），袖口比手臂寬，反摺的邊往內收
+    out.sleeve[s] = loftGeo(`${key}Slv${s}`, frSide(s, [
+      { y: 0.037, w: 0, d: 0, x: -0.03 },
+      { y: 0.033, xn: 0.026, xp: 0.021, f: 0.027, b: 0.029, x: -0.025 },
+      { y: 0.024, xn: 0.04, xp: 0.041, f: 0.044, b: 0.046, x: -0.014 },
+      { y: 0.012, xn: 0.045, xp: 0.052, f: 0.05, b: 0.052, x: -0.005 },
+      { y: 0, xn: 0.046, xp: 0.055, f: 0.052, b: 0.054, n: 'seam' },
+      { y: -0.05, xn: 0.046, xp: 0.053, f: 0.051, b: 0.052 },
+      { y: -0.1, xn: 0.047, xp: 0.051, f: 0.05, b: 0.051, wv: 0.0015 },
+      { y: girl ? -0.128 : -0.145, xn: 0.048, xp: 0.051, f: 0.05, b: 0.051, wv: 0.002, n: 'hem' },
+      { y: girl ? -0.131 : -0.148, xn: 0.042, xp: 0.045, f: 0.044, b: 0.045, n: 'lip' },
+    ], ar), { seg: 18, sub: 2, uv: FR_UV.sleeve, flipU: s < 0 });
+    // 上臂（袖子底下）：前面二頭肌、後面三頭肌，到手肘收成圓的
+    out.upper[s] = loftGeo(`${key}Ua${s}`, frSide(s, [
+      { y: -0.1, xn: 0.043, xp: 0.045, f: 0.045, b: 0.047 },
+      { y: -0.16, xn: 0.041, xp: 0.043, f: 0.046, b: 0.045 },
+      { y: -0.215, xn: 0.038, xp: 0.039, f: 0.04, b: 0.041 },
+      { y: -D.ua + 0.03, xn: 0.035, xp: 0.037, f: 0.034, b: 0.037 },
+      { y: -D.ua, xn: 0.034, xp: 0.036, f: 0.032, b: 0.036 },
+    ], ar), { seg: 14, sub: 2, capB: 0.034 * ar });
+    // 前臂：手肘下面的肌肉比較粗，到手腕變扁（手掌那個方向寬）
+    out.fore[s] = loftGeo(`${key}Fa${s}`, frSide(s, [
+      { y: 0, xn: 0.034, xp: 0.037, f: 0.034, b: 0.037 },
+      { y: -0.045, xn: 0.035, xp: 0.04, f: 0.037, b: 0.036 },
+      { y: -0.1, xn: 0.031, xp: 0.035, f: 0.032, b: 0.031 },
+      { y: -0.165, xn: 0.024, xp: 0.026, f: 0.028, b: 0.026 },
+      { y: -D.fa + 0.02, xn: 0.019, xp: 0.02, f: 0.027, b: 0.025 },
+      { y: -D.fa, xn: 0.018, xp: 0.019, f: 0.026, b: 0.024 },
+    ], ar), { seg: 14, sub: 2, capA: 0.033 * ar });
+    // 大腿（牛仔褲）：上面粗、外側有一點臀部的弧度，往膝蓋慢慢變細、稍微往內
+    out.thigh[s] = loftGeo(`${key}Th${s}`, frSide(s, girl ? [
+      { y: 0, xn: 0.072, xp: 0.097, f: 0.088, b: 0.096, z: -0.008, n: 'top' },
+      { y: -0.08, xn: 0.07, xp: 0.09, f: 0.087, b: 0.09, z: -0.004 },
+      { y: -0.18, xn: 0.062, xp: 0.076, f: 0.079, b: 0.076, z: 0.002, x: -0.002 },
+      { y: -0.28, xn: 0.055, xp: 0.064, f: 0.068, b: 0.064, z: 0.004, x: -0.004 },
+      { y: -0.37, xn: 0.051, xp: 0.055, f: 0.058, b: 0.056, z: 0.002, x: -0.005 },
+      { y: -0.43, xn: 0.051, xp: 0.053, f: 0.056, b: 0.054, x: -0.006, n: 'knee' },
+    ] : [
+      { y: 0, xn: 0.074, xp: 0.093, f: 0.088, b: 0.094, z: -0.006, n: 'top' },
+      { y: -0.08, xn: 0.071, xp: 0.088, f: 0.088, b: 0.088, z: -0.002 },
+      { y: -0.18, xn: 0.065, xp: 0.078, f: 0.082, b: 0.078, z: 0.003, x: -0.002 },
+      { y: -0.28, xn: 0.059, xp: 0.068, f: 0.072, b: 0.068, z: 0.004, x: -0.004 },
+      { y: -0.37, xn: 0.055, xp: 0.06, f: 0.062, b: 0.06, z: 0.002, x: -0.005 },
+      { y: -0.43, xn: 0.055, xp: 0.057, f: 0.06, b: 0.058, x: -0.006, n: 'knee' },
+    ]), { seg: 20, sub: 2, capA: 0.06, capB: 0.045, uv: FR_UV.thigh, flipU: s < 0 });
+    // 小腿（牛仔褲）：後面有一點小腿肚，褲管直直的，到腳踝堆起來、褲腳蓋在球鞋上
+    out.shin[s] = loftGeo(`${key}Sh${s}`, frSide(s, [
+      { y: 0, xn: 0.055, xp: 0.057, f: 0.06, b: 0.058, n: 'top' },
+      { y: -0.07, xn: 0.054, xp: 0.056, f: 0.056, b: 0.064, z: -0.002 },
+      { y: -0.15, xn: 0.053, xp: 0.055, f: 0.054, b: 0.064, z: -0.004 },
+      { y: -0.25, xn: 0.052, xp: 0.053, f: 0.053, b: 0.056, z: -0.002 },
+      { y: -0.325, xn: 0.053, xp: 0.054, f: 0.055, b: 0.054, wv: 0.0022, n: 'stack' },
+      { y: -0.368, xn: 0.056, xp: 0.057, f: 0.061, b: 0.056, z: 0.004, wv: 0.003, n: 'hem' },
+      { y: -0.371, xn: 0.049, xp: 0.05, f: 0.054, b: 0.049, z: 0.004, n: 'lip' },
+    ], lr), { seg: 18, sub: 2, capA: 0.05, uv: FR_UV.shin, flipU: s < 0 });
+  }
+  // 脖子：底下寬（藏在領口裡面），往上變細、稍微往前；男生有一點喉結
+  const nk = girl ? 0.88 : 1;
+  out.neck = loftGeo(key + 'Neck', [
+    { y: -0.065, w: 0.066 * nk, f: 0.054 * nk, b: 0.064 * nk, z: -0.012 },
+    { y: -0.02, w: 0.058 * nk, f: 0.052 * nk, b: 0.057 * nk, z: -0.006 },
+    { y: 0.03, w: 0.05 * nk, f: 0.047 * nk, b: 0.05 * nk, z: 0.004, s: [girl ? 0 : 0.004] },
+    { y: 0.08, w: 0.047 * nk, f: 0.045 * nk, b: 0.047 * nk, z: 0.012 },
+    { y: 0.12, w: 0.045 * nk, f: 0.042 * nk, b: 0.045 * nk, z: 0.016 },
+  ], { seg: 16, sub: 2, bumps: [{ a: 0, w: 0.3 }] });
+  return out;
+}
+
+// ---------- 手：手掌、四根手指、拇指（在前臂的座標裡，手腕在 y = -fa）；s = 1 左手、-1 右手（手掌朝身體），grip 握拳（握著手電筒） ----------
+const FR_FING = [[0.027, 0.07, 0.0092, 0.07], [0.009, 0.078, 0.0096, 0], [-0.009, 0.073, 0.009, -0.06], [-0.025, 0.058, 0.008, -0.14]];   // 食指到小指：位置 z、長度、粗細、張開的角度
+function friendHand(q, D, s, grip, skin) {
+  const k = D.k, w = -D.fa, yk = w - 0.075 * k, key = `frH${k}${s}${grip ? 'g' : 'r'}`, cup = grip ? -0.004 : 0;
+  pmesh(q, loftGeo(key + 'p', frSide(s, [
+    { y: w + 0.014, xn: 0.017, xp: 0.018, f: 0.026, b: 0.024 },
+    { y: w - 0.018 * k, xn: 0.018, xp: 0.016, f: 0.033, b: 0.029, z: 0.003 },
+    { y: w - 0.048 * k, xn: 0.016, xp: 0.014, f: 0.037, b: 0.033, z: 0.002, x: -0.002 + cup },
+    { y: yk, xn: 0.013, xp: 0.012, f: 0.038, b: 0.035, x: -0.003 + cup },
+  ].map(r => ({ ...r, xn: r.xn * k, xp: r.xp * k, f: r.f * k, b: r.b * k, z: (r.z || 0) * k, x: (r.x || 0) * k }))), { seg: 14, sub: 2, capB: 0.011 * k }), skin, 0, 0, 0);
+  pel(q, -0.008 * k * s, w - 0.024 * k, 0.019 * k, 0.012 * k, 0.022 * k, 0.014 * k, skin, 10);   // 拇指根部的肉
+  // 手指：三節，放鬆的時候微微彎向手心，握拳的時候整根捲起來
+  const curl = grip ? [1.25, 1.5, 0.95] : [0.22, 0.38, 0.24], ph = [0.45, 0.3, 0.22];
+  FR_FING.forEach(([z, L, rr, sp], i) => {
+    let x = (-0.003 + cup) * k, y = yk + 0.014 * k, zz = z * k, a = 0;
+    const pts = [[x * s, y, zz], [x * s, yk, zz]];
+    y = yk;
+    for (let j = 0; j < 3; j++) {
+      a += curl[j];
+      const l = ph[j] * L * k;
+      x -= Math.sin(a) * l; y -= Math.cos(a) * Math.cos(sp) * l; zz += Math.cos(a) * Math.sin(sp) * l;
+      pts.push([x * s, y, zz]);
+    }
+    pmesh(q, tubeGeo(`${key}f${i}`, pts, [1, 1, 0.95, 0.9, 0.82].map(v => v * rr * k), 6, 8), skin, 0, 0, 0);
+    const tp = pts[4], tr = 0.82 * rr * k;
+    pel(q, tp[0], tp[1], tp[2], tr, tr, tr, skin, 6);   // 指尖
+  });
+  // 拇指：放鬆的時候往前下方，握拳的時候扣在食指外面
+  const th = (grip ? [[-0.004, 0, 0.016], [-0.014, -0.027, 0.04], [-0.03, -0.047, 0.04], [-0.043, -0.057, 0.027]] : [[-0.004, 0, 0.016], [-0.012, -0.03, 0.04], [-0.019, -0.054, 0.05], [-0.023, -0.074, 0.05]])
+    .map(([x, y, z]) => [x * k * s, w + y * k, z * k]);
+  pmesh(q, tubeGeo(key + 't', th, [0.0135, 0.0118, 0.0102, 0.0092].map(v => v * k), 7, 8), skin, 0, 0, 0);
+  pel(q, th[3][0], th[3][1], th[3][2], 0.0088 * k, 0.0088 * k, 0.0088 * k, skin, 6);
+}
+// 手電筒（右手握著，順著前臂的方向）：握把、防滑紋、燈頭、亮亮的燈罩；回傳燈頭前面的位置
+function friendFlashlight(q, D, s) {
+  const k = D.k, yk = -D.fa - 0.075 * k, x = -0.026 * k * s, z = 0.008 * k;
+  const body = pcol('#2b2b30'), dark = pcol('#18181a'), rim = pcol('#74757a'), lens = pcol('#f2ead2');
+  cyl(q, 0.0155, 0.0155, 0.1, x, yk - 0.06, z, body, 12);              // 握把
+  cyl(q, 0.016, 0.016, 0.008, x, yk + 0.04, z, dark, 12);              // 尾蓋
+  for (let i = 0; i < 3; i++) cyl(q, 0.0162, 0.0162, 0.004, x, yk - 0.05 + i * 0.008, z, dark, 12);   // 防滑紋
+  cyl(q, 0.0165, 0.021, 0.028, x, yk - 0.088, z, body, 14);            // 燈頭（往前變粗）
+  cyl(q, 0.0215, 0.0215, 0.007, x, yk - 0.095, z, rim, 14);            // 金屬框
+  cyl(q, 0.018, 0.018, 0.002, x, yk - 0.0965, z, lens, 14);            // 燈罩
+  return [x, yk - 0.1, z];
+}
+// 球鞋（腳踝的座標，地板在 y = -0.085）：鞋底（白色的橡膠，腳尖翹一點）、鞋面、鞋舌、鞋帶和蝴蝶結、後跟的布標、襪子；s = 1 左腳、-1 右腳（大拇趾在內側）
+const FR_FOOT = [[0, -0.079], [0.026, -0.071], [0.035, -0.045], [0.038, 0], [0.044, 0.06], [0.05, 0.11], [0.046, 0.155], [0.033, 0.188], [0.012, 0.205], [-0.012, 0.21], [-0.036, 0.195], [-0.049, 0.155], [-0.05, 0.11], [-0.04, 0.05], [-0.033, 0], [-0.032, -0.045], [-0.024, -0.071]];
+const FR_UPPER = [   // 鞋面：z 從後跟到腳尖，xn 內側、xp 外側的半寬，h 鞋面的高度（鞋底上面），x 中心往內偏
+  [-0.07, 0.024, 0.024, 0.05], [-0.056, 0.032, 0.033, 0.066], [-0.03, 0.036, 0.037, 0.074], [0, 0.036, 0.039, 0.077], [0.03, 0.037, 0.042, 0.072],
+  [0.065, 0.041, 0.045, 0.058], [0.1, 0.045, 0.046, 0.046], [0.135, 0.046, 0.043, 0.038, -0.002], [0.165, 0.042, 0.034, 0.032, -0.004], [0.186, 0.033, 0.022, 0.026, -0.007], [0.197, 0.022, 0.013, 0.021, -0.009],
+];
+const frToe = z => 1.6 * Math.max(0, z - 0.11) ** 2;   // 腳尖翹起來的高度（z 是沒縮放的位置）
+const frUpperY = k => -0.088 + 0.024 * k;              // 鞋面的底（鞋底上面一點點，k 是腳的大小）
+const frUpperTop = (z, k) => {   // 鞋面頂端的高度（鞋帶放在這上面）
+  let h = FR_UPPER[FR_UPPER.length - 1][3];
+  for (let i = 1; i < FR_UPPER.length; i++) if (z <= FR_UPPER[i][0]) { const a = FR_UPPER[i - 1], b = FR_UPPER[i], t = clamp((z - a[0]) / (b[0] - a[0]), 0, 1); h = a[3] + (b[3] - a[3]) * t; break; }
+  return frUpperY(k) + (h + frToe(z)) * k;
+};
+function friendShoe(q, s, k, cols) {
+  const [upC, laceC, soleC, tabC] = cols, up = pcol(upC), sole = pcol(soleC), lace = pcol(laceC), tab = pcol(tabC);
+  const key = `frShoe${k}${s}`;
+  const lift = g => { const P = g.attributes.position; for (let i = 0; i < P.count; i++) P.setY(i, P.getY(i) + frToe(P.getZ(i) / k) * k); return g; };
+  // 鞋底：腳的形狀擠出來，邊是圓的
+  pmesh(q, geo(key + 'sole', () => {
+    const pts = new THREE.CatmullRomCurve3(FR_FOOT.map(([x, z]) => new THREE.Vector3(x * s * k * 0.94, 0, z * k * 0.97 + 0.002)), true).getPoints(40);
+    const g = new THREE.ExtrudeGeometry(new THREE.Shape(pts.map(p => new THREE.Vector2(p.x, -p.z))), { depth: 0.012 * k, bevelEnabled: true, bevelThickness: 0.006 * k, bevelSize: 0.0055 * k, bevelSegments: 2, curveSegments: 1 });
+    g.rotateX(-Math.PI / 2);
+    g.computeBoundingBox(); g.translate(0, -0.085 - g.boundingBox.min.y, 0);
+    g.setIndex([...Array(g.attributes.position.count).keys()]);
+    g.clearGroups();
+    return lift(g);
+  }), sole, 0, 0, 0);
+  // 鞋面：沿著腳從後跟放樣到腳尖（放樣的 y 是 -z，再轉成躺平）
+  pmesh(q, geo(key + 'up', () => {
+    const g = loftBuild(frSide(s, FR_UPPER.map(([z, xn, xp, h, x]) => ({ y: -z * k, xn: xn * k, xp: xp * k, f: h * k, b: 0.006, z: frUpperY(k), x: (x || 0) * k, p: 0.78 }))), { seg: 16, sub: 2, capA: 0.012 * k, capB: 0.01 * k });
+    g.rotateX(-Math.PI / 2);
+    return lift(g);
+  }), up, 0, 0, 0);
+  // 鞋帶：五條橫過鞋舌（照鞋面的斜度），上面打一個蝴蝶結
+  const zs = [0.026, 0.044, 0.062, 0.08, 0.098];
+  for (const z of zs) {
+    const y = frUpperTop(z, k) + 0.0015, sl = Math.atan2(frUpperTop(z - 0.01, k) - frUpperTop(z + 0.01, k), 0.02 * k);
+    box(q, -0.017 * k, 0.017 * k, y - 0.002, y + 0.002, z * k - 0.0035, z * k + 0.0035, lace).rotation.x = sl;
+  }
+  const ty = frUpperTop(0.014, k);
+  box(q, -0.016 * k, 0.016 * k, ty - 0.004, ty + 0.013, 0.004 * k, 0.016 * k, up).rotation.x = -0.25;   // 鞋舌
+  for (const t of [-1, 1]) pel(q, t * 0.012 * k, ty + 0.004, 0.022 * k, 0.011 * k, 0.004, 0.006 * k, lace).rotation.z = t * 0.3;   // 蝴蝶結
+  const hy = frUpperTop(-0.066, k);
+  box(q, -0.007 * k, 0.007 * k, hy - 0.006, hy + 0.01, -0.074 * k, -0.066 * k, tab);   // 後跟的布標
+  cyl(q, 0.033 * k, 0.035 * k, 0.07, 0, -0.03, -0.012 * k, pcol('#2b2b2e'), 10);   // 襪子（褲管和鞋口中間）
+}
+
+// ---------- 衣服的貼圖 ----------
+// 在放樣的貼圖上畫：u 繞一圈（0.5 正前方、0 和 1 正後方、0.75 是左手左腳的外側；右邊的貼圖左右翻過，所以外側也是 0.75），t 從上往下（照 userData.at 的名字）
+function frCanvas(c, W, H) {
+  const path = pts => { c.beginPath(); pts.forEach(([u, t], i) => (i ? c.lineTo(u * W, t * H) : c.moveTo(u * W, t * H))); };
+  const line = (pts, col, w, dash) => { c.save(); c.strokeStyle = col; c.lineWidth = w; c.lineCap = 'round'; c.lineJoin = 'round'; if (dash) c.setLineDash(dash); path(pts); c.stroke(); c.restore(); };
+  // 柔和的皺褶、刷白：先畫在另一張透明的圖層上，最後整張模糊一次再疊上去（每一筆都模糊的話很慢）
+  let layer = null;
+  const soft = (pts, col, w) => {
+    if (!layer) { layer = document.createElement('canvas'); layer.width = W; layer.height = H; }
+    const x = layer.getContext('2d'); x.strokeStyle = col; x.lineWidth = w; x.lineCap = 'round'; x.lineJoin = 'round';
+    x.beginPath(); pts.forEach(([u, t], i) => (i ? x.lineTo(u * W, t * H) : x.moveTo(u * W, t * H))); x.stroke();
+  };
+  const flush = b => { if (!layer) return; c.save(); c.filter = `blur(${b}px)`; c.drawImage(layer, 0, 0); c.restore(); layer = null; };
+  const glow = (u, t, ru, rt, col, a) => { c.save(); c.translate(u * W, t * H); c.scale(ru * W, rt * H); const g = c.createRadialGradient(0, 0, 0, 0, 0, 1); g.addColorStop(0, rgbaOf(col, a)); g.addColorStop(1, rgbaOf(col, 0)); c.fillStyle = g; c.beginPath(); c.arc(0, 0, 1, 0, 7); c.fill(); c.restore(); };
+  const band = (t0, t1, col) => { c.fillStyle = col; c.fillRect(0, t0 * H, W, (t1 - t0) * H); };
+  // 一條曲線上取幾個點（二次曲線）
+  const quad = (a, b, d, n = 12) => Array.from({ length: n + 1 }, (_, i) => { const t = i / n, m = 1 - t; return [m * m * a[0] + 2 * m * t * b[0] + t * t * d[0], m * m * a[1] + 2 * m * t * b[1] + t * t * d[1]]; });
+  return { path, line, soft, flush, glow, band, quad };
+}
+// T 恤：針織的布紋、腋下往腰拉的斜皺褶、下擺上面堆起來的橫皺褶、肩膀到兩側的縫線、羅紋圓領、反摺的下擺和袖口
+function paintFriendShirt(c, W, H, col, GM) {
+  const { line, soft, flush, glow, band } = frCanvas(c, W, H), T = GM.torso.userData.at, S = GM.sleeve[1].userData.at, Dk = a => `rgba(0,0,0,${a})`, Lt = a => `rgba(255,255,255,${a})`;
+  c.fillStyle = col; c.fillRect(0, 0, W, H);
+  for (let y = 0; y < H; y += 2) { c.fillStyle = Dk(0.025 + rnd() * 0.02); c.fillRect(0, y, W, 1); }
+  for (let i = 0; i < 1600; i++) { c.fillStyle = rnd() < 0.5 ? Lt(0.05) : Dk(0.06); c.fillRect(rnd() * W, rnd() * H, 1 + rnd() * 2, 1); }
+  // 身體：腋下往腰的斜皺褶（前後各兩條，旁邊一條亮的）
+  for (const [ua, ub] of [[0.31, 0.43], [0.69, 0.57], [0.19, 0.08], [0.81, 0.92]]) {
+    const pts = [[ua, T.pit], [(ua * 2 + ub) / 3 + 0.01 * Math.sign(ub - ua), (T.pit * 2 + T.waist) / 3], [ub, T.waist + (T.hem - T.waist) * 0.35]];
+    soft(pts, Dk(0.15), 6);
+    soft(pts.map(([u, t]) => [u + 0.014 * Math.sign(ub - ua), t - 0.01]), Lt(0.07), 4);
+  }
+  // 下擺上面堆起來的橫皺褶（彎彎的）
+  for (let k = 0; k < 4; k++) {
+    const t0 = T.waist + (T.hem - T.waist) * (0.32 + k * 0.17), ph = rnd() * 6, amp = 0.004 + rnd() * 0.004, pts = [];
+    for (let u = 0; u <= 1.001; u += 0.02) pts.push([u, t0 + Math.sin(u * 18 + ph) * amp + Math.sin(u * 41 + ph * 2) * amp * 0.4]);
+    soft(pts, Dk(0.06 + rnd() * 0.05), 3);
+    soft(pts.map(([u, t]) => [u, t - 0.012]), Lt(0.05), 3);
+  }
+  // 袖子腋下那一側的斜皺褶
+  for (let i = 0; i < 3; i++) { const t = S.seam + (S.hem - S.seam) * (0.15 + i * 0.22); soft([[0.12, t], [0.25, t + 0.025], [0.38, t + 0.01]], Dk(0.13), 4); }
+  soft([[0.6, S.seam + 0.03], [0.95, S.seam + 0.05]], Dk(0.07), 4);
+  flush(2.5);
+  glow(0.5, T.chest + (T.waist - T.chest) * 0.35, 0.14, 0.05, '#000000', 0.08);   // 胸口底下的影子
+  // 肩膀到兩側的縫線
+  for (const u of [0.25, 0.75]) { line([[u, T.top], [u, T.hem]], Dk(0.3), 1); line([[u + 0.006, T.collar], [u + 0.006, T.hem]], Lt(0.08), 1); }
+  // 羅紋圓領：顏色深一點、直的細條紋，下面一條縫線
+  band(0, T.collar + 0.004, mixHex(col, '#000000', 0.12));
+  for (let x = 0; x < W; x += 2) { c.fillStyle = Dk(0.13); c.fillRect(x, (T.top - 0.004) * H, 1, (T.collar - T.top + 0.008) * H); }
+  line([[0, T.collar + 0.008], [1, T.collar + 0.008]], Dk(0.3), 1);
+  line([[0, T.collar + 0.016], [1, T.collar + 0.016]], Dk(0.16), 1, [2, 1.5]);
+  // 下擺：反摺的邊、兩條縫線、最下面摺起來的地方比較暗
+  const hb = T.hem - 0.03;
+  band(hb, T.hem + 0.01, Dk(0.05));
+  line([[0, hb], [1, hb]], Dk(0.28), 1, [2, 1.5]); line([[0, hb + 0.007], [1, hb + 0.007]], Dk(0.2), 1, [2, 1.5]);
+  band(T.hem - 0.004, T.hem + 0.01, Dk(0.1));
+  // 袖子：接肩膀的縫線是斜的一圈：外側在三角肌上面、腋下那一側比較低
+  const arm = Array.from({ length: 41 }, (_, i) => { const u = i / 40; return [u, S.seam - 0.01 + 0.022 * Math.cos(2 * Math.PI * (u - 0.25))]; });
+  line(arm, Dk(0.22), 1);
+  line(arm.map(([u, t]) => [u, t + 0.006]), Lt(0.06), 1);
+  line([[0.25, S.seam], [0.25, S.hem]], Dk(0.25), 1);   // 腋下那一側的縫線
+  const sb = S.hem - 0.035;
+  band(sb, S.hem, Dk(0.03));
+  line([[0, sb], [1, sb]], Dk(0.28), 1, [2, 1.5]); line([[0, sb + 0.008], [1, sb + 0.008]], Dk(0.2), 1, [2, 1.5]);
+  band(S.hem - 0.004, S.last, Dk(0.08));
+}
+// 牛仔褲：斜紋布、竹節紗、刷白（大腿前面、膝蓋、屁股）、貓鬚、金黃色的縫線（雙線）、褲頭、皮帶和皮帶環、前口袋（鉚釘）、零錢袋、門襟的 J 字縫線、後面的育克和兩個後口袋、褲管堆起來的皺褶、褲腳
+function paintFriendJeans(c, W, H, col, GM) {
+  const { line, soft, flush, glow, band, quad } = frCanvas(c, W, H), P = GM.pelvis.userData.at, Q = GM.thigh[1].userData.at, R = GM.shin[1].userData.at;
+  const thr = 'rgba(205,150,72,.8)', thr2 = 'rgba(205,150,72,.55)', Dk = a => `rgba(0,0,0,${a})`, Lt = a => `rgba(255,255,255,${a})`, dash = [2.5, 1.5];
+  const stitch = (pts, w = 1) => line(pts, thr, w, dash);
+  c.fillStyle = col; c.fillRect(0, 0, W, H);
+  c.save(); c.lineWidth = 1;
+  for (let x = -H; x < W; x += 2) { c.strokeStyle = (x & 2) ? Lt(0.05) : Dk(0.09); c.beginPath(); c.moveTo(x, 0); c.lineTo(x + H * 0.5, H); c.stroke(); }
+  c.restore();
+  for (let i = 0; i < 700; i++) { c.fillStyle = Lt(0.03 + rnd() * 0.05); c.fillRect(rnd() * W, rnd() * H, 1, 3 + rnd() * 10); }
+  // 刷白：大腿前面、膝蓋、屁股
+  glow(0.5, Q.top + (Q.knee - Q.top) * 0.45, 0.13, (Q.knee - Q.top) * 0.42, '#ffffff', 0.13);
+  glow(0.5, R.top + 0.02, 0.12, 0.05, '#ffffff', 0.1);
+  for (const u of [0.11, 0.89]) glow(u, P.seat, 0.09, (P.crotch - P.hip) * 0.6, '#ffffff', 0.08);
+  // 貓鬚：胯下前面短短的白色橫紋
+  for (let i = 0; i < 7; i++) {
+    const t = P.crotch - (P.crotch - P.seat) * (0.1 + rnd() * 0.9), u0 = 0.04 + rnd() * 0.05;
+    for (const sd of [-1, 1]) soft([[0.5 + sd * u0, t], [0.5 + sd * (u0 + 0.06 + rnd() * 0.05), t - 0.004 - rnd() * 0.006]], Lt(0.13), 1.6);
+  }
+  for (let i = 0; i < 5; i++) { const t = Q.top + rnd() * (Q.knee - Q.top) * 0.18, u = 0.36 + rnd() * 0.06; soft([[u, t], [u + 0.07 + rnd() * 0.04, t - 0.003]], Lt(0.11), 1.6); }
+  // 膝蓋後面、褲管下面堆起來的皺褶
+  for (let i = 0; i < 4; i++) { const t = Q.knee - 0.005 - i * 0.012; soft([[0.86, t], [0.95, t + 0.004], [1, t]], Dk(0.12), 2); soft([[0, t], [0.05, t + 0.004], [0.14, t]], Dk(0.12), 2); }
+  for (let k = 0; k < 5; k++) {
+    const t0 = R.stack + (R.hem - R.stack) * (k / 5) - 0.012, ph = rnd() * 6, pts = [];
+    for (let u = 0; u <= 1.001; u += 0.02) pts.push([u, t0 + Math.sin(u * 13 + ph) * 0.006]);
+    soft(pts, Dk(0.14), 2.5);
+    soft(pts.map(([u, t]) => [u, t - 0.006]), Lt(0.07), 2);
+  }
+  flush(1.4);
+  // 褲管：外側的縫線（單線＋布邊的深色線）、內側的縫線（雙線）
+  for (const [t0, t1] of [[Q.first, Q.last], [R.first, R.hem]]) {
+    line([[0.75, t0], [0.75, t1]], Dk(0.35), 1.2); line([[0.758, t0], [0.758, t1]], Lt(0.07), 1); stitch([[0.742, t0], [0.742, t1]]);
+    line([[0.25, t0], [0.25, t1]], Dk(0.3), 1); stitch([[0.243, t0], [0.243, t1]]); stitch([[0.257, t0], [0.257, t1]]);
+  }
+  // 褲腳：反摺的邊、兩條縫線
+  band(R.hem - 0.022, R.hem + 0.003, Dk(0.08)); stitch([[0, R.hem - 0.02], [1, R.hem - 0.02]]); stitch([[0, R.hem - 0.012], [1, R.hem - 0.012]]);
+  band(R.hem - 0.003, R.last, Dk(0.2));
+  // 腰：側邊縫線、後中線
+  line([[0.25, P.wbBot], [0.25, P.crotch]], Dk(0.3), 1); stitch([[0.243, P.wbBot], [0.243, P.crotch]]);
+  line([[0.75, P.wbBot], [0.75, P.crotch]], Dk(0.3), 1); stitch([[0.757, P.wbBot], [0.757, P.crotch]]);
+  for (const u of [0.003, 0.997]) line([[u, P.wbBot], [u, P.crotch]], Dk(0.35), 1.5);
+  stitch([[0.012, P.wbBot], [0.012, P.crotch]]); stitch([[0.988, P.wbBot], [0.988, P.crotch]]);
+  // 門襟：中間一條深色的邊、J 字縫線
+  const fe = P.wbBot + (P.crotch - P.wbBot) * 0.62;
+  line([[0.5, P.wbBot], [0.5, fe + 0.01]], Dk(0.4), 1.2);
+  for (const o of [0, 0.008]) stitch([[0.533 + o, P.wbBot], [0.533 + o, fe - 0.02 + o], [0.52, fe + o * 0.6], [0.502, fe + 0.012 + o]]);
+  // 前口袋：彎彎的袋口（深色的邊＋縫線）、鉚釘；右邊口袋裡的零錢袋
+  for (const sd of [-1, 1]) {
+    const a = [0.5 + sd * 0.085, P.wbBot], b = [0.5 + sd * 0.11, P.wbBot + (P.hip - P.wbBot) * 1.15], d = [0.5 + sd * 0.25, P.wbBot + (P.crotch - P.wbBot) * 0.45];
+    line(quad(a, b, d), Dk(0.5), 2);
+    line(quad([a[0] + sd * 0.006, a[1]], [b[0] + sd * 0.006, b[1] - 0.004], [d[0], d[1] - 0.008]), Lt(0.1), 1);
+    stitch(quad([a[0] - sd * 0.008, a[1]], [b[0] - sd * 0.009, b[1] + 0.006], [d[0] - sd * 0.002, d[1] + 0.012]));
+    for (const [u, t] of [[a[0] - sd * 0.004, a[1] + 0.006], [d[0] - sd * 0.012, d[1] + 0.004]]) { c.fillStyle = '#b07a3a'; c.beginPath(); c.arc(u * W, t * H, 1.6, 0, 7); c.fill(); c.fillStyle = 'rgba(255,230,180,.6)'; c.fillRect(u * W - 0.6, t * H - 0.8, 1, 1); }
+  }
+  stitch([[0.41, P.wbBot + 0.004], [0.41, P.wbBot + (P.crotch - P.wbBot) * 0.28], [0.36, P.wbBot + (P.crotch - P.wbBot) * 0.28], [0.36, P.wbBot + 0.004]]);
+  // 後面：育克（V 字）、兩個後口袋（五角形的雙縫線、裡面一條裝飾的弧線）
+  const ty1 = P.wbBot + (P.crotch - P.wbBot) * 0.22, ty2 = P.wbBot + (P.crotch - P.wbBot) * 0.36, yoke = u => ty1 + (ty2 - ty1) * (0.25 - Math.min(u, 1 - u)) / 0.25;
+  for (const [ua, ub] of [[0.25, 0], [0.75, 1]]) { line([[ua, ty1], [ub, ty2]], Dk(0.35), 1.2); stitch([[ua, ty1 + 0.008], [ub, ty2 + 0.008]]); stitch([[ua, ty1 + 0.016], [ub, ty2 + 0.016]]); }
+  for (const cu of [0.11, 0.89]) {
+    const w = 0.065, top = yoke(cu) + 0.022, bot = top + (P.crotch - P.wbBot) * 0.42, tip = bot + 0.03;
+    const shp = [[cu - w, top], [cu + w, top], [cu + w * 0.88, bot], [cu, tip], [cu - w * 0.88, bot], [cu - w, top]];
+    line(shp.map(([u, t]) => [u + 0.004, t + 0.004]), Dk(0.3), 2);
+    line(shp, Dk(0.2), 1);
+    stitch(shp.map(([u, t]) => [cu + (u - cu) * 0.9, top + (t - top) * 0.94 + 0.004]));
+    line(quad([cu - w * 0.7, top + 0.045], [cu, top + 0.085], [cu + w * 0.7, top + 0.045]), thr2, 1, dash);
+    line(quad([cu - w * 0.7, top + 0.06], [cu, top + 0.1], [cu + w * 0.7, top + 0.06]), thr2, 1, dash);
+  }
+  // 褲頭、皮帶、皮帶環
+  band(0, P.wbBot, mixHex(col, '#000000', 0.08));
+  stitch([[0, P.wbBot - 0.006], [1, P.wbBot - 0.006]]);
+  const b0 = P.wbTop + (P.wbBot - P.wbTop) * 0.12, b1 = P.wbBot - (P.wbBot - P.wbTop) * 0.12;
+  band(b0, b1, '#2a1e17'); line([[0, b0], [1, b0]], 'rgba(0,0,0,.6)', 1); line([[0, b1], [1, b1]], 'rgba(0,0,0,.6)', 1);
+  line([[0, b0 + 0.004], [1, b0 + 0.004]], 'rgba(255,220,180,.12)', 1, [2, 2]);
+  for (const u of [0.04, 0.22, 0.38, 0.62, 0.78, 0.96]) { c.fillStyle = mixHex(col, '#000000', 0.15); c.fillRect(u * W - 2.5, P.wbTop * H, 5, (P.wbBot - P.wbTop) * H); c.fillStyle = Lt(0.08); c.fillRect(u * W - 2.5, P.wbTop * H, 1, (P.wbBot - P.wbTop) * H); }
+  c.fillStyle = '#8f9096'; c.fillRect(0.5 * W - 8, (b0 - 0.006) * H, 16, (b1 - b0 + 0.012) * H);   // 皮帶扣
+  c.fillStyle = '#2a1e17'; c.fillRect(0.5 * W - 5, (b0 + 0.001) * H, 10, (b1 - b0 - 0.002) * H);
+  c.fillStyle = 'rgba(255,255,255,.35)'; c.fillRect(0.5 * W - 8, (b0 - 0.006) * H, 16, 1);
+}
+
+// 朋友的頭：第三世界乘客的寫實頭（畫布畫的臉：活人的膚色、睜著眼；立體的鼻子、男生有耳朵），脖子和頭髮自己做
+function friendHead(pose, p, px) {
+  const hd = p.hd, girl = p.sex === 'f', skin = pcol(p.skin, 'skin'), hc = new THREE.Group();
+  hc.position.set(0, girl ? 0.128 : 0.134, 0.024); pose.add(hc);
+  pmesh(pose, friendGeos(p.sex).neck, skin, 0, 0, 0);
+  const tex = canvasTex(PAX_TEX, PAX_TEX, c => paintPaxHead(c, p, 'alive'), true);
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  px.tex.alive = tex; px.headMat = paxTexMat([tex]);
+  pmesh(hc, paxHeadGeo(hd), px.headMat, 0, 0, 0);
+  pel(hc, 0, -0.022, hd.rz * 0.95, 0.0125, 0.021, 0.023, skin).rotation.x = -0.4;   // 鼻頭
+  for (const s of [-1, 1]) pel(hc, s * 0.009, -0.03, hd.rz * 0.93, 0.008, 0.008, 0.012, skin);   // 鼻翼
+  pel(hc, 0, 0.002, hd.rz * 0.975, 0.0075, 0.024, 0.012, skin);                      // 鼻樑
+  if (!girl) for (const s of [-1, 1]) pel(hc, s * hd.rx * 0.96, -0.008, -0.01, 0.009, 0.026, 0.017, skin).rotation.y = s * 0.35;   // 耳朵
+  pmesh(hc, friendHairGeo(p.style, hd), pcol(p.hair, 'hair'), 0, 0, 0);
+}
+// 頭髮：照髮際線從頭長出來（跟乘客的一樣），但更細、更自然：
+// 男生的短髮頭頂蓬一點、前面有一點瀏海蓋在額頭上（一撮一撮參差不齊），旁邊和後面往下剃短；女生的鮑伯頭從耳朵上面開始直直地垂到下巴，髮尾往內收；都有一點一撮一撮的起伏
+function friendHairGeo(style, hd) {
+  return geo('frHair' + style + hd.key, () => {
+    const W = 56, Hs = 36, g = new THREE.SphereGeometry(1, W, Hs, -Math.PI / 2), P = g.attributes.position, I = g.index.array, fn = paxHairLine(style), bob = style === 'bob';
+    const d = new Float32Array(P.count), keep = [], q = new THREE.Vector3(), n = new THREE.Vector3(), e = new THREE.Vector3(), TH = 1.15;
+    for (let i = 0; i < P.count; i++) {
+      const a = Math.atan2(P.getX(i), P.getZ(i)), th0 = Math.acos(clamp(P.getY(i), -1, 1));
+      // 男生的瀏海：額頭那一段的髮際線往下長一點，髮尾一撮一撮的
+      const line = t => Math.max(fn(a, t), bob ? -1 : 0.86 + (0.15 + 0.035 * Math.sin(a * 23) + 0.02 * Math.sin(a * 41 + 1)) * (1 - sstep(0.45, 0.95, Math.abs(a))) - t);
+      const dd = line(th0), D = Math.max(0, dd);
+      d[i] = dd;
+      // 髮際線外面的點拉到髮際線上（邊緣才會照著髮際線彎，不會一格一格的）
+      const th = dd < 0 ? th0 + dd : th0, st = Math.sin(th);
+      paxHeadPt(st * Math.sin(a), Math.cos(th), st * Math.cos(a), hd, q);
+      n.copy(q).normalize();
+      const fade = sstep(0, 0.12 + 0.3 * sstep(1.2, 1.8, th), D);   // 男生旁邊和後面往下越剃越短
+      const top = 1 - sstep(0.5, 1.5, th), tuft = 0.0016 * Math.sin(a * 11 + th * 7) * Math.sin(th * 13 - a * 5) + 0.0012 * Math.sin(a * 23 - th * 17) + 0.001 * Math.sin(a * 37 + th * 29);
+      const T = bob ? 0.005 + sstep(0, 0.12, D) * (0.009 + 0.008 * top) + tuft * 0.6
+        : 0.0025 + fade * (0.006 + 0.016 * top) + 0.008 * Math.exp(-(((th - 0.7) / 0.2) ** 2)) * (1 - sstep(0.4, 0.9, Math.abs(a))) + tuft * (0.3 + 0.7 * fade);
+      q.addScaledVector(n, T);
+      if (bob && th > TH) {
+        // 耳朵以下直直地垂下來（不跟著下巴往內收），髮尾往內收一點
+        paxHeadPt(Math.sin(TH) * Math.sin(a), Math.cos(TH), Math.sin(TH) * Math.cos(a), hd, e);
+        const rh = Math.hypot(e.x, e.z) + T, cur = Math.hypot(q.x, q.z) || 1, k = Math.max(1, rh / cur) * (1 - 0.08 * (1 - sstep(0, 0.16, D)));
+        q.x *= k; q.z *= k;
+      }
+      P.setXYZ(i, q.x, q.y, q.z);
+    }
+    for (let k = 0; k < I.length; k += 3) if (Math.max(d[I[k]], d[I[k + 1]], d[I[k + 2]]) > 0) keep.push(I[k], I[k + 1], I[k + 2]);
+    g.setIndex(keep);
+    g.computeVertexNormals();
+    fixSeam(g, W, Hs + 1);
+    return g;
+  });
+}
+// 頭髮的明暗：頭頂有光澤、下面暗一點，一撮一撮深淺不同（合併之後改頂點顏色）
+function friendHairShade(root) {
+  const hm = paxHairMat();
+  root.traverse(o => {
+    if (!o.isMesh || o.material !== hm) return;
+    const C = o.geometry.attributes.color, N = o.geometry.attributes.normal;
+    for (let i = 0; i < C.count; i++) { const v = 0.78 + 0.34 * sstep(0.2, 0.95, N.getY(i)) + (hash01(i * 0.37) - 0.5) * 0.1; C.setXYZ(i, C.getX(i) * v, C.getY(i) * v, C.getZ(i) * v); }
+    C.needsUpdate = true;
+  });
+}
 function buildFriend(f) {
-  const p = friendSpec(f), s0 = seed;   // 畫臉會用到亂數：用完放回去，第三世界的乘客才不會因為朋友來了就變臉
+  const p = friendSpec(f), s0 = seed, D = FR_DIM[p.sex], k = D.k;   // 畫臉、畫衣服會用到亂數：用完放回去，第三世界的乘客才不會因為朋友來了就變臉
+  seed = 1 + hash4('fr|' + f.name) % 2147483646;   // 衣服的皺褶照名字固定
   const g = new THREE.Group(); scene.add(g);
   const body = new THREE.Group(); body.scale.setScalar(p.sc); g.add(body);
   const r = { g, body, p, id: f.id, look: f.look, color: f.color, name: f.name, yaw: faceRot(f.face || 0), ph: 0, walkK: 0, crK: 0, init: false };
-  const sh = { shade: 0.55 };
-  const shirt = withDetail(ownLM(f.color || '#8a8a8a', sh), 'cotton', 5, 0.9);
-  const jeans = withDetail(ownLM(p.pants, sh), 'cotton', 7, 1.1);
+  const GM = friendGeos(p.sex), sh = { shade: 0.55 };
+  const shirtTex = canvasTex(256, 256, (c, w, h) => paintFriendShirt(c, w, h, f.color || '#8a8a8a', GM));
+  const jeansTex = canvasTex(256, 512, (c, w, h) => paintFriendJeans(c, w, h, p.pants, GM));
+  r.texs = [shirtTex, jeansTex];
+  const shirt = withDetail(ownLM('#ffffff', { map: shirtTex, ...sh }), 'cotton', 5, 0.8);
+  const jeans = withDetail(ownLM('#ffffff', { map: jeansTex, ...sh }), 'cotton', 7, 0.9);
   const skin = withDetail(ownLM(p.skin, sh), 'skin', 8, 1.2);
-  const shoe = ownLM('#2b2420', { shade: 0.5 }), sole = ownLM('#dcd6cb', { shade: 0.5 }), belt = ownLM('#1d1916', { shade: 0.5 }), metal = ownLM('#2a2a2e', { shade: 0.5 }), rim = ownLM('#5a5b60', { shade: 0.5 });
+  // 每一節自己一個小群組，零件照材質合併（子關節不放在裡面，才不會被合進去）
+  const seg = (parent, fill) => { const q = new THREE.Group(); parent.add(q); fill(q); paxMerge(q, []); return q; };
+  const put = (q, gm, mat) => pmesh(q, gm, mat, 0, 0, 0);
   // 腰：大腿和上半身都從這裡出發
   const hips = new THREE.Group(); hips.position.y = FRIEND_HIP; body.add(hips); r.hips = hips;
-  const pelvis = new THREE.Mesh(LATHE('frPelvis', [[0.001, -0.15], [0.07, -0.145], [0.13, -0.11], [0.158, -0.05], [0.16, 0.02], [0.155, 0.06]], 18), jeans);
-  pelvis.scale.set(1.1, 1, 0.7); pelvis.castShadow = true; hips.add(pelvis);
-  cyl(hips, 0.158, 0.16, 0.035, 0, 0.022, 0, belt, 18, true).scale.set(1.1, 1, 0.7);   // 皮帶
-  // 上半身（蹲下、跑步時往前彎）：T 恤、肩膀
+  seg(hips, q => put(q, GM.pelvis, jeans));
+  // 上半身（蹲下、跑步時往前彎）
   const torso = new THREE.Group(); hips.add(torso); r.torso = torso;
-  const tm = new THREE.Group(); torso.add(tm);
-  const chest = new THREE.Mesh(LATHE('frTorso', [[0.152, -0.02], [0.148, 0.06], [0.142, 0.13], [0.152, 0.24], [0.17, 0.36], [0.164, 0.43], [0.14, 0.49], [0.1, 0.53], [0.06, 0.555], [0.001, 0.565]], 20), shirt);
-  chest.scale.set(1.1, 1, 0.64); tm.add(chest);
-  for (const s of [-1, 1]) sph(tm, 0.056, s * 0.178, 0.462, 0, shirt, 1.05, 0.9, 1, 12);   // 肩膀（圓圓的，接到袖子）
-  mergeByMat(tm);
+  seg(torso, q => put(q, GM.torso, shirt));
   // 頭：脖子底下 → 轉頭（yaw）→ 抬頭低頭（pose）
-  const neck = new THREE.Group(); neck.position.set(0, 0.548, 0.004); torso.add(neck);
+  const neck = new THREE.Group(); neck.position.set(0, D.nkY, -0.004); torso.add(neck);
   r.headYaw = new THREE.Group(); neck.add(r.headYaw);
   r.headPose = new THREE.Group(); r.headYaw.add(r.headPose);
-  const px = { kind: 'friend', p, g, skins: [], tex: {}, state: 'dead' };
-  paxHead(r.headPose, p, px);
+  const px = { kind: 'friend', p, g, skins: [], tex: {}, state: 'alive' };
+  friendHead(r.headPose, p, px);
   paxMerge(r.headPose, px.skins);
-  paxState(px, 'alive');
+  friendHairShade(r.headPose);
   r.px = px;
-  // 手臂：肩膀 → 手肘 → 手（arms[0] 是右手，拿著手電筒）
+  // 手臂：肩膀（袖子、上臂）→ 手肘 → 前臂和手（arms[0] 是右手，握著手電筒）
   r.arms = [-1, 1].map(s => {
-    const shp = new THREE.Group(); shp.position.set(s * 0.205, 0.47, 0); shp.rotation.order = 'YXZ'; torso.add(shp);
-    const ua = new THREE.Group(); shp.add(ua);
-    taper(ua, [0, 0.025, 0], [0, -0.155, 0], 0.058, 0.054, shirt, 12);   // 短袖
-    taper(ua, [0, -0.13, 0], [0, -0.285, 0], 0.046, 0.039, skin, 10);
-    const el = new THREE.Group(); el.position.set(0, -0.285, 0); shp.add(el);
+    const shp = new THREE.Group(); shp.position.set(s * D.shX, D.shY, -0.006); shp.rotation.order = 'YXZ'; torso.add(shp);
+    seg(shp, q => { put(q, GM.sleeve[s], shirt); put(q, GM.upper[s], skin); });
+    const el = new THREE.Group(); el.position.set(0, -D.ua, 0); shp.add(el);
     const fa = new THREE.Group(); el.add(fa);
-    taper(fa, [0, 0.01, 0], [0, -0.24, 0], 0.039, 0.03, skin, 10);
-    sph(fa, 0.03, 0, -0.285, 0.006, skin, 1.1, 1.85, 0.72, 10);   // 手掌
-    mergeByMat(fa);
+    let tip = null;
+    seg(fa, q => { put(q, GM.fore[s], skin); friendHand(q, D, s, s < 0, skin); if (s < 0) tip = friendFlashlight(q, D, s); });
+    if (tip) { r.tip = new THREE.Object3D(); r.tip.position.set(...tip); fa.add(r.tip); }
     return { sh: shp, el, fa };
   });
-  const hand = r.arms[0].fa;
-  cyl(hand, 0.017, 0.015, 0.15, 0, -0.39, 0.012, metal, 10);   // 手電筒
-  cyl(hand, 0.022, 0.018, 0.03, 0, -0.42, 0.012, rim, 10);
-  r.tip = new THREE.Object3D(); r.tip.position.set(0, -0.43, 0.012); hand.add(r.tip);
   r.lens = ownSprite(glowTex, 0xfff0d0); r.lens.scale.setScalar(0.22); r.tip.add(r.lens);
   // 腳：大腿 → 膝蓋 → 小腿 → 腳踝和球鞋（腳踝會轉回來，腳底板才會平平地踩在地上；legs[0] 是右腳）
   r.legs = [-1, 1].map(s => {
-    const hp = new THREE.Group(); hp.position.set(s * 0.09, -0.04, 0); hips.add(hp);
-    taper(hp, [0, 0.02, 0], [0, -0.43, 0], 0.079, 0.057, jeans, 12);
-    const kn = new THREE.Group(); kn.position.set(0, -0.43, 0); hp.add(kn);
-    taper(kn, [0, 0.02, 0], [0, -0.385, 0], 0.056, 0.044, jeans, 12);
+    const hp = new THREE.Group(); hp.position.set(s * D.hipX, -0.04, 0); hips.add(hp);
+    seg(hp, q => put(q, GM.thigh[s], jeans));
+    const kn = new THREE.Group(); kn.position.set(-0.006 * s, -0.43, 0); hp.add(kn);
+    seg(kn, q => put(q, GM.shin[s], jeans));
     const an = new THREE.Group(); an.position.set(0, -0.385, 0); kn.add(an);
-    box(an, -0.048, 0.048, -0.07, 0, -0.06, 0.17, shoe);
-    box(an, -0.051, 0.051, -0.09, -0.067, -0.065, 0.178, sole);   // 白色的鞋底
+    seg(an, q => friendShoe(q, s, k, p.shoe));
     return { hp, kn, an };
   });
   // 手電筒的光束：放在場景裡（不跟著手臂轉），每一幀照著看的方向擺；尖端亮、越遠越淡
@@ -4563,6 +5129,7 @@ function friendLabel(r, text, color) {
 function disposeFriend(r) {
   disposeGroup(r.g);
   for (const t of (r.px && r.px.headMat && r.px.headMat.userData.maps) || []) t.dispose();
+  for (const t of r.texs || []) t.dispose();   // T 恤、牛仔褲的貼圖
   if (r.label) { r.label.material.map.dispose(); r.label.material.dispose(); }
   scene.remove(r.beam); r.beam.material.dispose();
 }
@@ -4609,7 +5176,7 @@ function poseFriend(f, r, t, dt, darkK) {
     lean = cr * 0.3 + r.walkK * 0.04 + run * 0.12;
     r.arms.forEach((a, i) => {
       const s = Math.sin(r.ph + (i ? Math.PI : 0));
-      a.sh.rotation.set(s * A * 0.8, 0, (i ? 1 : -1) * 0.07);   // 跟同一邊的腳反著擺
+      a.sh.rotation.set(s * A * 0.8, 0, (i ? 1 : -1) * 0.1);   // 跟同一邊的腳反著擺（手臂稍微張開，才不會穿進身體）
       a.el.rotation.x = -0.18 - 0.45 * Math.min(1, r.walkK) - cr * 0.4;
     });
   }
@@ -6612,79 +7179,83 @@ function makePlankMats() {
   plankMats = M;
 }
 const PLANK_EDGE = ['', '#7a5532', '#bdb8ac', '#b8861a', '#2a1208', '#e8f6ff'];
-// 一片牆（或門）：放在格子的邊上，0.1 公尺厚、2.6 公尺高；門可以打開（繞著一邊轉）
+// 一片牆（或門）：2×2 公尺的正方形板子（PLANK4），0.1 公尺厚，放在格子的邊上（橫跨兩個邊）；門是兩扇對開，可以打開
 function buildWall4(w) {
-  // 斜放的牆（free）：外層放在中心、照角度轉，裡面跟水平的牆（h）一樣從 0 到 1 公尺
+  // 斜放的牆（free）：外層放在中心、照角度轉，裡面跟水平的牆（h）一樣從 0 到 2 公尺
+  const W = PLANK4, H = PLANK4;
   const g0 = new THREE.Group(); scene.add(g0);
   const g = new THREE.Group(); g0.add(g);
-  if (w.free) { g0.position.set(w.cx, w.lv || 0, w.cy); g0.rotation.y = -w.ang; g.position.x = -0.5; } else g0.position.set(w.x, w.lv || 0, w.y);
-  // 一片 1×1 公尺的正方形板子（門是 2 公尺高），整片放在第 lv 公尺的高度（下面的被打破就往下掉，見 syncBuild4）
-  const H = w.door ? 2 : 1, mat = plankMats[w.tier], edge = lm(PLANK_EDGE[w.tier]);
+  if (w.free) { g0.position.set(w.cx, w.lv || 0, w.cy); g0.rotation.y = -w.ang; g.position.x = -W / 2; } else g0.position.set(w.x, w.lv || 0, w.y);
+  // 整片放在第 lv 公尺的高度（下面的被打破就往下掉，見 syncBuild4）
+  const mat = plankMats[w.tier], edge = lm(PLANK_EDGE[w.tier]);
   const res = { g: g0, w };
   const piv = new THREE.Group(); g.add(piv); res.piv = piv;
   const hz = w.free || w.o === 'h';
+  // 沿著牆（u：0～W）、高度（y）、厚度（t）的方塊
+  const slab = (par, u0, u1, y0, y1, t, m, sh = true) => (hz ? box(par, u0, u1, y0, y1, -t, t, m, sh) : box(par, -t, t, y0, y1, u0, u1, m, sh));
   // 斜靠的牆（繞 X 或 Z 轉了 15°、45°）：從底部往一邊倒
   if (w.lean && !w.door) { if (hz) piv.rotation.x = w.lean * Math.PI / 180; else piv.rotation.z = -w.lean * Math.PI / 180; }
-  // 木板子用兩片疊起來的樣子（中間一條縫），水泥、黃金、岩漿、玻璃是整片
-  const panel = (x0, x1, y0, y1) => (hz ? box(piv, x0, x1, y0, y1, -0.05, 0.05, mat, w.tier !== 5) : box(piv, -0.05, 0.05, y0, y1, x0, x1, mat, w.tier !== 5));
   if (w.door) {
-    // 木門：門框 + 可以轉的門板（門把是黃銅）
-    const frame = (x0, x1, y0, y1) => (hz ? box(g, x0, x1, y0, y1, -0.07, 0.07, edge) : box(g, -0.07, 0.07, y0, y1, x0, x1, edge));
-    frame(0.0, 0.06, 0, H); frame(0.94, 1.0, 0, H); frame(0.0, 1.0, H - 0.06, H);
-    if (hz) piv.position.x = 0.06; else piv.position.z = 0.06;
-    const dp = hz ? box(piv, 0, 0.88, 0, H - 0.07, -0.035, 0.035, mat) : box(piv, -0.035, 0.035, 0, H - 0.07, 0, 0.88, mat);
-    const kn = lm('#d6a84a');
-    for (const s of [-1, 1]) sph(piv, 0.03, hz ? 0.78 : s * 0.06, 1.0, hz ? s * 0.06 : 0.78, kn);
-    res.panel = dp;
-  } else {
-    panel(0.02, 0.98, 0.01, H - 0.01);
-    // 四邊的收邊條（看得出是一片一片的正方形）
-    if (w.tier !== 5) {
-      const bar = (x0, x1, y0, y1) => (hz ? box(piv, x0, x1, y0, y1, -0.055, 0.055, edge, false) : box(piv, -0.055, 0.055, y0, y1, x0, x1, edge, false));
-      bar(0.02, 0.98, H - 0.05, H - 0.01); bar(0.02, 0.98, 0.01, 0.05); bar(0.02, 0.06, 0.01, H - 0.01); bar(0.94, 0.98, 0.01, H - 0.01);
+    // 兩扇對開的門：門框 + 兩片可以轉的門板（各自繞外側的邊轉），門把是黃銅
+    slab(g, 0.0, 0.06, 0, H, 0.07, edge); slab(g, W - 0.06, W, 0, H, 0.07, edge); slab(g, 0.0, W, H - 0.06, H, 0.07, edge);
+    const leaf = (W - 0.12) / 2 - 0.005, kn = lm('#d6a84a');
+    const piv2 = new THREE.Group(); g.add(piv2); res.piv2 = piv2;
+    if (hz) { piv.position.x = 0.06; piv2.position.x = W - 0.06; } else { piv.position.z = 0.06; piv2.position.z = W - 0.06; }
+    slab(piv, 0, leaf, 0, H - 0.07, 0.035, mat); slab(piv2, -leaf, 0, 0, H - 0.07, 0.035, mat);
+    for (const [pv, u] of [[piv, leaf - 0.1], [piv2, -leaf + 0.1]]) {
+      slab(pv, u > 0 ? 0.06 : -leaf + 0.06, u > 0 ? leaf - 0.06 : -0.06, H * 0.55, H * 0.55 + 0.04, 0.045, edge, false);   // 門板上的橫條（看得出是兩扇）
+      for (const s of [-1, 1]) sph(pv, 0.03, hz ? u : s * 0.06, 1.0, hz ? s * 0.06 : u, kn);
     }
-    else {   // 玻璃：細細的鋁框
+    res.panel = piv;
+  } else {
+    slab(piv, 0.02, W - 0.02, 0.01, H - 0.01, 0.05, mat, w.tier !== 5);
+    if (w.tier !== 5) {
+      // 四邊的收邊條（看得出是一片一片的正方形）；木頭板子中間多三條直的縫，像四片木板拼起來的
+      const bar = (u0, u1, y0, y1) => slab(piv, u0, u1, y0, y1, 0.055, edge, false);
+      bar(0.02, W - 0.02, H - 0.06, H - 0.01); bar(0.02, W - 0.02, 0.01, 0.06); bar(0.02, 0.07, 0.01, H - 0.01); bar(W - 0.07, W - 0.02, 0.01, H - 0.01);
+      if (w.tier === 1) for (let i = 1; i < 4; i++) slab(piv, i * W / 4 - 0.008, i * W / 4 + 0.008, 0.06, H - 0.06, 0.052, edge, false);
+    } else {   // 玻璃：細細的鋁框，中間一條橫的
       const al = lm('#c8ccd0');
-      if (hz) { box(piv, 0.0, 0.03, 0, H, -0.04, 0.04, al); box(piv, 0.97, 1.0, 0, H, -0.04, 0.04, al); box(piv, 0, 1, H - 0.04, H, -0.04, 0.04, al); box(piv, 0, 1, 0, 0.04, -0.04, 0.04, al); }
-      else { box(piv, -0.04, 0.04, 0, H, 0.0, 0.03, al); box(piv, -0.04, 0.04, 0, H, 0.97, 1.0, al); box(piv, -0.04, 0.04, H - 0.04, H, 0, 1, al); box(piv, -0.04, 0.04, 0, 0.04, 0, 1, al); }
+      slab(piv, 0.0, 0.03, 0, H, 0.04, al); slab(piv, W - 0.03, W, 0, H, 0.04, al); slab(piv, 0, W, H - 0.04, H, 0.04, al); slab(piv, 0, W, 0, 0.04, 0.04, al); slab(piv, 0, W, H / 2 - 0.02, H / 2 + 0.02, 0.04, al);
     }
   }
   // 裂痕：兩面各一片，越破越明顯
   if (w.tier !== 5) {
     const cm = ownBasic({ map: store4Tex.crack, transparent: true, opacity: 0, depthWrite: false });
     for (const s of [-1, 1]) {
-      const pl = new THREE.Mesh(geo('crack4' + H, () => new THREE.PlaneGeometry(0.9, H * 0.9)), cm);
-      if (hz) { pl.position.set(0.5, H * 0.48, s * 0.056); pl.rotation.y = s > 0 ? 0 : Math.PI; } else { pl.position.set(s * 0.056, H * 0.48, 0.5); pl.rotation.y = s > 0 ? Math.PI / 2 : -Math.PI / 2; }
+      const pl = new THREE.Mesh(geo('crack4w' + W, () => new THREE.PlaneGeometry(W * 0.9, H * 0.9)), cm);
+      if (hz) { pl.position.set(W / 2, H * 0.48, s * 0.056); pl.rotation.y = s > 0 ? 0 : Math.PI; } else { pl.position.set(s * 0.056, H * 0.48, W / 2); pl.rotation.y = s > 0 ? Math.PI / 2 : -Math.PI / 2; }
       piv.add(pl);
     }
     res.crack = cm;
   }
-  res.fire = ownSprite(glowTex, 0xff7a20); res.fire.scale.set(1.4, 1.4, 1); res.fire.position.set(hz ? 0.5 : 0, 0.5, hz ? 0 : 0.5); res.fire.visible = false; g.add(res.fire);
+  res.fire = ownSprite(glowTex, 0xff7a20); res.fire.scale.set(2.2, 2.2, 1); res.fire.position.set(hz ? W / 2 : 0, H / 2, hz ? 0 : W / 2); res.fire.visible = false; g.add(res.fire);
   return res;
 }
 function buildRoof4(r) {
-  // 沒有完全躺平的屋頂（倒了 60°、75°）斜斜的：繞那一格的中心轉
-  const g = new THREE.Group(); g.position.set(r.x + 0.5, ROOF4_H, r.y + 0.5); scene.add(g);
+  // 屋頂：2×2 公尺躺平的板子，蓋住 2×2 格；沒有完全躺平的屋頂（倒了 60°、75°）斜斜的：繞中心轉
+  const W = PLANK4, g = new THREE.Group(); g.position.set(r.x + W / 2, ROOF4_H, r.y + W / 2); scene.add(g);
   if (r.tilt) g.rotation[r.tax === 'z' ? 'z' : 'x'] = r.tilt * Math.PI / 180;
-  box(g, -0.5, 0.5, -0.04, 0.04, -0.5, 0.5, plankMats[r.tier], r.tier !== 5);
-  box(g, -0.5, 0.5, 0.04, 0.06, -0.02, 0.02, lm(PLANK_EDGE[r.tier]));
+  box(g, -W / 2, W / 2, -0.04, 0.04, -W / 2, W / 2, plankMats[r.tier], r.tier !== 5);
+  const edge = lm(PLANK_EDGE[r.tier]);
+  for (const s of [-1, 1]) { box(g, -W / 2, W / 2, -0.05, 0.05, s * W / 2 - (s > 0 ? 0.05 : 0), s * W / 2 + (s < 0 ? 0.05 : 0), edge, false); box(g, s * W / 2 - (s > 0 ? 0.05 : 0), s * W / 2 + (s < 0 ? 0.05 : 0), -0.05, 0.05, -W / 2, W / 2, edge, false); }
   return { g, r };
 }
-// 斜坡：一片板子斜 45° 放在一格裡，從 lv 公尺往 dir 的方向升高 1 公尺（可以走上去）
+// 斜坡：一片板子斜 45° 放在 2×2 格上，從 lv 公尺往 dir 的方向升高 2 公尺（可以走上去）
 function buildRamp4(rp) {
-  const g = new THREE.Group(); g.position.set(rp.x + 0.5, rp.lv + 0.5, rp.y + 0.5); scene.add(g);
+  const W = PLANK4, g = new THREE.Group(); g.position.set(rp.x + W / 2, rp.lv + W / 2, rp.y + W / 2); scene.add(g);
   g.rotation.y = { e: -Math.PI / 2, w: Math.PI / 2, s: Math.PI, n: 0 }[rp.dir];
   const b = new THREE.Group(); b.rotation.x = Math.PI / 4; g.add(b);   // 往 -z（dir 的方向）翹起來
-  const L = Math.SQRT2, mat = plankMats[rp.tier], edge = lm(PLANK_EDGE[rp.tier]);
-  box(b, -0.48, 0.48, -0.03, 0.02, -L / 2, L / 2, mat, rp.tier !== 5);
-  for (const x of [-0.48, 0.44]) box(b, x, x + 0.04, 0.02, 0.04, -L / 2, L / 2, edge, false);
-  for (let i = 1; i < 5; i++) box(b, -0.45, 0.45, 0.02, 0.035, -L / 2 + i * L / 5 - 0.015, -L / 2 + i * L / 5 + 0.015, edge, false);   // 防滑條，看得出是可以走的斜坡
+  const L = W * Math.SQRT2, mat = plankMats[rp.tier], edge = lm(PLANK_EDGE[rp.tier]), hw = W / 2 - 0.02;
+  box(b, -hw, hw, -0.03, 0.02, -L / 2, L / 2, mat, rp.tier !== 5);
+  for (const x of [-hw, hw - 0.04]) box(b, x, x + 0.04, 0.02, 0.04, -L / 2, L / 2, edge, false);
+  for (let i = 1; i < 9; i++) box(b, -hw + 0.03, hw - 0.03, 0.02, 0.035, -L / 2 + i * L / 9 - 0.015, -L / 2 + i * L / 9 + 0.015, edge, false);   // 防滑條，看得出是可以走的斜坡
   return { g };
 }
-// 地上的板子（設計師：木板就是木板）：一片真的大小的板子平躺在地上（1 公尺寬、2.6 公尺長），旁邊是稀有度顏色的收邊
+// 地上的板子（設計師：木板就是木板）：一片正方形的板子平躺在地上，旁邊是稀有度顏色的收邊
 function buildLoose4(l) {
   const g = new THREE.Group(); g.position.set(l.x, 0, l.y); g.rotation.y = l.a || 0; scene.add(g);
-  const L = l.door ? 1.4 : 0.7, Wd = 0.7;   // 正方形的板子（門是長方形），縮小一點平躺在地上
+  const L = 1.1, Wd = 1.1;   // 2×2 公尺的板子（門也是）縮小一點平躺在地上，才不會整片疊在一起
   box(g, -L / 2, L / 2, 0, 0.035, -Wd / 2, Wd / 2, plankMats[l.tier], false);
   box(g, -L / 2, L / 2, 0.035, 0.04, -Wd / 2 - 0.01, -Wd / 2 + 0.02, lm(RARITY[PLANKS[l.tier].rar].color), false);
   box(g, -L / 2, L / 2, 0.035, 0.04, Wd / 2 - 0.02, Wd / 2 + 0.01, lm(RARITY[PLANKS[l.tier].rar].color), false);
@@ -6701,8 +7272,8 @@ function syncBuild4(t) {
     for (const [o, r] of map) if (!seen.has(o)) { disposeGroup(r.g); map.delete(o); }
   };
   sync(wall4Map, G.b4.list, buildWall4);
-  sync(roof4Map, [...G.b4.roofs.values()], buildRoof4);
-  sync(ramp4Map, [...G.b4.ramps.values()], buildRamp4);
+  sync(roof4Map, roofList4(), buildRoof4);
+  sync(ramp4Map, rampList4(), buildRamp4);
   sync(loose4Map, G.loose4, buildLoose4);
   for (const [w, r] of wall4Map) {
     const k = w.tier === 5 ? 1 : clamp(w.hp / PLANKS[w.tier].hp, 0, 1);
@@ -6711,7 +7282,7 @@ function syncBuild4(t) {
     // 下面的板子被打破時，上面的慢慢掉下來（lv 變小）
     r.y = r.y === undefined ? w.lv : r.y > w.lv ? Math.max(w.lv, r.y - 0.15) : w.lv;
     if (w.free) r.g.position.set(w.cx + sh, r.y, w.cy); else r.g.position.set(w.x + (w.o === 'v' ? sh : 0), r.y, w.y + (w.o === 'h' ? sh : 0));
-    if (w.door) { const a = w.open ? -1.45 : 0; r.piv.rotation.y += (a - r.piv.rotation.y) * 0.25; }
+    if (w.door) { const a = w.open ? 1.45 : 0; r.piv.rotation.y += (-a - r.piv.rotation.y) * 0.25; r.piv2.rotation.y += (a - r.piv2.rotation.y) * 0.25; }
     r.fire.visible = w.burn > 0;
     if (r.fire.visible) r.fire.material.opacity = 0.5 + 0.4 * Math.random();
   }
@@ -6727,7 +7298,6 @@ function syncWhistle4(t) {
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: whistleDotTex, transparent: true, depthTest: false, depthWrite: false, fog: false, sizeAttenuation: false }));   // 遠近都一樣大
     s.material.userData.own = true; s.renderOrder = 999; scene.add(s); whistleDots.push(s);
   }
-  const fade = Math.min(1, (G && G.whistleT) || 0);
   whistleDots.forEach((s, i) => {
     const d = dots[i];
     s.visible = !!d;
@@ -6737,7 +7307,7 @@ function syncWhistle4(t) {
     // 點越大代表離你越近（設計師：紅、藍點越大代表距離越近）：3 公尺內最大，越遠越小
     const dist = Math.hypot(d.x - camera.position.x, d.y - camera.position.z);
     s.scale.setScalar((0.022 + 0.09 * clamp(1 - (dist - 3) / 38, 0, 1)) * (1 + 0.12 * Math.sin(t * 8 + i)));
-    s.material.opacity = fade;
+    s.material.opacity = d.a;
   });
 }
 // 預覽：拿著板子或家具時，前面放下的位置（綠色＝放得下、紅色＝放不下）
@@ -6755,18 +7325,19 @@ function syncGhost4() {
   ghostMesh4.box.material.color.setHex(col); ghostMesh4.edge.material.color.setHex(g.ok ? 0xb0ffc0 : 0xff9a9a);
   ghostMesh4.rotation.set(0, 0, 0, 'YXZ');
   if (g.kind === 'wall' || g.kind === 'free') {
-    // 一片正方形的板子（門 2 公尺高），疊在第 lv 公尺；斜靠的話從底部倒下去（中心跟著移）
-    const H = G.hand.door ? 2 : 1, y0 = g.lv || 0;
+    // 一片 2×2 公尺的正方形板子（門也是），疊在第 lv 公尺；斜靠的話從底部倒下去（中心跟著移）
+    const W = PLANK4, H = PLANK4, y0 = g.lv || 0;
     const th = g.kind === 'free' ? -g.ang : g.o === 'h' ? 0 : -Math.PI / 2, lean = (g.lean || 0) * Math.PI / 180;
-    const cx = g.kind === 'free' ? g.cx : g.o === 'h' ? g.x + 0.5 : g.x, cz = g.kind === 'free' ? g.cy : g.o === 'h' ? g.y : g.y + 0.5;
+    const cx = g.kind === 'free' ? g.cx : g.o === 'h' ? g.x + W / 2 : g.x, cz = g.kind === 'free' ? g.cy : g.o === 'h' ? g.y : g.y + W / 2;
     ghostMesh4.rotation.set(lean, th, 0, 'YXZ');
     ghostMesh4.position.set(cx + Math.sin(th) * Math.sin(lean) * H / 2, y0 + Math.cos(lean) * H / 2, cz + Math.cos(th) * Math.sin(lean) * H / 2);
-    ghostMesh4.scale.set(0.96, H, 0.1);
+    ghostMesh4.scale.set(W - 0.04, H, 0.1);
   } else if (g.kind === 'ramp') {
-    // 斜坡：一格裡斜 45°，往 dir 的方向升高
+    // 斜坡：2×2 格斜 45°，往 dir 的方向升高
+    const W = PLANK4;
     ghostMesh4.rotation.set(Math.PI / 4, { e: -Math.PI / 2, w: Math.PI / 2, s: Math.PI, n: 0 }[g.dir], 0, 'YXZ');
-    ghostMesh4.position.set(g.x + 0.5, g.lv + 0.5, g.y + 0.5); ghostMesh4.scale.set(0.96, 0.06, Math.SQRT2);
-  } else if (g.kind === 'roof') { ghostMesh4.position.set(g.x + 0.5, ROOF4_H, g.y + 0.5); ghostMesh4.scale.set(1, 0.08, 1); if (g.tilt) ghostMesh4.rotation[g.tax === 'z' ? 'z' : 'x'] = g.tilt * Math.PI / 180; }
+    ghostMesh4.position.set(g.x + W / 2, g.lv + W / 2, g.y + W / 2); ghostMesh4.scale.set(W - 0.04, 0.06, W * Math.SQRT2);
+  } else if (g.kind === 'roof') { ghostMesh4.position.set(g.x + PLANK4 / 2, ROOF4_H, g.y + PLANK4 / 2); ghostMesh4.scale.set(PLANK4, 0.08, PLANK4); if (g.tilt) ghostMesh4.rotation[g.tax === 'z' ? 'z' : 'x'] = g.tilt * Math.PI / 180; }
   else { const fh = G.hand.f.solid === false ? 0.05 : 1.0; ghostMesh4.position.set(g.x + g.w / 2, fh / 2, g.y + g.h / 2); ghostMesh4.scale.set(g.w, fh, g.h); ghostMesh4.rotation.y = -(g.yaw || 0) * Math.PI / 180; }
 }
 // 手上拿的板子（畫面右下角）
@@ -6780,7 +7351,7 @@ function syncHand4() {
   if (handPlank4.userData.key !== key) {
     handPlank4.userData.key = key;
     while (handPlank4.children.length) { const c = handPlank4.children[0]; handPlank4.remove(c); }
-    if (h && h.k === 'plank') { if (!plankMats) makePlankMats(); const hh = h.door ? 0.4 : 0.2; box(handPlank4, -0.2, 0.2, -hh, hh, -0.015, 0.015, plankMats[h.tier], false); }   // 正方形的板子（門是長的）
+    if (h && h.k === 'plank') { if (!plankMats) makePlankMats(); box(handPlank4, -0.26, 0.26, -0.26, 0.26, -0.015, 0.015, plankMats[h.tier], false); if (h.door) sph(handPlank4, 0.02, 0.2, 0, 0.02, lm('#d6a84a')); }   // 正方形的板子（門也是）
     else if (h) box(handPlank4, -0.14, 0.14, -0.1, 0.1, -0.1, 0.1, lm('#b08a5a'), false);
   }
   handPlank4.visible = !!h;

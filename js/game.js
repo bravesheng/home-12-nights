@@ -96,6 +96,10 @@ function applyWorld(w) {
   document.body.classList.toggle('w4', w === 4);
   if (window.Renderer && Renderer.setWorld) Renderer.setWorld(w);
 }
+// 設定（每台平板自己的，測試版也會記；跟存檔、進度分開）：pickTips 拿到東西的提示要不要顯示
+const OPTS_KEY = 'home99_opts_v1';
+const OPTS = (() => { try { return { pickTips: true, ...JSON.parse(localStorage.getItem(OPTS_KEY) || '{}') }; } catch (e) { return { pickTips: true }; } })();
+function saveOpts() { try { localStorage.setItem(OPTS_KEY, JSON.stringify(OPTS)); } catch (e) { /* 無法存的時候忽略 */ } }
 function readProg() { if (TEST_MODE) return { w2: true, w3: true, w4: true, seenInit: true }; try { return JSON.parse(localStorage.getItem(PROG_KEY)) || {}; } catch (e) { return {}; } }
 function writeProg(p) { if (TEST_MODE) return; try { localStorage.setItem(PROG_KEY, JSON.stringify(p)); } catch (e) { /* 無法存檔時忽略 */ } }
 const w2Unlocked = () => TEST_MODE || !!readProg().w2;
@@ -388,6 +392,7 @@ const rarityTag = id => { const r = rarityOfItem(id); return r ? `<span class="r
 const cardQ = [];
 let cardTimer = 0;
 function showBulbCard(tier) {
+  if (!OPTS.pickTips) return;   // 拿到東西的提示關掉了（燈泡圖鑑照樣會記）
   cardQ.push(tier);
   if (!cardTimer) nextCard();
 }
@@ -2962,7 +2967,7 @@ function updatePlayer(dt) {
   if (sticky && !G.ev.trailTip) { G.ev.trailTip = 1; toast('🐌 踩到黏液了，走不快！跳過去就不會變慢。', 'warn'); }
   const sp = (sprint ? 4.8 : 3.0) * (sneakKey && !sprint ? 0.45 : 1) * (sticky ? 0.45 : 1) * (isW3() ? speedMult3() : 1) * (w4 ? speedMult4() : 1);
   if (p.stunT > 0) { p.stunT -= dt; fwd = 0; str = 0; }   // 被震倒、被打飛：動不了
-  if (ride) { if (ride.climb) updateClimb4(dt); else updateSlide(dt); fwd = 0; str = 0; }   // 正在玩溜滑梯、爬梯子（第四世界）：照固定路線走
+  if (ride) { if (ride.climb) updateClimb4(dt, fwd); else updateSlide(dt); fwd = 0; str = 0; }   // 正在玩溜滑梯（照固定路線走）、抓著梯子（第四世界：往前推往上爬、往後拉往下爬）
   if (p.pose) { if (moving || p.stunT > 0) standUp(); fwd = 0; str = 0; }   // 坐著、躺著：一走動（或被打飛）就起來
   if (sprint) p.stam -= 28 * dt; else p.stam = Math.min(100, p.stam + 16 * dt);
   const c = Math.cos(p.face), s = Math.sin(p.face);
@@ -2976,6 +2981,7 @@ function updatePlayer(dt) {
   if (!ride && (p.z > gnd + 0.001 || p.vz > 0)) {
     p.vz -= JUMP_G * dt;
     p.z += p.vz * dt;
+    if (w4) { const top = headroom4(p.x, p.y, p.z); if (p.z > top) { p.z = top; if (p.vz > 0) p.vz = 0; } }   // 第四世界：在屋頂底下跳，頭會撞到屋頂
     if (p.z <= gnd) {
       const fall = -p.vz;
       p.z = gnd; p.vz = 0;
@@ -3301,15 +3307,16 @@ function pickUp() {
 }
 
 // ====================================================================
-// 跳（第二世界的新技能）
+// 跳（每個世界都能跳；設計師：要可以跳躍！！！）
 // ====================================================================
 const JUMP_V = 5.2, JUMP_G = 22;     // 起跳速度、重力：跳 0.6 公尺高、0.47 秒落地（設計師說不要像在外太空一樣，要有重力）
 // 第三世界跳得比較高（1.3 公尺）：設計師要能跳到床、椅子、桌子、乘客的頭上
 const JUMP_V_WORLD = { 3: 7.6, 4: 7.6 };   // 第三、四世界跳得比較高（可以跳上桌子；第四世界設計師說要可以跑跳）
 function tryJump() {
-  if (!G || mode !== 'play' || curWorld < 2) return;
+  if (!G || mode !== 'play') return;
   const p = G.p;
   if (p.grabbed) { grabEscapePress(); return; }   // 被草叢人抓住：連按跳掙脫
+  if (ride && ride.climb) { letGoLadder4(); return; }   // 抓著梯子：放手
   if (p.pose) { standUp(); return; }               // 坐著、躺著：先起來
   if (airborne(p)) return;
   p.vz = JUMP_V_WORLD[curWorld] || JUMP_V;
@@ -3923,6 +3930,7 @@ function updateHUD() {
 }
 let lastToast = '', lastToastT = 0;
 function toast(msg, cls = '') {
+  if (cls === 'item' && !OPTS.pickTips) return;   // 拿到東西的提示關掉了
   const now = performance.now();
   if (msg === lastToast && now - lastToastT < 1500) return;
   lastToast = msg; lastToastT = now;
@@ -4014,8 +4022,14 @@ function releaseInputs() {
   lookId = null;
   if (G) G.holdLock = false;
 }
+// 暫停：自己按的（平板的暫停鈕、電腦的 Esc、切到別的 App）。跟朋友一起玩時會告訴大家，大家一起暫停（net.js）
 function pauseGame() {
-  if (mode !== 'play') return;
+  if (!enterPause()) return;
+  if (NET_OK) Net.pause(true);
+}
+// 進到暫停畫面（朋友暫停時 net.js 也呼叫這個，不會再傳出去）
+function enterPause() {
+  if (mode !== 'play') return false;
   mode = 'pause';
   $('pauseDiff').textContent = `${WORLD_NAMES[G.world || 1]}・難度：${diffName(G.diff)}`;
   Sound.setDrone(0);
@@ -4023,13 +4037,21 @@ function pauseGame() {
   if (document.pointerLockElement) document.exitPointerLock();
   $('pause').classList.remove('hidden');
   $('jumpscare').classList.remove('show');
-  if (NET_OK) Net.onPause();   // 暫停選單上的房間資訊
+  if (NET_OK) Net.onPause();   // 暫停選單上的房間資訊、是誰暫停的
+  return true;
 }
+// 繼續：自己按的（「繼續」、Esc）。跟朋友一起玩時大家一起繼續
 function resumeGame() {
-  $('pause').classList.add('hidden');
-  $('help').classList.add('hidden');
+  if (!leavePause()) return;
+  if (NET_OK) Net.pause(false);
+}
+// 離開暫停畫面（朋友按了繼續時 net.js 也呼叫這個）：從暫停選單打開的說明、圖鑑、朋友的畫面也一起關掉
+function leavePause() {
+  if (mode !== 'pause') return false;
+  for (const id of ['pause', 'help', 'book', 'bulbBook', 'friends']) $(id).classList.add('hidden');
   mode = 'play';
   lockPointer();
+  return true;
 }
 addEventListener('keydown', e => {
   if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return; // 在輸入框打字時不當成遊戲操作
@@ -4199,6 +4221,7 @@ function refreshTitle() {
 }
 function toTitle() {
   mode = 'title';
+  if (NET_OK) Net.onTitle();   // 先跟朋友說（客人回主選單就是離開房間；房主的房間還開著），蓋主選單的場景要一點時間，朋友那邊才會馬上看不到你的人物
   Sound.setDrone(0);
   if (document.pointerLockElement) document.exitPointerLock();
   if (CUT) { CUT = null; $('cutscene').classList.add('hidden'); }
@@ -4208,7 +4231,6 @@ function toTitle() {
   $('hud').classList.add('hidden');
   $('title').classList.remove('hidden');
   refreshTitle();
-  if (NET_OK) Net.onTitle();   // 客人回主選單就是離開房間；房主的房間還開著
 }
 let helpFrom = 'title', pickWorld = 1;
 $('btnNew').onclick = () => {
@@ -4292,6 +4314,10 @@ $('btnPauseBook').onclick = () => openBook('pause');
 $('btnBookBack').onclick = () => { $('book').classList.add('hidden'); $(bookFrom).classList.remove('hidden'); };
 function refreshMuteBtn() { $('btnMute').textContent = Sound.isMuted() ? '🔇 聲音：關' : '🔊 聲音：開'; }
 $('btnMute').onclick = () => { Sound.toggleMute(); refreshMuteBtn(); };
+// 拿到東西的提示（「撿到了……」「找到：……」和燈泡卡）可以關掉（設計師：拿到東西的提示可以顯示或關閉）
+function refreshPickTipsBtn() { $('btnPickTips').textContent = OPTS.pickTips ? '📦 拿到東西的提示：顯示' : '📦 拿到東西的提示：關閉'; }
+$('btnPickTips').onclick = () => { OPTS.pickTips = !OPTS.pickTips; saveOpts(); refreshPickTipsBtn(); Sound.play('click'); };
+refreshPickTipsBtn();
 refreshMuteBtn();
 $('btnQuit').onclick = toTitle;
 $('btnGoMenu').onclick = toTitle;

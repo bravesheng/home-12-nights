@@ -179,6 +179,10 @@ body.touch #itemInfo { font-size: 14px; }
 .froster .dot { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; box-shadow: 0 0 8px currentColor; }
 .froster .tag2 { margin-left: auto; font-size: 12px; opacity: .65; }
 .netbadge { color: #bfe0ff; border-color: rgba(120, 180, 255, .6); background: rgba(120, 180, 255, .1); }
+/* 跟朋友一起玩：暫停畫面上寫是誰暫停的 */
+#pauseWho { margin: -4px 0 4px; font-size: 18px; color: #ffd166; line-height: 1.4; }
+#pauseWho b { display: block; }
+#pauseWho .small { display: block; margin-top: 4px; color: #eee; }
 /* 客人倒下了：整個畫面暗紅，等天亮 */
 #netDown { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 20; pointer-events: auto;
   background: radial-gradient(ellipse at center, rgba(70, 0, 0, .3), rgba(12, 0, 0, .86)); }
@@ -339,7 +343,6 @@ li { margin-bottom: 9px; line-height: 1.55; font-size: 14px; }
 #stopfx { background: radial-gradient(ellipse at center, rgba(60, 0, 10, 0) 30%, rgba(80, 0, 10, .7) 100%); transition: opacity 1s; }
 
 /* 平板：第二、三世界才有「跳」按鈕 */
-body:not(.w2):not(.w3):not(.w4) #tbtns .tb.jump { visibility: hidden; }   /* 第一世界不能跳；第二、三、四世界可以（設計師：要可以跳躍！） */
 .tb.jump { border-color: rgba(255, 158, 200, .7); color: #ffd0e6; }
 
 /* ===== 破關動畫 ===== */

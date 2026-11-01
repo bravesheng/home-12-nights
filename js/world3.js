@@ -204,7 +204,7 @@ function alerts3() {
     else if (fuelLeft() < 20) a.push(`🔥 火快熄了（剩 ${Math.round(fuelLeft())} 秒）`);
   }
   if (onRoof(G.p.x, G.p.y)) a.push('🌬️ 你在車頂（對著艙口按住 E 爬回車廂）');
-  if (G.cold && candleHeld()) a.push('🕯️ 蠟燭讓你暖和一點');
+  if (G.cold && candleHeld()) a.push('🕯️ 蠟燭讓你暖和起來');
   return a;
 }
 // 狀態列：🔥 火力（火還能燒幾秒，低於 20 秒會閃）、🌡️ 體溫（只有寒寂之境顯示）
@@ -514,9 +514,18 @@ function chestMonster(c) {
 // 大白燈（第 15 級）：燈下站著一個大白，走到它面前它會抱住你（被打只扣一半的血）。不管有沒有下雪都會回體溫
 // ====================================================================
 const BAYMAX_WARM_R = 3, BAYMAX_HUG_R = 1.0;
-// 手上拿著蠟燭（物品列選中蠟燭）：寒寂之境時體溫掉得慢很多，3D 畫面的手上也會拿著一根點著的蠟燭
+// 手上拿著蠟燭（物品列選中蠟燭）：寒寂之境時體溫會慢慢回升（第三、四世界都一樣），3D 畫面的手上也會拿著一根點著的蠟燭
 const CANDLE_HAND_SECS = 90;
 const candleHeld = () => !!(G && G.selId === 'candle' && G.inv.candle > 0 && mode === 'play');
+// 加上手上蠟燭的體溫變化（設計師：下雪時拿著蠟燭可以回溫暖）：本來在掉的只剩四分之一，再每秒 +1；拿著的時候每 90 秒燒完一根
+function candleWarm(rate, dt) {
+  if (!candleHeld()) return rate;
+  const p = G.p;
+  p.candleT = (p.candleT || 0) + dt;
+  if (!G.ev.candleTip) { G.ev.candleTip = 1; toast('🕯️ 蠟燭讓你暖和起來：拿在手上，體溫會慢慢回升（每 90 秒燒完一根）。', 'good'); }
+  if (p.candleT >= CANDLE_HAND_SECS) { p.candleT = 0; removeItem('candle'); invDirty = true; toast(G.inv.candle ? `🕯️ 手上的蠟燭燒完了，換上新的一根（還有 ${G.inv.candle} 根）。` : '🕯️ 手上的蠟燭燒完了……', 'warn'); }
+  return (rate < 0 ? rate * 0.25 : rate) + 1;
+}
 function nearestBaymax() {
   const p = G.p, tx = Math.floor(p.x), ty = Math.floor(p.y);
   if (!inMap(tx, ty)) return null;
@@ -547,14 +556,7 @@ function updateWarmth3(dt) {
   const r = roomAt(p.x, p.y), outside = isStationRoom(r) || !!(r && r.roof);
   let rate = r && r.roof ? -3 : isStationRoom(r) ? -2 : -0.8;   // 車頂風最大，掉得最快
   if (r && r.id === 'engine' && G.fire.queue.length) rate = 3;
-  // 手上拿著點著的蠟燭（物品列選中蠟燭）：體溫掉得慢很多（只剩四分之一）；拿著的時候每 90 秒燒完一根
-  const candle = candleHeld();
-  if (candle) {
-    if (rate < 0) rate *= 0.25;
-    p.candleT = (p.candleT || 0) + dt;
-    if (!G.ev.candleTip) { G.ev.candleTip = 1; toast('🕯️ 蠟燭讓你暖和一點：拿在手上，體溫掉得慢很多（每 90 秒燒完一根）。', 'good'); }
-    if (p.candleT >= CANDLE_HAND_SECS) { p.candleT = 0; removeItem('candle'); invDirty = true; toast(G.inv.candle ? `🕯️ 手上的蠟燭燒完了，換上新的一根（還有 ${G.inv.candle} 根）。` : '🕯️ 手上的蠟燭燒完了……', 'warn'); }
-  }
+  rate = candleWarm(rate, dt);   // 手上拿著點著的蠟燭：體溫慢慢回升
   if (nb) rate += hugging ? 10 : nb.d < BAYMAX_WARM_R ? 5 : 0;
   for (const e of G.enemies) if (e.kind === 'tyrant' && !e.dead && Math.hypot(e.x - p.x, e.y - p.y) < 3) rate += 4;
   p.temp = clamp(p.temp + rate * dt, 0, 100);
