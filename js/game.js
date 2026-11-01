@@ -4022,8 +4022,14 @@ function releaseInputs() {
   lookId = null;
   if (G) G.holdLock = false;
 }
+// 暫停：自己按的（平板的暫停鈕、電腦的 Esc、切到別的 App）。跟朋友一起玩時會告訴大家，大家一起暫停（net.js）
 function pauseGame() {
-  if (mode !== 'play') return;
+  if (!enterPause()) return;
+  if (NET_OK) Net.pause(true);
+}
+// 進到暫停畫面（朋友暫停時 net.js 也呼叫這個，不會再傳出去）
+function enterPause() {
+  if (mode !== 'play') return false;
   mode = 'pause';
   $('pauseDiff').textContent = `${WORLD_NAMES[G.world || 1]}・難度：${diffName(G.diff)}`;
   Sound.setDrone(0);
@@ -4031,13 +4037,21 @@ function pauseGame() {
   if (document.pointerLockElement) document.exitPointerLock();
   $('pause').classList.remove('hidden');
   $('jumpscare').classList.remove('show');
-  if (NET_OK) Net.onPause();   // 暫停選單上的房間資訊
+  if (NET_OK) Net.onPause();   // 暫停選單上的房間資訊、是誰暫停的
+  return true;
 }
+// 繼續：自己按的（「繼續」、Esc）。跟朋友一起玩時大家一起繼續
 function resumeGame() {
-  $('pause').classList.add('hidden');
-  $('help').classList.add('hidden');
+  if (!leavePause()) return;
+  if (NET_OK) Net.pause(false);
+}
+// 離開暫停畫面（朋友按了繼續時 net.js 也呼叫這個）：從暫停選單打開的說明、圖鑑、朋友的畫面也一起關掉
+function leavePause() {
+  if (mode !== 'pause') return false;
+  for (const id of ['pause', 'help', 'book', 'bulbBook', 'friends']) $(id).classList.add('hidden');
   mode = 'play';
   lockPointer();
+  return true;
 }
 addEventListener('keydown', e => {
   if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return; // 在輸入框打字時不當成遊戲操作
@@ -4207,6 +4221,7 @@ function refreshTitle() {
 }
 function toTitle() {
   mode = 'title';
+  if (NET_OK) Net.onTitle();   // 先跟朋友說（客人回主選單就是離開房間；房主的房間還開著），蓋主選單的場景要一點時間，朋友那邊才會馬上看不到你的人物
   Sound.setDrone(0);
   if (document.pointerLockElement) document.exitPointerLock();
   if (CUT) { CUT = null; $('cutscene').classList.add('hidden'); }
@@ -4216,7 +4231,6 @@ function toTitle() {
   $('hud').classList.add('hidden');
   $('title').classList.remove('hidden');
   refreshTitle();
-  if (NET_OK) Net.onTitle();   // 客人回主選單就是離開房間；房主的房間還開著
 }
 let helpFrom = 'title', pickWorld = 1;
 $('btnNew').onclick = () => {
