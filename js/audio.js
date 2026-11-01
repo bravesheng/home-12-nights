@@ -57,6 +57,16 @@ const Sound = (() => {
     bell() { tone(1568, 0.5, 'sine', 0.08); tone(2093, 0.4, 'sine', 0.05, null, 0.02); tone(1568, 0.5, 'sine', 0.06, null, 0.18); },
     acid() { noise(0.6, 0.15, 5000, 0, 0.8); },
     rain() { for (let i = 0; i < 8; i++) noise(0.05, 0.08, rnd(2500, 4500), rnd(0, 0.6), 2); },
+    // 打雷：先一聲很響的劈啪（近的雷），再一串低低的轟隆隆慢慢滾過去
+    thunder() { noise(0.25, 0.7, 2600, 0, 0.6); noise(0.4, 0.6, 700, 0.05, 0.5); for (let i = 0; i < 6; i++) noise(0.9 + Math.random() * 0.8, 0.45 - i * 0.05, 90 + Math.random() * 80, 0.15 + i * 0.35, 0.7); tone(48, 2.4, 'sine', 0.35, 30, 0.1); },
+    farThunder() { for (let i = 0; i < 4; i++) noise(1.2 + Math.random(), 0.22 - i * 0.03, 70 + Math.random() * 60, i * 0.45, 0.6); },
+    splash() { noise(0.3, 0.35, 1400, 0, 0.7); noise(0.15, 0.25, 3500, 0.05, 1.5); tone(260, 0.2, 'sine', 0.08, 120); },
+    fizz() { for (let i = 0; i < 14; i++) noise(0.05, 0.12, 4000 + Math.random() * 3000, i * 0.07, 3); noise(1.2, 0.12, 2400, 0, 0.6); },
+    chop() { noise(0.09, 0.55, 600, 0, 1.4); tone(160, 0.12, 'triangle', 0.18, 90); noise(0.05, 0.2, 2200, 0.02, 2); },
+    treeFall() { noise(0.9, 0.35, 300, 0, 0.6); for (let i = 0; i < 5; i++) noise(0.06, 0.3, 1500 + i * 300, i * 0.08, 2); tone(60, 0.6, 'sine', 0.35, 35, 0.6); noise(0.4, 0.5, 150, 0.6, 1); },
+    reel() { for (let i = 0; i < 6; i++) tone(2200 + i * 80, 0.03, 'square', 0.04, null, i * 0.05); },
+    fish() { noise(0.25, 0.4, 1800, 0, 0.8); for (let i = 0; i < 4; i++) noise(0.05, 0.2, 2600, 0.1 + i * 0.09, 2); tone(520, 0.12, 'sine', 0.08, 780, 0.25); },
+    craft() { noise(0.06, 0.35, 900, 0, 2); noise(0.06, 0.3, 1300, 0.12, 2); tone(523, 0.25, 'triangle', 0.08, null, 0.22); tone(784, 0.3, 'triangle', 0.08, null, 0.32); },
     staffAlert() { tone(110, 0.6, 'sawtooth', 0.12, 90); tone(220, 0.4, 'triangle', 0.06, 180, 0.05); noise(0.3, 0.1, 300, 0, 1); },
     step() { noise(0.08, 0.3, 180, 0, 1.2); },
     punch() { noise(0.12, 0.6, 150, 0, 1); tone(80, 0.15, 'sine', 0.3, 40); },
@@ -495,10 +505,28 @@ const Sound = (() => {
     fireG.gain.setTargetAtTime(level * 0.25, ac.currentTime, 0.15);
   }
 
+  // 下雨聲（第五世界：持續播放，level 0～1 是雨多大；底下一層沙沙的雨聲，加上一滴一滴打在葉子上的聲音）
+  let rainG = null;
+  function setRain(level) {
+    if (!ac) return;
+    if (!rainG) {
+      const len = ac.sampleRate * 3, buf = ac.createBuffer(1, len, ac.sampleRate), d = buf.getChannelData(0);
+      let lp = 0;
+      for (let i = 0; i < len; i++) { lp += ((Math.random() * 2 - 1) - lp) * 0.35; d[i] = lp * 0.7 + (Math.random() < 0.0015 ? (Math.random() * 2 - 1) * 0.9 : 0); }
+      const src = ac.createBufferSource(); src.buffer = buf; src.loop = true;
+      const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1700; f.Q.value = 0.35;
+      rainG = ac.createGain(); rainG.gain.value = 0;
+      src.connect(f); f.connect(rainG); rainG.connect(master);
+      src.start();
+    }
+    rainG.gain.setTargetAtTime(level * 0.32, ac.currentTime, 0.6);
+  }
+
   return {
     init,
     setStatic,
     setFire,
+    setRain,
     play(name, vol = 1) {
       if (!ac || muted || !sfx[name]) return;
       if (vol !== 1) { out = ac.createGain(); out.gain.value = vol; out.connect(master); }

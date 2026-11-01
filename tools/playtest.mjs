@@ -695,7 +695,7 @@ await scenario('phone', '手機版面（橫放 852×393、直放 393×852：介�
   await shot('4-portrait');
 });
 
-await scenario('book', '怪物圖鑑（沒見過的只有問號；見過的卡片上是會動的 3D 怪物：三個世界各拍一張；舊存檔會照進度標成見過）', {}, async ({ page, shot, check }) => {
+await scenario('book', '怪物圖鑑（沒見過的只有問號；見過的卡片上是會動的 3D 怪物：三個世界各拍一張；舊存檔會照進度標成見過；?model= 看第五世界七隻怪物的模型）', {}, async ({ page, shot, check }) => {
   await page.goto(BASE, { waitUntil: 'load' });
   await page.waitForSelector('#btnBook');
   await page.click('#btnBook');
@@ -757,6 +757,168 @@ await scenario('book', '怪物圖鑑（沒見過的只有問號；見過的卡�
   await page.waitForSelector('#btnBook');
   const mig = await page.evaluate(() => { const s = seenSet(); return { stick: s.has('stick'), momo: s.has('momo'), tall: s.has('tall'), grass: s.has('grass') }; });
   check(mig.stick && mig.momo && !mig.tall && !mig.grass, `舊存檔要照進度標成見過（火柴人 ${mig.stick}、鳥腳女 ${mig.momo}、它 ${mig.tall}、草叢人 ${mig.grass}）`);
+  // 看模型（?model=cradle）：還沒有第五世界，搖籃囈語先用這個看；拖曳會轉，返回之後圖鑑照常
+  await page.goto(BASE + '?model=cradle', { waitUntil: 'load' });
+  const built5 = await page.waitForFunction(() => window.Renderer && Renderer.book.stats.built > 0 && !document.getElementById('book').classList.contains('hidden'), null, { timeout: 30000 }).then(() => true, () => false);
+  const mv = await page.evaluate(() => ({ title: document.querySelector('#book h2').textContent, stage: !!document.querySelector('#bookList .model-stage'), cards: document.querySelectorAll('#bookList .card').length }));
+  check(built5 && mv.stage && mv.cards === 0 && mv.title.includes('搖籃囈語'), `?model=cradle 要打開搖籃囈語的大舞台（${JSON.stringify(mv)}）`);
+  await sleep(1500);
+  await shot('6-cradle');
+  const box = await page.locator('#bookList .model-stage').boundingBox();
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5); await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.55, { steps: 6 }); await page.mouse.up();
+  await sleep(1200);
+  await shot('7-cradle-turned');
+  await page.click('#btnBookBack');
+  await page.click('#btnBook');
+  await sleep(1500);
+  const back = await page.evaluate(() => ({ title: document.querySelector('#book h2').textContent, cards: document.querySelectorAll('#bookList .card').length, tabs: getComputedStyle(document.getElementById('bookTabs')).display }));
+  check(back.title === '生物圖鑑' && back.cards > 0 && back.tabs !== 'none', `看完模型返回，再打開圖鑑要照常（${JSON.stringify(back)}）`);
+  // 記憶洩漏源（22 公尺高）、白日夢（16 公尺長）：舞台放大來看
+  for (const [kind, name] of [['leak', '記憶洩漏源'], ['daydream', '白日夢'], ['slice', '夢境切片'], ['gaze', '404視線'], ['green', '綠溫室'], ['clone', '複製人']]) {
+    await page.goto(BASE + '?model=' + kind, { waitUntil: 'load' });
+    const built = await page.waitForFunction(() => window.Renderer && Renderer.book.stats.built > 0 && !document.getElementById('book').classList.contains('hidden'), null, { timeout: 30000 }).then(() => true, () => false);
+    check(built && await page.evaluate(n => document.querySelector('#book h2').textContent.includes(n), name), `?model=${kind} 要打開${name}的大舞台`);
+    await sleep(1500);
+    await shot('8-' + kind);
+  }
+});
+
+await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板的草原、白天 6 分鐘晚上 5 分鐘、砍樹（掉板子和木柴、樹樁、2 天後長回來）、樹上和花上長的東西、釣魚、沐浴球丟進水裡洗出東西、工作台的合成書做方塊放在地上、12 天的天氣（下雨、雷暴雨打雷、霧）、7 隻新怪物晚上出來（不會出錯）、圖鑑的第五世界、存檔讀檔砍倒的樹', {}, async ({ page, shot, check }) => {
+  await page.goto(BASE + '?world=5&kit=1', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play');
+  await sleep(2000);
+  const info = await page.evaluate(() => ({ world: curWorld, w: MAP_W, h: MAP_H, day: DAY_LEN, night: NIGHT_LEN, bag: bagUsed(), trees: FURN.filter(f => f.type === 'tree5').length, flowers: FURN.filter(f => f.type === 'flower5').length, water: W5MAP.water.size, grown: G.pickups.filter(p => p.s).length, loose: G.loose4.length, bench: !!FURN_BY_ID.bench5, bath: !!FURN_BY_ID.bath5, ceil: Renderer.dbg().scene.children.length > 0 }));
+  check(info.world === 5 && info.w === 80 && info.h === 80, `第五世界的地圖要是 80×80（世界 ${info.world}、${info.w}×${info.h}）`);
+  check(info.day === 360 && info.night === 300, `白天 6 分鐘、晚上 5 分鐘（${info.day}／${info.night} 秒）`);
+  check(info.trees > 120 && info.flowers > 100 && info.water > 300, `草原上要有樹、花、池塘和河（樹 ${info.trees}、花 ${info.flowers}、水 ${info.water} 格）`);
+  check(info.grown > 60, `樹上和花上要長著東西（${info.grown} 個）`);
+  check(info.bench && info.bath && info.loose >= 4, `起點旁邊要有工作台、沐浴球機和地上的板子（板子 ${info.loose} 片）`);
+  check(info.bag <= 16, `kit 帶的東西不能超過背包 16 格（${info.bag} 格）`);
+  await page.evaluate(() => { G.t = 100; Object.assign(G.p, { x: 40.5, y: 44.5, face: -Math.PI / 2, pitch: 0.02 }); });
+  await sleep(1500);
+  await shot('1-meadow');
+  // 砍樹：看著樹按住 E 砍 3 下，樹倒了掉 2 片板子和木柴，留下樹樁
+  const chop = await page.evaluate(() => {
+    const f = FURN.filter(o => o.type === 'tree5' && !o.cut).sort((a, b) => Math.hypot(a.x - 40, a.y - 40) - Math.hypot(b.x - 40, b.y - 40))[0];
+    const spot = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => ({ x: f.x + 0.5 + dx * 1.0, y: f.y + 0.5 + dy * 1.0 })).find(q => walkable(q.x, q.y));
+    Object.assign(G.p, { x: spot.x, y: spot.y, face: Math.atan2(f.y + 0.5 - spot.y, f.x + 0.5 - spot.x), pitch: 0 });
+    const t = getTarget(), loose0 = G.loose4.length, pk0 = G.pickups.filter(p => p.id === 'wood').length;
+    for (let i = 0; i < 3; i++) { const tt = getTarget(); if (tt && tt.id && tt.id.startsWith('tree:')) tt.action(); }
+    return { label: t && t.label, cut: !!f.cut, solid: solid[f.y][f.x], planks: G.loose4.length - loose0, wood: G.pickups.filter(p => p.id === 'wood').length - pk0, id: f.id };
+  });
+  check(chop.label === '砍樹' && chop.cut && !chop.solid, `看著樹按住 E 砍 3 下樹要倒（「${chop.label}」、倒了 ${chop.cut}、還擋路 ${chop.solid}）`);
+  check(chop.planks === 2 && chop.wood === 1, `樹倒了要掉 2 片板子和木柴（板子 ${chop.planks}、木柴 ${chop.wood}）`);
+  await sleep(800);
+  await shot('2-chopped');
+  // 樹上長的東西：看著它按 E 摘下來
+  const fruit = await page.evaluate(() => {
+    const pk = G.pickups.filter(p => p.s && FURN_BY_ID[p.s].type === 'tree5' && !FURN_BY_ID[p.s].cut)[0];
+    const f = FURN_BY_ID[pk.s], a = Math.atan2(pk.y - f.y - 0.5, pk.x - f.x - 0.5), x = pk.x + Math.cos(a) * 0.9, y = pk.y + Math.sin(a) * 0.9;
+    Object.assign(G.p, { x, y, face: a + Math.PI, pitch: Math.atan2(pk.z + 0.1 - 1.5, 0.9) });
+    if (!walkable(x, y)) return { skip: true };
+    while (bagUsed() >= BAG_SLOTS) delete G.inv[invList().find(i => i !== pk.id)];
+    const lp = lookedPickup4(), n0 = G.inv[pk.id] || 0;
+    if (lp) takePickup4(lp.pk);
+    return { looked: !!lp, got: (G.inv[pk.id] || 0) > n0, id: pk.id };
+  });
+  check(fruit.skip || (fruit.looked && fruit.got), `看著樹上的東西按 E 要摘得下來（${JSON.stringify(fruit)}）`);
+  // 釣魚：站在水邊看著水按住 E
+  const fish = await page.evaluate(() => {
+    for (const k of W5MAP.water) {
+      const [x, y] = k.split(',').map(Number);
+      for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) if (walkable(x + dx + 0.5, y + dy + 0.5)) {
+        Object.assign(G.p, { x: x + dx + 0.5, y: y + dy + 0.5, face: Math.atan2(-dy, -dx), pitch: -0.2 });
+        while (bagUsed() >= BAG_SLOTS - 1) delete G.inv[invList().find(i => i !== 'bathbomb')];
+        const t = getTarget(), n0 = Object.values(G.inv).reduce((a, b) => a + b, 0), c0 = G.coins;
+        if (t && t.id === 'fish5') t.action();
+        return { label: t && t.label, hold: t && t.hold, got: Object.values(G.inv).reduce((a, b) => a + b, 0) > n0 || G.coins > c0 };
+      }
+    }
+    return {};
+  });
+  check(fish.label === '釣魚' && fish.got, `站在水邊看著水按住 E 要釣到東西（「${fish.label}」、釣到 ${fish.got}）`);
+  // 沐浴球：在水邊選它按 Q 丟進水裡，冒泡之後岸邊浮上來 2～4 樣東西
+  const bath = await page.evaluate(() => {
+    G.inv.bathbomb = 2; G.selId = 'bathbomb';
+    const n0 = G.pickups.length, c0 = G.coins;
+    useSelected();
+    const fizz = (G.bath5 || []).length;
+    updateBath5(2.1);
+    return { fizz, left: G.inv.bathbomb, washed: G.pickups.length - n0 + (G.coins - c0) / 2 };   // 洗出來的硬幣直接給丟的人（一次 2 枚）
+  });
+  check(bath.fizz === 1 && bath.left === 1 && bath.washed >= 2 && bath.washed <= 4, `沐浴球丟進水裡要冒泡、洗出 2～4 樣東西（${JSON.stringify(bath)}）`);
+  await sleep(600);
+  await shot('3-water');
+  // 工作台：打開合成書，2 根木柴做 2 個方塊，拿在手上放到地上（站得上去的 1 公尺方塊）
+  const craft = await page.evaluate(() => {
+    const b = FURN_BY_ID.bench5;
+    Object.assign(G.p, { x: b.x + 1, y: b.y + 2.2, face: -Math.PI / 2, pitch: 0 });
+    G.hand = null; G.inv.wood = 6;
+    const t = getTarget();
+    if (t && t.id === 'bench5') t.action();
+    const opened = mode === 'modal' && document.getElementById('mTitle').textContent.includes('合成書');
+    const n0 = FURN.filter(f => f.type === 'cube5').length;
+    modalAct('cube');
+    closeModal();
+    const hand = G.hand && G.hand.k === 'furn' && G.hand.f.type;
+    G.p.face = Math.PI / 2;
+    const g = ghost4(); if (g && g.ok) place4();
+    const cubes = FURN.filter(f => f.type === 'cube5' && !f.held);
+    return { label: t && t.label, opened, made: FURN.filter(f => f.type === 'cube5').length - n0, hand, placed: cubes.length, top: cubes[0] ? tileTopH(cubes[0].x, cubes[0].y) : null, wood: G.inv.wood };
+  });
+  check(craft.opened && craft.made === 2 && craft.hand === 'cube5', `工作台要打開合成書、做出 2 個方塊拿在手上（${JSON.stringify(craft)}）`);
+  check(craft.placed >= 2 && craft.top === 1 && craft.wood === 4, `方塊要放得到地上、站得上去（1 公尺高）、用掉 2 根木柴（${JSON.stringify(craft)}）`);
+  await page.evaluate(() => { const c = FURN.find(f => f.type === 'cube5' && !f.held); Object.assign(G.p, { x: c.x + 0.5, y: c.y + 3, face: -Math.PI / 2, pitch: -0.15 }); });
+  await sleep(1000);
+  await shot('4-cubes');
+  // 天氣：第 7 天雷暴雨（打雷、閃電）、第 2 天下雨加起霧、第 3 天寒寂之境；下雨有雨聲
+  const wx = await page.evaluate(() => {
+    const out = {};
+    G.day = 7; out.storm = rain5(); G.ev.boltT = 0; updateWeather5(0.016); out.flash = G.flash5 > 0; out.bolt = !!G.bolt5;
+    G.day = 2; out.rain = rain5(); out.fog = fog5();
+    out.counts = Object.fromEntries(['rain', 'storm', 'cold', 'red', 'fog', 'acid'].map(k => [k, Object.values(W5_WEATHER).filter(l => l.includes(k)).length]));
+    out.sound = typeof Sound.setRain === 'function';
+    G.day = 1;
+    return out;
+  });
+  check(wx.storm === 1 && wx.flash && wx.bolt, `雷暴雨的那天要打雷、有閃電（${JSON.stringify(wx)}）`);
+  check(wx.rain > 0 && wx.fog === 1 && wx.sound, `第 2 天要下雨又起霧、有雨聲（${JSON.stringify(wx)}）`);
+  const c = wx.counts;
+  check(c.rain === 6 && c.storm === 1 && c.cold === 3 && c.red === 2 && c.fog === 2 && c.acid === 2, `12 天的天氣照設計圖：下雨 6、雷暴雨 1、寒寂之境 3、紅月 2、霧 2、酸雨 2（${JSON.stringify(c)}）`);
+  await page.evaluate(() => { G.day = 2; Object.assign(G.p, { x: 40.5, y: 44.5, face: -Math.PI / 2, pitch: 0.05 }); });
+  await sleep(1500);
+  await shot('5-rain-fog');
+  // 存檔讀檔：砍倒的樹讀回來還是倒的；2 天後長回來
+  const sv = await page.evaluate(id => {
+    const s = save4(), f = FURN_BY_ID[id];
+    f.cut = null; furnGrid[f.y][f.x] = f; solid[f.y][f.x] = true;
+    load5(s.w5);
+    const back = !!f.cut && !solid[f.y][f.x];
+    G.day = f.cut + 2; regrow5();
+    return { back, regrown: !f.cut && solid[f.y][f.x], saved: (s.w5.cut || []).length };
+  }, chop.id);
+  check(sv.back && sv.regrown && sv.saved >= 1, `存檔要記得砍倒的樹、2 天後長回來（${JSON.stringify(sv)}）`);
+  // 晚上：7 隻新怪物都叫出來動一動，不能出錯；手電筒照得到
+  await page.evaluate(() => { G.day = 10; G.t = DAY_LEN - 0.05; Object.assign(G.p, { x: 40.5, y: 40.5, face: -Math.PI / 2, pitch: 0.1 }); });
+  await page.waitForFunction(() => G.phase === 'night', null, { timeout: 20000 });
+  const night = await page.evaluate(() => {
+    G.enemies = [];
+    for (const k of ['daydream', 'gaze', 'slice', 'green', 'cradle', 'clone', 'leak']) {
+      const e = spawnEnemy(k, k === 'leak' ? { x: 40.5, y: 18.5 } : { x: 40.5 + (Math.random() - 0.5) * 8, y: 33.5 + Math.random() * 3 });
+      if (e) e.spawn = 0;
+    }
+    G.p.flash = true; G.p.bat = 100;
+    for (let i = 0; i < 40; i++) updateEnemies(0.05);
+    update5(0.05);
+    return { kinds: G.enemies.map(e => e.kind), hp: Math.round(G.p.hp) };
+  });
+  check(['daydream', 'gaze', 'slice', 'green', 'cradle', 'clone', 'leak'].every(k => night.kinds.includes(k)), `第五世界的 7 隻新怪物都要能在晚上出現（${night.kinds.join('、')}）`);
+  await page.evaluate(() => { G.p.hp = 100; G.p.san = 100; for (const e of G.enemies) { e.x = 40.5 + (e.x - 40.5) * 0.6; } });
+  await sleep(2500);
+  await shot('6-night-monsters');
+  const book = await page.evaluate(() => BESTIARY.filter(m => monsterWorlds(m).includes(5)).map(m => m.kind || m.flower));
+  check(['daydream', 'gaze', 'slice', 'green', 'cradle', 'clone', 'leak'].every(k => book.includes(k)), `圖鑑的第五世界要有 7 隻新怪物（${book.join('、')}）`);
 });
 
 await scenario('cut', '破關開門動畫（?cut=1）', {}, async ({ page, shot, check }) => {
@@ -1474,6 +1636,85 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   const cl = await page.evaluate(() => ({ roster: Net.roster().length, vis: Renderer.friends().filter(r => r.visible).length, toast: document.getElementById('toasts').textContent }));
   check(cl.roster === 1 && cl.vis === 0 && Date.now() - closeAt < 6000, `客人關掉分頁，房主要馬上拿掉他的人物（${JSON.stringify(cl)}）`);
   check(cl.toast.includes('小明 離開了'), `客人關掉分頁，房主要看到「小明 離開了」（${cl.toast.slice(-60)}）`);
+});
+
+await scenario('net5', '跟朋友一起玩第五世界（?nettest）：客人進到房主的草原、砍倒的樹、砍樹（樹倒了掉的板子和木柴）、樹上的東西拿走、工作台做的方塊、沐浴球冒泡和洗出來的東西、閃電、記憶的光點、早上長回來的樹，兩邊都一樣', { limit: 240000 }, async ({ page, ctx, check }) => {
+  const guest = await ctx.newPage();
+  guest.on('pageerror', e => check(false, '客人的分頁 JS 錯誤：' + e.message));
+  guest.on('console', m => { if (m.type() === 'error' && !m.text().startsWith('Failed to load resource')) check(false, '客人的分頁 console 錯誤：' + m.text()); });
+  await guest.goto(BASE + '?nettest', { waitUntil: 'load' });
+  await guest.evaluate(() => { localStorage.removeItem('home99_save_v1'); localStorage.removeItem('home99_progress_v1'); });
+  await page.goto(BASE + 'test.html?world=5&kit=1&nettest', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play' && curWorld === 5, null, { timeout: 60000 });
+  // 房主先砍倒一棵樹（客人加入時要拿到）
+  const first = await page.evaluate(() => { G.t = 60; const f = FURN.find(o => o.type === 'tree5' && !o.cut); fellTree5(f, true); return f.id; });
+  await page.evaluate(() => pauseGame());
+  await page.click('#btnPauseFriends');
+  await page.click('#fHost');
+  await page.waitForFunction(() => /^[A-Z2-9]{4}$/.test(document.getElementById('fRoomCode').textContent), null, { timeout: 10000 });
+  const code = await page.evaluate(() => document.getElementById('fRoomCode').textContent);
+  await page.click('#fResume');
+  await guest.reload({ waitUntil: 'load' });
+  await guest.waitForSelector('#btnFriends');
+  await guest.click('#btnFriends');
+  await guest.fill('#fName', '小華');
+  await guest.fill('#fCode', code);
+  await guest.evaluate(() => { window.__left = []; Net.on('@close', d => window.__left.push({ why: d && d.why, t: Math.round(performance.now()), w: curWorld })); });
+  await guest.click('#fJoin');
+  await guest.waitForFunction(() => (mode === 'play' || mode === 'pause') && curWorld === 5 && Net.ready, null, { timeout: 90000 });
+  await page.evaluate(() => { if (mode === 'pause') resumeGame(); });
+  await guest.waitForFunction(() => mode === 'play', null, { timeout: 30000 }).catch(() => {});
+  // 兩邊都看得到對方在第五世界裡、客人拿到房主的整片草原（砍倒的樹）才開始（電腦很忙時要等比較久）
+  await page.waitForFunction(() => Net.friends().some(f => f.ingame && f.world === 5), null, { timeout: 30000 }).catch(() => {});
+  await guest.waitForFunction(() => Net.friends().some(f => f.ingame && f.world === 5), null, { timeout: 30000 }).catch(() => {});
+  await guest.waitForFunction(id => curWorld === 5 && FURN_BY_ID[id] && FURN_BY_ID[id].cut, first, { timeout: 40000 }).catch(() => {});
+  const g0 = await guest.evaluate(id => ({ world: curWorld, cut: !!(FURN_BY_ID[id] && FURN_BY_ID[id].cut), grown: G.pickups.filter(p => p.s).length, left: window.__left, mode }), first);
+  const h0 = await page.evaluate(() => G.pickups.filter(p => p.s).length);
+  check(g0.world === 5 && g0.cut, `客人要進到房主的草原、房主之前砍倒的樹也是倒的（${JSON.stringify(g0)}）`);
+  check(g0.grown === h0 && h0 > 30, `樹上和花上的東西要跟房主一樣（房主 ${h0}、客人 ${g0.grown}）`);
+  // 房主砍樹：客人那邊也倒、掉的板子和木柴一樣
+  const fell = await page.evaluate(() => {
+    const f = FURN.find(o => o.type === 'tree5' && !o.cut);
+    for (let i = 0; i < 3; i++) chop5(f);
+    return { id: f.id, loose: G.loose4.slice(-2).map(l => l.uid), wood: G.pickups.filter(p => p.id === 'wood').map(p => p.uid).pop() };
+  });
+  await guest.waitForFunction(d => FURN_BY_ID[d.id] && FURN_BY_ID[d.id].cut && d.loose.every(u => G.loose4.some(l => l.uid === u)), fell, { timeout: 15000 }).catch(() => {});
+  const g1 = await guest.evaluate(d => ({ cut: !!FURN_BY_ID[d.id].cut, solid: solid[FURN_BY_ID[d.id].y][FURN_BY_ID[d.id].x], loose: d.loose.every(u => G.loose4.some(l => l.uid === u)), wood: G.pickups.some(p => p.uid === d.wood) }), fell);
+  check(g1.cut && !g1.solid && g1.loose && g1.wood, `房主砍倒樹，客人那邊也要倒、掉一樣的板子和木柴（${JSON.stringify(g1)}）`);
+  // 客人拿走樹上的東西：房主那邊也不見
+  const took = await guest.evaluate(() => { const pk = G.pickups.find(p => p.s); const uid = pk.uid; while (bagUsed() >= BAG_SLOTS) delete G.inv[invList()[0]]; takePickup4(pk); return uid; });
+  await page.waitForFunction(u => !G.pickups.some(p => p.uid === u), took, { timeout: 15000 }).catch(() => check(false, '客人摘走樹上的東西，房主那邊也要不見'));
+  // 房主在工作台做方塊放在地上：客人那邊也有
+  const cube = await page.evaluate(() => {
+    G.hand = null; G.inv.wood = 4; openBook5(); modalAct('cube'); closeModal();
+    const f = G.hand && G.hand.f; G.p.face = Math.PI / 2;
+    const g = ghost4(); if (g && g.ok) place4();
+    const other = FURN.filter(o => o.type === 'cube5' && o !== f).map(o => o.id);
+    return { id: f && f.id, placed: f && !f.held, x: f && f.x, y: f && f.y, other };
+  });
+  await guest.waitForFunction(c => FURN_BY_ID[c.id] && !FURN_BY_ID[c.id].held, cube, { timeout: 15000 }).catch(() => {});
+  const g2 = await guest.evaluate(c => { const f = FURN_BY_ID[c.id]; return { has: !!f, placed: !!f && !f.held && furnGrid[c.y][c.x] === f, other: c.other.every(id => !!FURN_BY_ID[id]) }; }, cube);
+  check(cube.placed && g2.has && g2.placed && g2.other, `房主做的方塊（拿在手上的、放在工作台旁邊的），客人那邊也要有、放在一樣的地方（${JSON.stringify({ cube, g2 })}）`);
+  // 沐浴球：房主丟進水裡，客人看到冒泡、洗出來的東西也看得到
+  const bath = await page.evaluate(() => {
+    for (const k of W5MAP.water) { const [x, y] = k.split(',').map(Number); if (walkable(x + 0.5, y + 1.5)) { Object.assign(G.p, { x: x + 0.5, y: y + 1.5, face: -Math.PI / 2 }); break; } }
+    G.inv.bathbomb = 1; G.selId = 'bathbomb'; useSelected();
+    const n0 = G.pickups.length; updateBath5(2.1);
+    return G.pickups.slice(n0).map(p => p.uid);
+  });
+  await guest.waitForFunction(u => u.every(x => G.pickups.some(p => p.uid === x)), bath, { timeout: 15000 }).catch(() => {});
+  const g3 = await guest.evaluate(u => ({ items: u.filter(x => G.pickups.some(p => p.uid === x)).length }), bath);
+  check(bath.length >= 1 && g3.items === bath.length, `房主用沐浴球洗出來的東西，客人那邊也要有（洗出 ${bath.length}、客人看到 ${g3.items}）`);
+  // 閃電（房主決定）、記憶的光點（算記憶洩漏源的人放出來）
+  await page.evaluate(() => { G.force5 = ['storm']; G.ev.boltT = 0; updateWeather5(0.016); });
+  await guest.waitForFunction(() => G.flash5 > 0 || !!G.bolt5, null, { timeout: 15000, polling: 50 }).catch(() => check(false, '房主那邊打雷，客人那邊也要閃電'));
+  await page.evaluate(() => { const e = spawnEnemy('leak', { x: 40.5, y: 18.5 }); e.spawn = 0; e.cd = 0; updateLeak5(e, 0.05); });
+  await guest.waitForFunction(() => (G.motes5 || []).length > 0, null, { timeout: 15000, polling: 50 }).catch(() => check(false, '記憶洩漏源放出的光點，客人那邊也要有'));
+  // 早上長回來的樹：房主算好，送給客人
+  const regrow = await page.evaluate(id => { const f = FURN_BY_ID[id]; f.cut = G.day - 2; Object.assign(G.p, { x: 40.5, y: 40.5 }); regrow5(); net4Day(); return !f.cut; }, first);
+  check(regrow, '房主那邊的樹要長回來');
+  await guest.waitForFunction(id => !FURN_BY_ID[id].cut && solid[FURN_BY_ID[id].y][FURN_BY_ID[id].x], first, { timeout: 15000 }).catch(() => check(false, '房主那邊長回來的樹，客人那邊也要長回來'));
+  await guest.close();
 });
 
 await scenario('test', '測試版頁面（test.html）：所有世界都開著、圖鑑沒有問號、新遊戲可以從第 6 夜開始、不存檔也不碰正式版的進度；test.html 要跟 index.html 同步', {}, async ({ page, shot, check }) => {

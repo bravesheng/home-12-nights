@@ -4,9 +4,9 @@
 const TILE = 32;
 // 地圖大小：第一、二世界是 44×33 的房子；第三世界是一列 59 格長的列車（換世界時由 applyWorld 設定）
 let MAP_W = 44, MAP_H = 33;
-const MAP_SIZE = { 1: [44, 33], 2: [44, 33], 3: [59, 25], 4: [100, 76] };   // 第四世界的大小在下面的 W4W、W4H
+const MAP_SIZE = { 1: [44, 33], 2: [44, 33], 3: [59, 25], 4: [100, 76], 5: [80, 80] };   // 第四世界的大小在下面的 W4W、W4H
 // 白天和晚上多長（秒）：第四世界照設計師的要求，早上 5 分鐘、晚上 6 分鐘
-const DAY_SECS = { 1: 150, 2: 150, 3: 150, 4: 300 }, NIGHT_SECS = { 1: 150, 2: 150, 3: 150, 4: 360 };
+const DAY_SECS = { 1: 150, 2: 150, 3: 150, 4: 300, 5: 360 }, NIGHT_SECS = { 1: 150, 2: 150, 3: 150, 4: 360, 5: 300 };   // 第五世界：早上 6 分鐘、晚上 5 分鐘（設計圖）
 
 // 房間（格子座標，含邊界）。level 越高，找到的燈泡越好
 // ROOMS_HOUSE 是第一、二世界的房子；ROOMS 是現在這個世界用的清單，換世界時由 roomsForWorld 重新填
@@ -246,13 +246,20 @@ for (let t = 1; t <= MAX_TIER; t++) {
 }
 ITEMS.key = { name: '鑰匙', kind: 'key', icon: '🗝️', desc: '走到上鎖的寶箱前按 E 就能打開。' };
 ITEMS.coin = { name: '硬幣', kind: 'coin', icon: '🪙', desc: '可以跟神秘商人買東西，或投扭蛋機。' };
+// 第五世界：樹上和花上長的水果、釣到的魚、烤魚、釣竿、沐浴球（world5.js）
+ITEMS.apple5 = { name: '蘋果', kind: 'food', icon: '🍎', hunger: 22, san: 4, desc: '長在樹上的蘋果。飽食 +22、理智 +4' };
+ITEMS.grape5 = { name: '葡萄', kind: 'food', icon: '🍇', hunger: 14, san: 8, desc: '長在花上的一串葡萄。飽食 +14、理智 +8' };
+ITEMS.fish5 = { name: '魚', kind: 'food', icon: '🐟', hunger: 18, san: -4, desc: '剛釣上來的生魚，有點腥。飽食 +18、理智 −4；在工作台烤熟比較好吃' };
+ITEMS.fishc5 = { name: '烤魚', kind: 'food', icon: '🍢', hunger: 48, san: 10, warm: 12, desc: '在工作台烤熟的魚。飽食 +48、理智 +10' };
+ITEMS.rod5 = { name: '釣竿', kind: 'tool5', icon: '🎣', desc: '帶在身上就有效：釣魚快一倍。在工作台用 2 根木柴做。' };
+ITEMS.bathbomb = { name: '沐浴球', kind: 'bath5', icon: '🫧', desc: '走到池塘或河邊，選它按 Q 丟進水裡：咕嚕咕嚕冒泡，洗出 2～4 樣東西。' };
 const ITEM_ORDER = [
   'pan', 'slingshot', 'watergun', 'firecracker', 'salt', 'marble', 'holywater', 'strongflash', 'megaflash', 'flash4', 'flash5', 'flash6', 'flash7', 'amulet',
   'bulb' + BAYMAX_TIER, 'bulb' + HEAL_TIER, 'bulb' + SLIME_TIER, 'bulb' + ANGEL_TIER,
   ...Array.from({ length: NORMAL_MAX }, (_, i) => 'bulb' + (NORMAL_MAX - i)),
-  'key', 'lamp_chand', 'lamp_floor', 'lamp_desk', 'battery', 'candle',
+  'key', 'bathbomb', 'rod5', 'lamp_chand', 'lamp_floor', 'lamp_desk', 'battery', 'candle',
   'charcoal', 'wood', 'cushion', 'newspaper',
-  'cocoa', 'chocolate', 'milk', 'pizza', 'meatball', 'hotdog', 'cake', 'fries', 'soda', 'canned', 'noodles', 'snack', 'medkit', 'bandage',
+  'cocoa', 'chocolate', 'milk', 'pizza', 'meatball', 'hotdog', 'cake', 'fries', 'soda', 'canned', 'noodles', 'snack', 'fishc5', 'apple5', 'grape5', 'fish5', 'medkit', 'bandage',
 ];
 
 // 物資表（權重）
@@ -280,6 +287,10 @@ const LOOT = {
   tools4:   { battery: 3, wood: 3, charcoal: 1.2, coin: 2, firecracker: 1.5, marble: 1, watergun: 0.3, strongflash: 0.2, holywater: 1, key: 0.3 },
   kids4:    { marble: 3, slingshot: 0.6, chocolate: 2, candle: 1, coin: 2, firecracker: 1, soda: 1 },
   med4:     { bandage: 4, medkit: 1.2, holywater: 2, battery: 1, coin: 1 },
+  // 第五世界：樹上、花上長的東西（設計圖：食物水果、飲料、餅乾、電池、檯燈……都會長在樹上或花上）；沐浴球丟進水裡洗出來的東西
+  tree5:    { apple5: 5, snack: 2, soda: 1.5, battery: 2, bulb: 1.4, coin: 1.2, cocoa: 0.6, candle: 0.6, lamp_desk: 0.3 },
+  flower5:  { grape5: 4, snack: 2, soda: 1.5, milk: 1, chocolate: 1, battery: 1.4, bulb: 1, candle: 0.8, coin: 1 },
+  bath5:    { bulb: 3, battery: 2.5, coin: 4, apple5: 1, cake: 1, cocoa: 1, medkit: 0.6, bandage: 1.2, firecracker: 1, marble: 1, holywater: 1, amulet: 0.25, strongflash: 0.15, key: 0.2, wood: 1.5 },
 };
 
 // 難度：開始新遊戲前選
@@ -292,7 +303,7 @@ const DIFFS = {
 // ====================================================================
 // 第二世界：夢核花園。房間和門的位置都跟第一世界一樣，只換名字、地板和家具
 // ====================================================================
-const WORLD_NAMES = { 1: '第一世界：家', 2: '第二世界：夢核花園', 3: '第三世界：末班列車', 4: '第四世界：無盡賣場' };
+const WORLD_NAMES = { 1: '第一世界：家', 2: '第二世界：夢核花園', 3: '第三世界：末班列車', 4: '第四世界：無盡賣場', 5: '第五世界：世界夾層' };
 const ROOMS_W2 = {
   attic:    { name: '紫藤花架', floor: 'grass2', dayDark: 0.25 },
   study:    { name: '樹洞書屋', floor: 'grass' },
@@ -310,6 +321,7 @@ const ROOMS_W2 = {
 function roomsForWorld(w) {
   if (w === 3) return ROOMS_W3.map(r => ({ ...r }));
   if (w === 4) return W4MAP.rooms.map(r => ({ ...r }));
+  if (w === 5) return W5MAP.rooms.map(r => ({ ...r }));
   return ROOMS_HOUSE.map(r => ({ ...r, ...(w === 2 ? ROOMS_W2[r.id] : {}) }));
 }
 const isStationRoom = r => !!(r && r.station);   // 車站的房間（白天才能去，晚上列車開走就鎖門）
@@ -519,7 +531,7 @@ const FURN_TOP_H = {
   table3: 0.75, telegraph: 0.78, bed: 0.56, trunks: 0.5, crates3: 0.75,
   // 第四世界的家具（賣場）
   chair4: 0.46, armchair: 0.44, sofa4: 0.44, coffee4: 0.45, table4: 0.77, desk4: 0.76, bed4: 0.55, nightstand4: 0.55,
-  toybox: 0.5, crate4: 0.92, sideboard4: 0.8, cart4: 0.9,
+  toybox: 0.5, crate4: 0.92, sideboard4: 0.8, cart4: 0.9, cube5: 1.0, bench5: 0.9,
   bunk4: 1.62, ladder4: 1.95, rack4: 5.2,   // 上鋪、A 字梯頂、倉儲貨架頂：跳不上去，要爬梯子（world4.js 的 ladders4）
 };
 const FURN_SIT = {
@@ -550,12 +562,13 @@ const FURN_W1 = FURN.map(f => ({ ...f }));
 function furnForWorld(w) {
   if (w === 3) return FURN_W3.map(f => ({ ...f }));
   if (w === 4) return W4MAP.furn.map(f => ({ ...f }));
+  if (w === 5) return W5MAP.furn.map(f => ({ ...f }));
   return FURN_W1.map(f => ({ ...f, ...(w === 2 ? FURN_W2[f.id] || {} : {}) }));
 }
-const doorsForWorld = w => (w === 4 ? W4MAP.doors : w === 3 ? DOORS_W3 : DOORS_HOUSE).map(d => ({ ...d }));
-const socketsForWorld = w => (w === 4 ? [] : w === 3 ? SOCKETS_W3 : SOCKETS_HOUSE).map(s => ({ ...s }));   // 第四世界沒有天花板燈座：燈泡全變檯燈
+const doorsForWorld = w => (w === 5 ? [] : w === 4 ? W4MAP.doors : w === 3 ? DOORS_W3 : DOORS_HOUSE).map(d => ({ ...d }));
+const socketsForWorld = w => (w >= 4 ? [] : w === 3 ? SOCKETS_W3 : SOCKETS_HOUSE).map(s => ({ ...s }));   // 第四世界沒有天花板燈座：燈泡全變檯燈
 // 賣場裡面的牆格（柱子、樣品間的牆、小房間的牆）：第四世界才有，buildMap 在房間之後、門之前放
-const wallsForWorld = w => (w === 4 ? W4MAP.walls : []);
+const wallsForWorld = w => (w === 4 ? W4MAP.walls : w === 5 ? W5MAP.walls : []);   // 第五世界：池塘和河（水裡走不進去）
 
 // 寶箱四級：每天早上在車站三間重新放；打開是賭：可能是物資，也可能跳出怪物（等級越高東西越好、怪物越強）
 const CHESTS3 = [null,
@@ -616,6 +629,9 @@ const FURN4 = {
   plankpile: { name: '板材堆' }, foodcounter: { name: '熱食櫃台' }, drink4: { name: '飲料機' }, coldcase: { name: '冷藏櫃' },
   locker4: { name: '員工置物櫃' }, vending4: { name: '販賣機' }, bagrack: { name: '提袋架' }, infodesk: { name: '服務台' },
   breaker: { name: '電箱' }, workbench: { name: '工作台' }, gacha: { name: '扭蛋機' },
+  // 第五世界（world5.js）：樹（砍了會倒）、花、工作台、沐浴球機、自己做的方塊（1 公尺的木頭方塊，搬得動、站得上去）
+  tree5: { name: '樹' }, flower5: { name: '花', solid: false }, bench5: { name: '工作台' }, bath5: { name: '沐浴球機' },
+  cube5: { name: '木頭方塊', move: true },
 };
 // 樣品間的擺設（u 從左到右、v 從後面的牆往開口；side：f 朝開口、b 朝後面的牆、l 朝左、r 朝右）
 const W4_ROOMS_TMPL = {
@@ -768,3 +784,72 @@ const W4 = {
 // 天氣：紅月（2 天）、寒寂之境（4 天）、酸雨（每局隨機 2～3 次，開新遊戲時排好）
 const RED_MOON_W4 = [5, 11], COLD_DAYS_W4 = [3, 6, 9, 12];
 const BAG_SLOTS = 16;   // 第四世界的背包只有 16 格（一種東西一格），手上另外可以拿 1 個
+
+// ====================================================================
+// 第五世界「世界夾層」（照設計師第五次手稿 docs/sketches/IMG_7436.jpeg）：沒有天花板的夢核草原，有樹、花、池塘、河、草。
+// 跟第四世界用同一套玩法（背包 16 格、自己蓋房子、火爐、天氣），不一樣的地方在 js/world5.js：
+// 樹要自己砍（掉板子和木柴），工作台打開書把木柴做成方塊；食物、飲料、餅乾、電池、檯燈長在樹上和花上；
+// 池塘和河可以釣魚；扭蛋機換成沐浴球（丟進水裡洗出東西）。白天 6 分鐘、晚上 5 分鐘，地圖每一局都一樣
+// ====================================================================
+const W5W = 80, W5H = 80;
+const W5_MAP_VER = 1;
+// 12 天的天氣（設計圖：12 天裡 6 天下雨（不會怎樣）、1 天雷暴雨（會打雷）、3 天寒寂之境、2 天紅月、2 天霧天、2 天酸雨；有幾天同時有兩種）
+const W5_WEATHER = { 1: [], 2: ['rain', 'fog'], 3: ['cold'], 4: ['rain', 'red'], 5: ['acid'], 6: ['rain'], 7: ['storm'], 8: ['cold', 'fog'], 9: ['rain', 'red'], 10: ['acid'], 11: ['rain'], 12: ['cold', 'rain'] };
+const wx5 = (d, k) => (W5_WEATHER[d] || []).includes(k);
+const RED_MOON_W5 = [4, 9], COLD_DAYS_W5 = [3, 8, 12];
+const W5MAP = (() => {
+  let sd = 5150505;
+  const r = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+  const rooms = [{ id: 'meadow', name: '草原', x: 1, y: 1, w: W5W - 2, h: W5H - 2, floor: 'grass5', level: 2 }];
+  const water = new Set(), furn = [], zones = [], busy = new Set();
+  const cx = 40, cy = 40;   // 起點（草原的正中間）
+  // 河：從北往南彎彎曲曲，寬 3 格；兩座木橋
+  const riverX = y => Math.round(60 + 4 * Math.sin(y / 9) + 2 * Math.sin(y / 4.3 + 1));
+  const bridges = [22, 56];
+  for (let y = 1; y < W5H - 1; y++) {
+    if (bridges.some(b => Math.abs(y - b) <= 1)) continue;
+    for (let x = riverX(y) - 1; x <= riverX(y) + 1; x++) water.add(x + ',' + y);
+  }
+  // 池塘：幾個橢圓（中心、半徑）
+  const ponds = [[24, 25, 5, 3.6], [17, 59, 4.2, 3], [43, 67, 6, 3.2], [72, 11, 3.6, 2.8], [33, 47, 3, 2.2]];
+  for (const [px, py, rx, ry] of ponds)
+    for (let y = Math.floor(py - ry); y <= Math.ceil(py + ry); y++)
+      for (let x = Math.floor(px - rx); x <= Math.ceil(px + rx); x++)
+        if (((x + 0.5 - px) / rx) ** 2 + ((y + 0.5 - py) / ry) ** 2 < 1) water.add(x + ',' + y);
+  for (const k of water) busy.add(k);
+  let n = 0;
+  const F = (type, x, y, w, h, o = {}) => {
+    const spec = FURN4[type] || {};
+    const f = { id: o.id || type + '_' + (n++), type, name: spec.name, x, y, w, h, ...o };
+    if (spec.solid === false) f.solid = false;
+    if (spec.move) f.move = true;
+    furn.push(f);
+    for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) busy.add(xx + ',' + yy);
+    return f;
+  };
+  const free = (x, y, pad) => {
+    if (x < 2 || y < 2 || x > W5W - 3 || y > W5H - 3) return false;
+    for (let dy = -pad; dy <= pad; dy++) for (let dx = -pad; dx <= pad; dx++) if (busy.has((x + dx) + ',' + (y + dy))) return false;
+    return true;
+  };
+  // 起點旁邊：工作台、沐浴球機（取代扭蛋機）、火爐
+  F('bench5', cx + 2, cy - 3, 2, 1, { id: 'bench5', side: 's' });
+  F('bath5', cx - 3, cy - 3, 1, 1, { id: 'bath5', side: 's' });
+  F('fireplace4', cx - 1, cy + 3, 1, 1, { id: 'fire5' });
+  for (let y = cy - 4; y <= cy + 4; y++) for (let x = cx - 5; x <= cx + 5; x++) busy.add(x + ',' + y);   // 起點周圍留一塊空地
+  // 樹：西北邊和東北邊的森林密一點，其他地方零零星星；四成的樹會結東西（grow：長什麼的物資表，不是可以搜索的櫃子）
+  const forests = [[6, 4, 26, 18, 0.16], [66, 30, 12, 20, 0.12], [64, 60, 14, 16, 0.12], [2, 2, W5W - 4, W5H - 4, 0.022]];
+  for (const [x0, y0, w, h, dens] of forests)
+    for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++)
+      if (r() < dens && free(x, y, 1)) F('tree5', x, y, 1, 1, { kind: Math.floor(r() * 4), big: 0.8 + r() * 0.5, grow: r() < 0.42 ? 'tree5' : null, rot: r() * 6.28 });
+  // 花：西南邊的花海密一點；有些花上面長著東西
+  const fields = [[4, 44, 24, 30, 0.13], [2, 2, W5W - 4, W5H - 4, 0.018]];
+  for (const [x0, y0, w, h, dens] of fields)
+    for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++)
+      if (r() < dens && free(x, y, 0)) F('flower5', x, y, 1, 1, { kind: Math.floor(r() * 5), big: 0.8 + r() * 0.6, grow: r() < 0.35 ? 'flower5' : null, rot: r() * 6.28 });
+  zones.push({ name: '西北的森林', x: 4, y: 2, w: 30, h: 22 }, { name: '花海', x: 2, y: 42, w: 28, h: 36 }, { name: '東邊的森林', x: 64, y: 28, w: 15, h: 50 },
+    { name: '河邊', x: 52, y: 1, w: 14, h: W5H - 2 }, { name: '大池塘', x: 16, y: 18, w: 16, h: 14 }, { name: '南邊的池塘', x: 34, y: 60, w: 18, h: 14 }, { name: '起點的空地', x: cx - 6, y: cy - 6, w: 13, h: 13 });
+  const walls = [...water].map(k => k.split(',').map(Number));
+  return { rooms, walls, water, furn, zones, ponds, bridges: bridges.map(y => ({ x: riverX(y), y })), riverX, start: { x: cx + 0.5, y: cy + 0.5, face: -Math.PI / 2 } };
+})();
+const W5 = { start: W5MAP.start, starterPlanks: [[-2.5, 1.5], [-1.5, 1.5], [1.5, 1.5], [2.5, 1.5]].map(([dx, dy]) => [W5MAP.start.x + dx, W5MAP.start.y + dy]) };

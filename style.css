@@ -231,6 +231,10 @@ textarea { width: 100%; height: 76px; resize: none; border-radius: 10px; border:
 .gtag { font-size: 11px; padding: 1px 8px; border: 1px solid var(--gc); color: var(--gc); border-radius: 10px; }
 #bookfx { position: absolute; inset: 0; width: 100% !important; height: 100% !important; pointer-events: none; z-index: 2; }
 body.phone .card .stage { width: 104px; height: 130px; }
+/* 看模型（?model=）：只有一個大舞台，可以拖曳、捏合（不讓瀏覽器拿去捲動） */
+#book.model #bookTabs, #book.model #bookNote, #book.model #bookUnseen, #book.model #bookGrades { display: none; }
+#book.model .book { display: block; }
+.model-stage { height: min(68vh, 760px); border-radius: 12px; background: #14101b; touch-action: none; cursor: grab; }
 .card h4 { margin: 2px 0 6px; font-size: 17px; }
 .card .night { font-size: 11px; font-weight: 500; color: #ffd166; border: 1px solid rgba(255, 209, 102, .5); border-radius: 10px; padding: 1px 7px; margin-left: 8px; vertical-align: 2px; }
 .card p { font-size: 13px; line-height: 1.55; opacity: .85; }
@@ -445,6 +449,10 @@ body:not(.w4) .w4only { display: none !important; }
 .worldbtn.w4 { border-color: rgba(120, 200, 240, .8); background: linear-gradient(135deg, rgba(240, 210, 60, .14), rgba(60, 120, 200, .16)); }
 .worldbtn.w4 b { color: #9fdcff; }
 .w4badge { color: #9fdcff; border-color: rgba(120, 200, 240, .7); background: rgba(120, 200, 240, .1); }
+/* 第五世界：夢核草原（淡綠、粉紅、白霧） */
+.worldbtn.w5 { border-color: rgba(180, 230, 170, .8); background: linear-gradient(135deg, rgba(150, 220, 140, .14), rgba(255, 190, 220, .14), rgba(240, 244, 248, .1)); }
+.worldbtn.w5 b { color: #c8f0c0; }
+.w5badge { color: #c8f0c0; border-color: rgba(180, 230, 170, .7); background: rgba(180, 230, 170, .1); }
 /* 狀態列的背包格數 */
 .bagcount { margin-left: 12px; font-size: 13px; font-weight: 700; color: #dfe8f0; }
 .bagcount.full { color: #ff8a8a; }

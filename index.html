@@ -10,7 +10,7 @@
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <title>在家生存 12 夜</title>
-  <link rel="stylesheet" href="style.css?v=28">
+  <link rel="stylesheet" href="style.css?v=29">
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -119,6 +119,7 @@
       <p id="w2Badge" class="w2badge hidden">🌸 第二世界：夢核花園 已解鎖</p>
       <p id="w3Badge" class="w2badge w3badge hidden">🚂 第三世界：末班列車 已解鎖</p>
       <p id="w4Badge" class="w2badge w4badge hidden">🏬 第四世界：無盡賣場 已解鎖</p>
+      <p id="w5Badge" class="w2badge w5badge hidden">🌫️ 第五世界：世界夾層 已解鎖</p>
       <p id="netNote" class="w2badge netbadge hidden"></p>
       <p id="testBadge" class="w2badge testbadge hidden">🧪 測試版：所有世界和怪物都開著，新遊戲可以從任一夜開始</p>
       <p id="saveInfo" class="small"></p>
@@ -135,6 +136,7 @@
         <button class="worldbtn w2" data-w="2"><b>🌸 第二世界：夢核花園</b><small>🔒 打贏第一世界的 12 夜就會解鎖</small></button>
         <button class="worldbtn w3" data-w="3"><b>🚂 第三世界：末班列車</b><small>🔒 打贏第二世界的 12 夜就會解鎖</small></button>
         <button class="worldbtn w4" data-w="4"><b>🏬 第四世界：無盡賣場</b><small>🔒 打贏第三世界的 12 夜就會解鎖（有網路時可以直接玩）</small></button>
+        <button class="worldbtn w5" data-w="5"><b>🌫️ 第五世界：世界夾層</b><small>🔒 打贏第四世界的 12 夜就會解鎖</small></button>
       </div>
       <div class="btns"><button id="btnWorldBack" class="ghost">返回</button></div>
     </div>
@@ -283,7 +285,7 @@
   <div id="book" class="screen hidden">
     <div class="panel">
       <h2>生物圖鑑</h2>
-      <div id="bookTabs" class="tabs"><button data-w="1" class="on">🏠 第一世界</button><button data-w="2">🌸 第二世界</button><button data-w="3">🚂 第三世界</button><button data-w="4">🏬 第四世界</button></div>
+      <div id="bookTabs" class="tabs"><button data-w="1" class="on">🏠 第一世界</button><button data-w="2">🌸 第二世界</button><button data-w="3">🚂 第三世界</button><button data-w="4">🏬 第四世界</button><button data-w="5">🌫️ 第五世界</button></div>
       <p id="bookNote" class="small book-note">所有怪物都有等級（Lv）和血量，夜晚越後面等級越高、越耐打。</p>
       <p id="bookUnseen" class="small book-note hidden">❓ 還沒見過的怪物只會顯示問號（在你 8 格內出現超過 1 秒就算見過），但牠的說明照樣看得到。</p>
       <div id="bookGrades" class="grades"></div>
@@ -339,16 +341,17 @@
     </div>
   </div>
 
-  <script src="js/version.js?v=28"></script>
-  <script src="js/data.js?v=28"></script>
-  <script src="js/audio.js?v=28"></script>
-  <script src="js/world2.js?v=28"></script>
-  <script src="js/world3.js?v=28"></script>
-  <script src="js/world4.js?v=28"></script>
-  <script src="js/vendor/peerjs.min.js?v=28"></script>
-  <script src="js/net.js?v=28"></script>
-  <script src="js/netmon.js?v=28"></script>
-  <script src="js/game.js?v=28"></script>
-  <script type="module" src="js/render3d.js?v=28"></script>
+  <script src="js/version.js?v=29"></script>
+  <script src="js/data.js?v=29"></script>
+  <script src="js/audio.js?v=29"></script>
+  <script src="js/world2.js?v=29"></script>
+  <script src="js/world3.js?v=29"></script>
+  <script src="js/world4.js?v=29"></script>
+  <script src="js/world5.js?v=29"></script>
+  <script src="js/vendor/peerjs.min.js?v=29"></script>
+  <script src="js/net.js?v=29"></script>
+  <script src="js/netmon.js?v=29"></script>
+  <script src="js/game.js?v=29"></script>
+  <script type="module" src="js/render3d.js?v=29"></script>
 </body>
 </html>

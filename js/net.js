@@ -33,7 +33,7 @@
 //     '@start' { world, day }（客人進到房主的世界；房主換世界時客人跟著換，會再發一次）、'@close' { why }（自己離開房間或斷線）
 //   type 不能用 _ 或 @ 開頭（內部用）；data 要能 JSON 化；大的訊息會自動切塊（PeerJS 一次只能送 16KB）
 
-const NET_VER = 3;                      // 連線的訊息格式版本：改了就加 1（版本不一樣的平板會被擋下來，請它更新）
+const NET_VER = 4;                      // 連線的訊息格式版本：改了就加 1（版本不一樣的平板會被擋下來，請它更新）
 const NET_PREFIX = 'home12-';           // PeerJS 的 id：home12-ABCD
 const NET_MAX = 4;                      // 一個房間最多幾個人（房主加 3 個客人）
 const NET_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // 房間代碼：大寫字母和數字，不用 0/O、1/I（看起來很像）
@@ -493,7 +493,7 @@ const Net = (() => {
     for (const s of G.ev.schedule || []) if (s.at < G.t - 0.5) s.done = true;
     if (S.downed && (h.ph === 'day' || !S.downed.night)) revive();
   }
-  function startPos() { return curWorld === 4 ? { ...W4.start } : curWorld === 3 ? { ...W3.start } : { x: 19.5, y: 23, face: -Math.PI / 2 }; }
+  function startPos() { return curWorld === 5 ? { ...W5.start } : curWorld === 4 ? { ...W4.start } : curWorld === 3 ? { ...W3.start } : { x: 19.5, y: 23, face: -Math.PI / 2 }; }
   // 站到房主旁邊（找一格走得到的地方，面向房主）
   function placeNearHost(fromStart) {
     const hf = S.friends.get(S.hostId);
