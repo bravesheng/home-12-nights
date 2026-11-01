@@ -313,9 +313,9 @@ await scenario('w3', '第三世界第 1 天（照片貼圖、各式各樣死去�
     lieDown(FURN_BY_ID.bed);
     const lie = { pose: G.p.pose && G.p.pose.kind, pitch: G.p.pitch, label: lieT && lieT.label, t: getTarget().label };
     standUp();
-    return { table, onTable, head, fell, sit, up, lie };
+    return { table, onTable, head, fell, sit, up, lie, mode };
   });
-  check(jump.onTable && jump.table.z > 0.7, `要能跳上桌子（腳的高度 ${jump.table.z.toFixed(2)}、在桌子上 ${jump.onTable}）`);
+  check(jump.onTable && jump.table.z > 0.7, `要能跳上桌子（腳的高度 ${jump.table.z.toFixed(2)}、在桌子上 ${jump.onTable}、mode ${jump.mode}）`);
   check(jump.head.z > 1.2, `要能從座位跳到乘客的頭上（腳的高度 ${jump.head.z.toFixed(2)}，最高 ${jump.head.top.toFixed(2)}）`);
   check(jump.fell < 0.05, `走出桌子的邊緣要掉下來（腳的高度 ${jump.fell.toFixed(2)}）`);
   check(jump.sit.pose === 'sit' && jump.sit.drop > 0.5 && Math.abs(jump.sit.face - Math.PI) < 0.01 && !jump.up.pose && jump.up.ok, `對著座位要能坐下（面向車頭）、一走動就站起來（${JSON.stringify(jump.sit)}）`);
@@ -331,7 +331,7 @@ await scenario('w3', '第三世界第 1 天（照片貼圖、各式各樣死去�
   await page.waitForFunction(() => G.p.y > 12.6, null, { timeout: 20000 }).catch(() => {});
   await page.keyboard.up('w');
   s = await state(page);
-  check(s.y > 12.6, `白天要能從車門走下月台（現在 y=${s.y.toFixed(1)}）`);
+  check(s.y > 12.6, `白天要能從車門走下月台（現在 y=${s.y.toFixed(1)}、mode ${await page.evaluate(() => mode)}）`);
   await shot('2-platform');
   // 寶箱：每天在車站放 6 個（LV1×3、LV2×2、LV3×1）；走到櫃箱前面開它（直接呼叫開箱的函式，不用等按住 E）
   const ch = await page.evaluate(() => {
