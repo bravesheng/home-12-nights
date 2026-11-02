@@ -10529,7 +10529,7 @@ function sky5Colors(k, top, hor) {
 const WARM5 = ['daydream', 'gaze', 'slice', 'green', 'cradle', 'clone', 'leak'];
 let warm5i = 0, warm5T = 0;
 function warmMonsters5(t) {
-  if (warm5i >= WARM5.length || G.phase !== 'day' || G.t < DAY_LEN - 50 || t - warm5T < 1.5) return;
+  if (!MON5_ON || warm5i >= WARM5.length || G.phase !== 'day' || G.t < DAY_LEN - 50 || t - warm5T < 1.5) return;
   warm5T = t;
   const r = buildEnemy({ kind: WARM5[warm5i++], x: 0, y: 0, wob: 0 });
   disposeGroup(r.g);

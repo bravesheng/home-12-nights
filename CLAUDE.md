@@ -29,7 +29,7 @@ node tools/playtest.mjs
   - `&diff=easy`／`normal`／`hard`：難度（預設 normal）
   - `&dusk`：第 1 夜也從天黑前 3 秒開始
   - `&cold`：第三世界這一天強制是寒寂之境；`&fire=0`：火爐一開始是空的（測列車停下來）
-  - `?world=5`：第五世界（草原）。`&kit=1` 跟第四世界一樣只帶 16 格（木柴 10 根、沐浴球、不帶煤炭，板子放在起點南邊）；`&rain`、`&storm`、`&fog` 強制今天下雨、雷暴雨、起霧（`G.force5`），`&cold`、`&acid`、`&red` 跟第四世界一樣
+  - `?world=5`：第五世界（草原）。`&kit=1` 跟第四世界一樣只帶 16 格（木柴 10 根、沐浴球、不帶煤炭，板子放在起點南邊）；`&rain`、`&storm`、`&fog` 強制今天下雨、雷暴雨、起霧（`G.force5`），`&cold`、`&acid`、`&red` 跟第四世界一樣；7 隻新怪物暫時關掉了（world5.js 的 `MON5_ON`，晚上不排、不先蓋模型，看平板的卡頓是不是牠們造成的），`&mon5` 打開
   - `?world=4`：第四世界（賣場）。`&kit=1` 只帶 16 格以內的東西（背包只有 16 格），另外在旁邊的地上放各級板子各 2 片、一扇木門，背包裡有木柴和煤炭；`&cold` 寒寂之境、`&acid` 馬上下酸雨、`&red` 今晚紅月
   - `?model=cradle`（或 `leak`、`daydream`、`slice`、`gaze`、`green`、`clone`）：看怪物的 3D 模型（不用 `world`；game.js 的 `openModelView`）：圖鑑畫面只放這一隻，拖曳轉動、捏合或滾輪縮放（`Renderer.book.aim` 設定鏡頭）。還沒放進遊戲的新怪物先用這個給設計師看
   - `?nettest`（或 `&nettest`）：跟朋友一起玩改用同一個瀏覽器分頁之間的 BroadcastChannel 互連，不用上網（自動試玩的 `net` 情境用這個）

@@ -2761,7 +2761,7 @@ function startNight() {
   else showBig(`第 ${night} 夜`, ev.blood ? (w2 ? '🌸 萬物甦醒：花園裡的一切都醒過來了……' : isW5() ? '🩸 紅月：夢裡的東西全部醒過來了' : w4 ? '🩸 紅月：地上長出了草，第二世界的怪物也來了' : '🩸 血月之夜：怪物更多、等級更高') : w4 ? (G.cold ? '❄️ 寒寂之境：待在家裡，顧好火爐' : '燈熄了。躲在家裡，或出去做你想做的事') : w3 ? (G.cold ? '❄️ 寒寂之境：顧好火爐，別讓體溫歸零' : '顧好火爐，別讓列車停下來') : '拿好手電筒');
   Sound.play(ev.blood && w2 ? 'awaken' : 'dusk');
   if (night === 1) toast(w4 ? '🌙 夜晚來了。燈光擋不住怪物，但待在亮處理智不會掉；待在自己蓋的家裡比較安全。按 F 開手電筒！' : '🌙 夜晚來了。燈光擋不住怪物，但待在亮處理智不會掉。按 F 開手電筒，照著怪物可以扣牠的血！', 'warn');
-  if ((w2 || w3 || w4 || night > 1) && Object.values(isW5() ? INTRO5 : w4 ? INTRO4 : w3 ? INTRO3 : w2 ? INTRO2 : INTRO).includes(night)) toast('📖 今晚會有新的怪物出現……可以先去「生物圖鑑」看看怎麼對付牠們。', 'warn');
+  if ((w2 || w3 || w4 || night > 1) && Object.values(isW5() ? (MON5_ON ? INTRO5 : {}) : w4 ? INTRO4 : w3 ? INTRO3 : w2 ? INTRO2 : INTRO).includes(night)) toast('📖 今晚會有新的怪物出現……可以先去「生物圖鑑」看看怎麼對付牠們。', 'warn');
 }
 // 第二、三世界同一時間最多 3 隻大怪物，免得太擠（跟朋友一起玩時朋友的也算，每多一個朋友多 1 隻）
 const bossFull = () => curWorld >= 2 && G.enemies.filter(e => BOSSES.includes(e.kind)).length >= 3 + NetMon.friendsHere();
