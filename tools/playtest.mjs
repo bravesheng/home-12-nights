@@ -903,6 +903,7 @@ await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板�
   await page.evaluate(() => { G.day = 10; G.t = DAY_LEN - 0.05; Object.assign(G.p, { x: 40.5, y: 40.5, face: -Math.PI / 2, pitch: 0.1 }); });
   await page.waitForFunction(() => G.phase === 'night', null, { timeout: 20000 });
   const night = await page.evaluate(() => {
+    const sched = G.ev.schedule.map(s => s.type);
     G.enemies = [];
     for (const k of ['daydream', 'gaze', 'slice', 'green', 'cradle', 'clone', 'leak']) {
       const e = spawnEnemy(k, k === 'leak' ? { x: 40.5, y: 18.5 } : { x: 40.5 + (Math.random() - 0.5) * 8, y: 33.5 + Math.random() * 3 });
@@ -911,9 +912,11 @@ await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板�
     G.p.flash = true; G.p.bat = 100;
     for (let i = 0; i < 40; i++) updateEnemies(0.05);
     update5(0.05);
-    return { kinds: G.enemies.map(e => e.kind), hp: Math.round(G.p.hp) };
+    return { kinds: G.enemies.map(e => e.kind), hp: Math.round(G.p.hp), sched };
   });
   check(['daydream', 'gaze', 'slice', 'green', 'cradle', 'clone', 'leak'].every(k => night.kinds.includes(k)), `第五世界的 7 隻新怪物都要能在晚上出現（${night.kinds.join('、')}）`);
+  // 新怪物暫時關掉了（world5.js 的 MON5_ON）：晚上不能排到牠們
+  check(!night.sched.some(k => ['daydream', 'gaze', 'slice', 'green', 'cradle', 'clone', 'leak'].includes(k)), `新怪物關掉時晚上不能排到牠們（${night.sched.join('、')}）`);
   await page.evaluate(() => { G.p.hp = 100; G.p.san = 100; for (const e of G.enemies) { e.x = 40.5 + (e.x - 40.5) * 0.6; } });
   await sleep(2500);
   await shot('6-night-monsters');
