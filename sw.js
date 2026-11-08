@@ -51,6 +51,11 @@ const ASSETS = [
   './tex/m5-twFur.webp', './tex/m5-twHead.webp', './tex/m5-twStrand.webp', './tex/m5-twEye.webp',
 
   // 第四世界重做的怪物（新的檔名加在這一行下面）
+  './tex/m5-shkCarton.webp', './tex/m5-shkSclera.webp', './tex/m5-shkIris.webp', './tex/m5-shkLid.webp',
+  './tex/m5-mimHead.webp', './tex/m5-mimHeadS.webp', './tex/m5-mimBody.webp', './tex/m5-mimBodyS.webp', './tex/m5-mimLimb.webp', './tex/m5-mimIris.webp',
+  './tex/m5-stfHead.webp', './tex/m5-stfShirt.webp', './tex/m5-stfSleeve.webp', './tex/m5-stfPants.webp', './tex/m5-stfBadge.webp',
+  './tex/m5-hubBody.webp', './tex/m5-hubLeg.webp', './tex/m5-hubPipe.webp',
+  './tex/m5-embBody.webp', './tex/m5-embLimb.webp', './tex/m5-embHead.webp', './tex/m5-embGlow.webp', './tex/m5-embWing.webp', './tex/m5-embWingE.webp', './tex/m5-embFlame.webp', './tex/m5-embFlameMask.webp',
 
 ];
 
