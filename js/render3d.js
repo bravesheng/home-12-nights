@@ -7448,6 +7448,361 @@ function syncSnail2(e, r, t, p, dt) {
 }
 UPG.snail = { build: buildSnail2, sync: syncSnail2, view: { h: 1.45, d: 2.9, cy: 0.6 } };   // 鏡頭跟 BOOK_VIEW.snail 一樣
 
+// ---------- 眼花女孩（girl，第二世界的大魔王） ----------
+// 穿藍色上衣、白色圓領、深藍色百褶裙、白襪黑皮鞋的女孩，頭比一般人大一點（像娃娃）；
+// 臉是雕出來的（被光照到才有明暗）：蒼白、黑眼圈很深，兩眼都流著血淚、兩手都是血；
+// 左眼是真的眼球（眼皮貼著眼球，瞪得大大的、會抖），右眼是一個血淋淋的黑洞，長出一根樹枝，枝上開著兩朵眼球花（被手電筒照到會閉起來）；
+// 黑色的鮑伯頭是一根根細細的髮束，走路時會晃、甩頭時會甩
+const W2GL_HEAD = { x: 0, y: 1.63, z: 0.035, rx: 0.13, ry: 0.158, rz: 0.142 };
+const W2GL_EYE = { x: 0.33, y: -0.1, R: 0.031 }, W2GL_LID = { w: 0.95, hu: 0.66, hl: 0.52, lift: 0.04 };   // 眼睛在單位球上的位置、眼球半徑；左眼（-x）是真的，右眼（+x）是洞
+// 臉上的起伏：[X, Y, 寬, 高, 凸起多少, 左右對稱, 邊緣多陡]
+const W2GL_FACE = [
+  [0, 0.42, 0.5, 0.25, 0.02, 0, 1],        // 額頭
+  [0.3, 0.06, 0.22, 0.06, 0.032, 1, 1],    // 眉骨
+  [0.33, -0.1, 0.2, 0.15, -0.045, 1, 1],   // 眼窩
+  [0.44, -0.3, 0.17, 0.12, 0.03, 1, 1],    // 顴骨
+  [0.42, -0.52, 0.16, 0.14, -0.025, 1, 1], // 臉頰凹下去（瘦瘦的）
+  [0, -0.18, 0.05, 0.14, 0.045, 0, 1],     // 鼻樑
+  [0, -0.36, 0.07, 0.07, 0.085, 0, 1],     // 鼻頭
+  [0.058, -0.4, 0.04, 0.035, 0.028, 1, 1], // 鼻翼
+  [0.034, -0.425, 0.018, 0.013, -0.028, 1, 1.5], // 鼻孔
+  [0, -0.48, 0.02, 0.03, -0.01, 0, 1],     // 人中
+  [0, -0.535, 0.12, 0.028, 0.04, 0, 1],    // 上唇
+  [0, -0.567, 0.13, 0.014, -0.034, 0, 1.4],// 嘴縫（微微張開）
+  [0, -0.6, 0.1, 0.03, 0.04, 0, 1],        // 下唇
+  [0, -0.65, 0.08, 0.025, -0.015, 0, 1],   // 下唇底下的凹
+  [0, -0.76, 0.12, 0.07, 0.055, 0, 1],     // 下巴
+  [0.75, -0.1, 0.12, 0.3, -0.02, 1, 1],    // 太陽穴
+];
+// 左眼的中心和朝向（第一次用時才算）
+let w2glEyeAt = null;
+function w2glEyeC() {
+  if (w2glEyeAt) return w2glEyeAt;
+  const X = -W2GL_EYE.x, Y = W2GL_EYE.y, S0 = w2glHeadPt(X, Y, Math.sqrt(1 - X * X - Y * Y), new THREE.Vector3(), true), F = new THREE.Vector3(-0.08, -0.04, 1).normalize();
+  return (w2glEyeAt = { F, C: S0.addScaledVector(F, -0.9 * W2GL_EYE.R) });
+}
+function w2glHeadPt(x, y, z, out, noEye) {
+  let X = x, Y = y, Z = z;
+  if (Y < 0) { const t = -Y; X *= 1 - 0.22 * t * t; Z *= Z > 0 ? 1 + 0.18 * sstep(0.15, 0.85, t) * (1 - 0.5 * sstep(0.88, 1, t)) : 1 - 0.3 * t * t; }
+  if (Z < 0) Z *= 1 + 0.06 * sstep(-0.5, 0.1, Y);
+  let d = 0;
+  if (z > 0.05) {
+    for (const f of W2GL_FACE) for (const s of f[5] ? [-1, 1] : [1]) { const u = (x - s * f[0]) / f[2], v = (y - f[1]) / f[3], q = u * u + v * v; if (q < 16) d += f[4] * Math.exp(-(q ** f[6])); }
+    // 右眼的洞：又深又陡，邊緣破破爛爛
+    const u = (x - W2GL_EYE.x) / 0.14, v = (y - W2GL_EYE.y) / 0.11, q = u * u + v * v;
+    if (q < 9) d += -0.2 * Math.exp(-(q ** 2.2)) * (1 + 0.15 * (fbm3(x * 20, y * 20, 1, 2, 801) - 0.5));
+    d *= sstep(0.05, 0.4, z);
+  }
+  const k = 1 + d / (Math.hypot(X, Y, Z) || 1);
+  out.set(X * k * W2GL_HEAD.rx, Y * k * W2GL_HEAD.ry, Z * k * W2GL_HEAD.rz);
+  if (noEye || z < 0.3) return out;
+  const E = w2glEyeC(), dx = (x + W2GL_EYE.x) * -1 * W2GL_HEAD.rx, dy = (y - W2GL_EYE.y) * W2GL_HEAD.ry;
+  if (dx * dx + dy * dy < (W2GL_EYE.R * 2.4) ** 2) crSnapLid(out, E.C, E.F, dx, dy, W2GL_EYE.R, W2GL_LID);
+  return out;
+}
+const W2GL_U = crWarp(-Math.PI, Math.PI, a => 1 + 1.6 * Math.exp(-((a / 0.7) ** 2))), W2GL_V = crWarp(0, Math.PI, th => 1 + 1.6 * Math.exp(-(((th - 1.75) / 0.55) ** 2)));
+const w2glHeadGeo = () => sculptGeo('w2glHead', w2glHeadPt, W2GL_U, W2GL_V, th => Math.max(sstep(1.38, 1.46, th) * (1 - sstep(1.84, 1.92, th)), 0.5 * sstep(1.84, 1.92, th) * (1 - sstep(2.36, 2.44, th))), a => sstep(-0.72, -0.62, a) * (1 - sstep(0.62, 0.72, a)), [0.034, 0.04], [0.11, 0.12]);
+// 鮑伯頭蓋住哪裡（a 從正面往右、th 從頭頂往下）：瀏海蓋到眉毛，兩邊蓋住耳朵到下巴，後面到後頸
+const w2glHairLine = (a, th) => 0.85 + 0.06 * Math.sin(a * 5) + 1.25 * sstep(0.8, 1.15, Math.abs(a)) - th;
+// 臉的貼圖：蒼白、有點灰的皮膚，黑眼圈很深；頭髮蓋住的地方是黑的（髮束之間不會露出皮膚）；
+// 兩眼流下來的血淚、右眼血淋淋的洞、蒼白的嘴唇
+function w2glPaintHead(c, W, H) {
+  w2PaintRect(c, 0, 0, W, H, (u, t, o) => {
+    const th = W2GL_V.inv(1 - t), a = W2GL_U.inv(u), st = Math.sin(th), x = st * Math.sin(a), y = Math.cos(th), z = st * Math.cos(a);
+    const n = fbm3(x * 5, y * 5, z * 5, 5, 811), blot = fbm3(x * 2, y * 2, z * 2, 3, 813);
+    let col = w2Mix([196, 180, 170], [220, 208, 196], n);
+    col = w2Mix(col, [196, 168, 170], sstep(0.55, 0.75, blot) * 0.4);
+    col = w2Mix(col, [176, 150, 140], sstep(0.4, 0.95, Math.abs(x)) * 0.35 + sstep(-0.6, -0.95, y) * 0.3);
+    // 透出來的青色血管（太陽穴、眼睛底下）、一點一點的紅斑
+    const vn = sstep(0.022, 0.0, Math.abs(fbm3(x * 7, y * 7, z * 7, 4, 815) - 0.5)) * (sstep(0.55, 0.85, Math.abs(x)) * sstep(-0.4, 0.1, y) + sstep(0.25, 0.0, Math.abs(y + 0.3)) * 0.6);
+    col = w2Mix(col, [130, 140, 170], vn * 0.35);
+    col = w2Mix(col, [200, 130, 130], sstep(0.62, 0.8, fbm3(x * 12, y * 12, z * 12, 3, 817)) * 0.25);
+    if (z > 0) {
+      // 黑眼圈、右眼的洞（洞裡全黑，邊緣血紅、破破的）
+      for (const s of [-1, 1]) { const q = Math.hypot((x - s * W2GL_EYE.x) / 0.16, (y - W2GL_EYE.y + 0.02) / 0.12); col = w2Mix(col, [112, 74, 84], sstep(1.7, 0.7, q) * 0.55); }
+      const q = Math.hypot((x - W2GL_EYE.x) / 0.14, (y - W2GL_EYE.y) / 0.11) * (1 + 0.15 * (fbm3(x * 20, y * 20, 1, 2, 801) - 0.5));
+      col = w2Mix(col, [110, 12, 18], sstep(1.5, 1.0, q)); col = w2Mix(col, [12, 2, 3], sstep(0.95, 0.65, q));
+      // 血淚：從兩隻眼睛往下流到下巴，邊緣深、中間亮；尾端一顆血珠
+      for (let i = 0; i < 5; i++) {
+        const s = i < 2 ? -1 : 1, x0 = s * W2GL_EYE.x + [-0.05, 0.04, -0.06, 0.03, 0.08][i], y0 = W2GL_EYE.y - 0.06, y1 = [-0.75, -0.5, -0.85, -0.62, -0.4][i];
+        const xx = x0 + Math.sin(y * 8 + i) * 0.015 + (y0 - y) * s * 0.04, w = 0.016 + 0.006 * (i % 2), k = Math.exp(-(((x - xx) / w) ** 2)) * sstep(y0 + 0.02, y0 - 0.03, y) * sstep(y1 - 0.02, y1 + 0.04, y);
+        const drop = Math.exp(-(((x - xx) / (w * 1.4)) ** 2) - (((y - y1) / 0.03) ** 2));
+        col = w2Mix(col, [150, 12, 20], clamp(k * 0.9 + drop, 0, 1)); col = w2Mix(col, [90, 4, 10], k * sstep(0.4, 0.9, Math.abs(x - xx) / w) * 0.5);
+      }
+    }
+    if (w2glHairLine(a, th) > -0.02) col = w2Mix(col, [20, 17, 20], sstep(-0.02, 0.04, w2glHairLine(a, th)));
+    o[0] = col[0]; o[1] = col[1]; o[2] = col[2];
+  });
+  const { at, soft, curve } = headPainter(c, W, H, W2GL_U, W2GL_V), sh = '#6a4a48';
+  // 左眼的眼皮：上下緣濕濕的粉紅色、上眼皮一道摺痕和睫毛，開口裡面暗紅色
+  const E = W2GL_EYE.R, lidPt = (u, k, off = 0) => { const L = crLidE(u * W2GL_LID.w * E, 0, E, W2GL_LID); return [u * W2GL_LID.w * E / W2GL_HEAD.rx * 100, ((k ? L.top : L.bot) + off * (k ? 1 : -1)) / W2GL_HEAD.ry * 100]; };
+  const lidLine = (k, off, col, w, u0 = -1, u1 = 1) => { c.strokeStyle = col; c.lineWidth = w; c.lineCap = 'round'; c.beginPath(); for (let u = u0; u <= u1 + 1e-6; u += 0.05) c.lineTo(...lidPt(u, k, off)); c.stroke(); };
+  const r = seeded(8191);
+  at(-W2GL_EYE.x, W2GL_EYE.y, () => {
+    c.fillStyle = '#4a1818'; c.beginPath();
+    for (let u = -1; u <= 1.001; u += 0.05) c.lineTo(...lidPt(u, 1));
+    for (let u = 1; u >= -1.001; u -= 0.05) c.lineTo(...lidPt(u, 0));
+    c.fill();
+    lidLine(1, 0.55 * E, rgbaOf(sh, 0.25), 2.5, -0.8, 0.9);
+    lidLine(1, 0.002, '#b07070', 1.2); lidLine(0, 0.002, '#c08078', 1.0);
+    for (let i = 0; i < 30; i++) { const u = -0.9 + i / 29 * 1.8, [px, py] = lidPt(u, 1, 0.002), l = 2.4 + r() * 1.4; curve([px, py, px + (u * 0.8 - 0.3) * l * 0.6, py + l * 0.7, px + (u * 1.1 - 0.5) * l, py + l], 'rgba(20,14,14,.85)', 0.5); }
+    for (let i = 0; i < 14; i++) { const u = -0.7 + i / 13 * 1.4, [px, py] = lidPt(u, 0, 0.002), l = 1.2 + r() * 0.8; curve([px, py, px + u * l * 0.5, py - l], 'rgba(30,20,20,.6)', 0.35); }
+  }, -1);
+  // 眉毛：細細的黑色
+  for (const s of [-1, 1]) at(s * 0.31, 0.1, () => { for (let i = 0; i < 50; i++) { const t2 = i / 49, x = -13 + t2 * 26, y = 2.2 * Math.sin(t2 * Math.PI) - t2 * 1.5 + (r() - 0.5) * 1.4; curve([x, y, x + 1.8 + t2, y + 0.8 - t2 * 0.5], 'rgba(26,20,20,.55)', 0.45); } }, s);
+  // 鼻子的影子、鼻孔
+  at(0, -0.36, () => { for (const s of [-1, 1]) soft(s * 7, 1, 3.5, 10, sh, 0.24); soft(0, 1.5, 2.2, 3.2, '#ffffff', 0.12); });
+  for (const s of [-1, 1]) at(s * 0.034, -0.425, () => { c.fillStyle = 'rgba(50,24,24,.85)'; c.beginPath(); c.ellipse(0, 0, 1.8, 1.1, -0.25, 0, 7); c.fill(); }, s);
+  // 嘴：蒼白、有點發紫的嘴唇，微微張開
+  at(0, -0.567, () => {
+    c.fillStyle = '#a8787c'; c.beginPath(); c.moveTo(-13, 0); c.bezierCurveTo(-8, 1.6, -4, 4, -1.5, 3.4); c.quadraticCurveTo(0, 2.6, 1.5, 3.4); c.bezierCurveTo(4, 4, 8, 1.6, 13, 0); c.quadraticCurveTo(0, -0.8, -13, 0); c.fill();
+    c.fillStyle = '#b48488'; c.beginPath(); c.moveTo(-11, -0.3); c.quadraticCurveTo(0, -7, 11, -0.3); c.quadraticCurveTo(0, -1, -11, -0.3); c.fill();
+    c.fillStyle = '#2a0c10'; c.beginPath(); c.ellipse(0, 0, 8, 1.1, 0, 0, 7); c.fill();
+    for (const s of [-1, 1]) soft(s * 13.5, -0.3, 2.2, 2.2, sh, 0.3);
+  });
+  // 整張臉的明暗（畫在貼圖上，燈光照不到的時候也看得出立體）：額頭亮、太陽穴和眼窩暗、顴骨底下一道影子、鼻子兩側、下巴底下
+  at(0, 0.38, () => soft(0, 0, 36, 22, '#ffffff', 0.12));
+  for (const s of [-1, 1]) {
+    at(s * 0.74, -0.05, () => soft(0, 0, 16, 36, sh, 0.32), s);
+    at(s * 0.33, -0.04, () => soft(0, 0, 18, 12, '#4a2a34', 0.35), s);
+    at(s * 0.44, -0.44, () => soft(0, 0, 14, 9, sh, 0.3), s);
+    at(s * 0.47, -0.27, () => soft(0, 0, 9, 6, '#ffffff', 0.12), s);
+  }
+  at(0, -0.36, () => soft(0, 4, 3, 8, '#ffffff', 0.15));
+  at(0, -0.86, () => soft(0, -4, 30, 12, sh, 0.45));
+  at(0, -0.64, () => soft(0, 0, 8, 3, sh, 0.3));
+  overlayDetail(c, 'skin', W, H, 6, 0.25);
+}
+// 眼球花的花瓣（根在下面）：粉紅色、根部偏紫紅，一條條細細的脈，邊緣有一點枯
+function w2glPaintPetal(c, W, H) {
+  w2PaintRect(c, 0, 0, W, H, (u, t, o) => {
+    const s = u * 2 - 1, as = Math.abs(s), n = fbm3(s * 2, t * 4, 0.3, 4, 881), vein = Math.pow(0.5 + 0.5 * Math.cos((s * 7 + (fbm3(s * 2, t * 6, 1, 3, 883) - 0.5) * 1.5) * Math.PI), 6);
+    let col = w2Mix([170, 60, 96], [236, 150, 176], sstep(0.0, 0.45, t));
+    col = w2Mix(col, [248, 196, 210], sstep(0.4, 0.9, t) * (1 - as) * 0.5);
+    col = w2Mix(col, [150, 80, 70], sstep(0.82, 1.0, t + as * 0.2 + (n - 0.5) * 0.3) * 0.6);
+    const k = 1 - 0.15 * vein + (n - 0.5) * 0.12;
+    o[0] = col[0] * k; o[1] = col[1] * k; o[2] = col[2] * k;
+    const hw = 0.25 + 0.75 * Math.sin(Math.PI * Math.min(1, t * 1.05) ** 0.6);
+    o[3] = as < hw * (0.97 - 0.08 * fbm3(s, t * 12, 2.2, 3, 885)) ? 255 : 0;
+  });
+}
+// 頭髮：一根根細細的髮束從頭皮長出來，沿著頭往外、往下，瀏海到眉毛、兩邊到下巴、後面到後頸
+function w2glHair() {
+  const r = seeded(8211), S = [], v = new THREE.Vector3(), v2 = new THREE.Vector3();
+  const dirOf = (a, th) => [Math.sin(th) * Math.sin(a), Math.cos(th), Math.sin(th) * Math.cos(a)];
+  for (let i = 0; i < 150; i++) {
+    const a = (r() * 2 - 1) * Math.PI, A = Math.abs(a), front = A < 0.85, th0 = front ? 0.25 + r() * 0.35 : 0.2 + r() * Math.max(0.1, w2glHairLine(a, 0) - 0.55) * 0.8;
+    const [x, y, z] = dirOf(a, th0); w2glHeadPt(x, y, z, v, true);
+    const n = new THREE.Vector3(x / W2GL_HEAD.rx, y / W2GL_HEAD.ry, z / W2GL_HEAD.rz).normalize(), lift = 0.012 + r() * 0.012;
+    // 髮尾到哪裡（單位球上的高度）：前面到眉毛、兩邊和後面到下巴
+    const tipTh = front ? 1.36 + r() * 0.07 + 0.12 * sstep(0.45, 0.85, A) : 2.25 + r() * 0.15 - 0.15 * sstep(2.4, 3.1, A);
+    const mTh = th0 + (tipTh - th0) * 0.55, [mx, my, mz] = dirOf(a, mTh), [tx, ty, tz] = dirOf(a, tipTh);
+    w2glHeadPt(mx, my, mz, v2, true); const mid = v2.clone().add(new THREE.Vector3(mx, my * 0.3, mz).normalize().multiplyScalar(lift + 0.026));
+    w2glHeadPt(tx, ty, tz, v2, true); const tip = v2.clone().add(new THREE.Vector3(tx, 0, tz).normalize().multiplyScalar(lift + (front ? 0.012 : 0.03)));
+    if (!front) tip.y = Math.min(tip.y, W2GL_HEAD.ry * (-0.55 - r() * 0.15));
+    const root = v.clone().addScaledVector(n, 0.004), b = root.clone().addScaledVector(n, lift + 0.022);
+    S.push({ a: root.toArray(), b: b.toArray(), c: mid.toArray(), d: tip.toArray(), w: 0.026 + r() * 0.018, f: a + (r() - 0.5) * 0.3, ph: a * 3 + r() * 2, tp: 0.55 });
+  }
+  return S;
+}
+function w2glPaintHair(c, W, H) {
+  const r = seeded(8231);
+  c.clearRect(0, 0, W, H);
+  for (let i = 0; i < 120; i++) {
+    const x = W / 2 + (r() + r() + r() - 1.5) * W * 0.6, end = H * (0.7 + r() * 0.3), g = 12 + r() * 26 | 0, edge = Math.min(1, Math.abs(x - W / 2) / (W * 0.44));
+    c.strokeStyle = `rgba(${g},${g - 3},${g + 2},${(0.95 - edge * 0.45).toFixed(2)})`; c.lineWidth = W * (0.012 + r() * 0.018) * (1 - edge * 0.5);
+    c.beginPath(); c.moveTo(x + (W / 2 - x) * 0.1, 0); c.bezierCurveTo(x + (r() - 0.5) * W * 0.06, end * 0.4, x + (r() - 0.5) * W * 0.1, end * 0.75, x + (r() - 0.5) * W * 0.12, end); c.stroke();
+    if (r() < 0.25) { c.strokeStyle = 'rgba(120,110,120,.25)'; c.lineWidth *= 0.5; c.stroke(); }
+  }
+}
+// 上衣：上半身（圓領底下、往前一點點駝），百褶裙另外做
+const W2GL_TORSO = [
+  { y: 0.86, w: 0.15, d: 0.11 }, { y: 0.98, w: 0.135, d: 0.1 }, { y: 1.1, w: 0.14, d: 0.1, z: 0.005 }, { y: 1.2, w: 0.155, d: 0.105, z: 0.01 },
+  { y: 1.3, w: 0.165, d: 0.1, z: 0.005 }, { y: 1.37, w: 0.15, d: 0.085 }, { y: 1.41, w: 0.075, d: 0.065, z: 0.01 }, { y: 1.425, w: 0.06, d: 0.055, z: 0.012 },
+];
+// 百褶裙：從腰到裙擺一圈一圈，24 道摺（三角波），越往下越蓬、摺越深
+function w2glSkirtGeo() {
+  return geo('w2glSkirt', () => {
+    const N = 96, R = 5, pos = [], uv = [], idx = [];
+    for (let i = 0; i <= R; i++) {
+      const k = i / R, y = 0.97 - 0.46 * k, rr = 0.15 + 0.17 * Math.pow(k, 0.8), amp = 0.006 + 0.026 * k;
+      for (let j = 0; j <= N; j++) {
+        const a = j / N * Math.PI * 2, tri = Math.abs(((j % 4) / 4) * 2 - 1) * 2 - 1, r2 = rr + amp * tri + 0.006 * Math.sin(a * 3 + 1) * k;
+        pos.push(Math.sin(a) * r2, y, Math.cos(a) * r2 * 0.92); uv.push(j / N * 6, 1 - k);
+        if (i < R && j < N) { const p = i * (N + 1) + j, q = p + 1, s2 = p + N + 1, t2 = s2 + 1; idx.push(p, s2, q, q, s2, t2); }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals();
+    return g;
+  });
+}
+// 手腳共用一張圖：袖子（藍）、皮膚、沾滿血的手、白襪、黑皮鞋
+const W2GL_LR = { sleeve: w2Rect(0, 0, 128, 512, 640, 512), skin: w2Rect(128, 0, 256, 512, 640, 512), blood: w2Rect(256, 0, 384, 512, 640, 512), sock: w2Rect(384, 0, 512, 512, 640, 512), shoe: w2Rect(512, 0, 640, 512, 640, 512) };
+function w2glPaintLimbs(c, W, H) {
+  const cloth = (x0, base, hi, s0) => w2PaintRect(c, x0, 0, 128, 512, (u, t, o) => { const a = u * Math.PI * 2, n = fbm3(Math.cos(a) * 2, t * 6, Math.sin(a) * 2, 4, s0), fold = fbm3(Math.cos(a) * 1.5, t * 14, Math.sin(a) * 1.5, 3, s0 + 1), wv = fbm3(Math.cos(a) * 30, t * 120, Math.sin(a) * 30, 2, s0 + 2); const col = w2Mix(base, hi, n * 0.5 + fold * 0.5); const k = 0.86 + 0.18 * wv; o[0] = col[0] * k; o[1] = col[1] * k; o[2] = col[2] * k; });
+  cloth(0, [70, 98, 146], [104, 132, 182], 821);
+  cloth(384, [214, 212, 206], [244, 242, 236], 825);
+  // 皮膚：蒼白，越往手越紅（血從手往上流）
+  w2PaintRect(c, 128, 0, 128, 512, (u, t, o) => {
+    const a = u * Math.PI * 2, n = fbm3(Math.cos(a) * 2, t * 5, Math.sin(a) * 2, 4, 831), drip = sstep(0.5, 0.62, fbm3(Math.cos(a) * 5, t * 3, Math.sin(a) * 5, 3, 833)) * sstep(0.45, 0.0, t);
+    let col = w2Mix([206, 192, 180], [228, 218, 206], n);
+    col = w2Mix(col, [140, 14, 22], drip);
+    o[0] = col[0]; o[1] = col[1]; o[2] = col[2];
+  });
+  w2PaintRect(c, 256, 0, 128, 512, (u, t, o) => {
+    const a = u * Math.PI * 2, n = fbm3(Math.cos(a) * 3, t * 6, Math.sin(a) * 3, 4, 841), skin = sstep(0.55, 0.7, fbm3(Math.cos(a) * 4, t * 7, Math.sin(a) * 4, 3, 843));
+    const col = w2Mix(w2Mix([120, 6, 14], [176, 24, 32], n), [196, 170, 160], skin * 0.5);
+    o[0] = col[0]; o[1] = col[1]; o[2] = col[2];
+  });
+  w2PaintRect(c, 512, 0, 128, 512, (u, t, o) => { const n = fbm3(u * 4, t * 4, 0.3, 4, 851); const L = 18 + 22 * n; o[0] = L; o[1] = L * 0.95; o[2] = L * 1.05; });
+}
+// 上衣：藍色的棉布、一道道皺褶，前面一排小白扣子；腰那裡塞進裙子
+function w2glPaintTop(c, W, H) {
+  w2PaintRect(c, 0, 0, W, H, (u, t, o) => {
+    const a = (u - 0.5) * Math.PI * 2, n = fbm3(Math.cos(a) * 2, t * 5, Math.sin(a) * 2, 4, 861), fold = fbm3(Math.cos(a) * 2, t * 10, Math.sin(a) * 2, 3, 863), wv = fbm3(Math.cos(a) * 40, t * 80, Math.sin(a) * 40, 2, 865);
+    let col = w2Mix([66, 94, 142], [108, 136, 186], n * 0.4 + fold * 0.6);
+    const btn = Math.abs(a) < 0.08 ? Math.max(...[0.62, 0.48, 0.34].map(y0 => Math.exp(-(((t - y0) / 0.018) ** 2) - ((a / 0.05) ** 2)))) : 0;
+    col = w2Mix(col, [236, 232, 224], sstep(0.5, 0.8, btn));
+    col = w2Mix(col, [150, 20, 28], sstep(0.62, 0.72, fbm3(Math.cos(a) * 4, t * 6, Math.sin(a) * 4, 3, 867)) * 0.6 * sstep(0.35, 0.85, t));   // 血跡
+    const k = 0.86 + 0.18 * wv;
+    o[0] = col[0] * k; o[1] = col[1] * k; o[2] = col[2] * k;
+  });
+}
+// 百褶裙：深藍色，一摺亮一摺暗，裙擺一圈深色的滾邊
+function w2glPaintSkirt(c, W, H) {
+  w2PaintRect(c, 0, 0, W, H, (u, t, o) => {
+    const n = fbm3(u * 3, t * 4, 0.7, 4, 871), wv = fbm3(u * 60, t * 80, 1.7, 2, 873), pl = (u * 4) % 1, sh = pl < 0.5 ? 0.95 : 0.78;
+    let col = w2Mix([44, 58, 92], [70, 88, 128], n);
+    col = w2Mix(col, [26, 32, 52], sstep(0.12, 0.06, t));
+    const k = sh * (0.88 + 0.16 * wv);
+    o[0] = col[0] * k; o[1] = col[1] * k; o[2] = col[2] * k;
+  });
+}
+// 樹枝：從右眼的洞長出來，往右上彎、分一根小枝，樹皮粗粗的
+function w2glBranchGeo() {
+  const E = W2GL_EYE, v = new THREE.Vector3(); w2glHeadPt(E.x, E.y, Math.sqrt(1 - E.x * E.x - E.y * E.y), v, true);
+  const o = [v.x, v.y, v.z - 0.01];
+  return mergeParts('w2glBranch', [
+    [tubeGeo('w2glBr0', [o, [o[0] + 0.05, o[1] + 0.04, o[2] + 0.04], [0.16, 0.14, 0.12], [0.26, 0.26, 0.13], [0.32, 0.3, 0.14]], [0.02, 0.017, 0.014, 0.011, 0.008], 7, 12), new THREE.Matrix4()],
+    [tubeGeo('w2glBr1', [[0.17, 0.15, 0.12], [0.25, 0.13, 0.14], [0.33, 0.1, 0.16], [0.38, 0.07, 0.17]], [0.01, 0.008, 0.006, 0.005], 6, 8), new THREE.Matrix4()],
+    [tubeGeo('w2glBr2', [[0.24, 0.24, 0.13], [0.21, 0.3, 0.12], [0.2, 0.34, 0.1]], [0.006, 0.004, 0.0015], 5, 4), new THREE.Matrix4()],
+    [tubeGeo('w2glBr3', [[0.3, 0.12, 0.15], [0.33, 0.16, 0.12], [0.35, 0.18, 0.1]], [0.005, 0.0035, 0.0012], 5, 4), new THREE.Matrix4()],
+  ]);
+}
+// 眼球花：一圈粉紅色、彎彎的花瓣（根部偏紫、邊緣有點枯），中間一顆眼球
+function w2glPetalsGeo() {
+  const parts = [], r = seeded(8251);
+  for (let i = 0; i < 9; i++) {
+    const a = i / 9 * Math.PI * 2 + (r() - 0.5) * 0.2, L = 0.07 + r() * 0.025;
+    const pg = w2Grid('w2glPetal', 3, 5, (ii, jj, out) => { const k = ii / 5, s = jj / 1.5 - 1, hw = 0.032; out.set(s * hw, k, 0.3 * s * s * hw - 0.28 * k * k); });
+    parts.push([pg, w2M(Math.cos(a) * 0.038, Math.sin(a) * 0.038, -0.012, a - Math.PI / 2, -0.4 + (r() - 0.5) * 0.3, 1, L, L)]);
+  }
+  return mergeParts('w2glPetals', parts);
+}
+function buildGirl2(r, g) {
+  const T = { transparent: true };
+  const limbT = m5Tex('w2glLimb', 640, 512, w2glPaintLimbs); limbT.wrapS = limbT.wrapT = THREE.ClampToEdgeWrapping;
+  const head = withDetail(ownLM('#ffffff', { map: m5Tex('w2glHead', 2048, 1024, w2glPaintHead), shade: 0.85, ...T }), 'skin', 8, 0.5);
+  head.map.wrapS = THREE.ClampToEdgeWrapping;
+  const top = withDetail(ownLM('#ffffff', { map: m5Tex('w2glTop', 256, 256, w2glPaintTop), shade: 0.8, ...T }), 'cotton', 7, 0.7);
+  const skirtT = m5Tex('w2glSkirt', 256, 128, w2glPaintSkirt); skirtT.wrapT = THREE.ClampToEdgeWrapping;
+  const skirt = withDetail(ownLM('#ffffff', { map: skirtT, side: THREE.DoubleSide, shade: 0.8, ...T }), 'cotton', 7, 0.7);
+  const limb = withDetail(ownPhong('#ffffff', { map: limbT, specular: 0x2a2020, shininess: 30, shade: 0.8, ...T }), 'skin', 8, 0.8);
+  const white = withDetail(ownLM('#efece4', { shade: 0.75, ...T }), 'cotton', 8, 0.7);
+  const hairM = withDetail(hairMat(m5Tex('w2glHair', 64, 256, w2glPaintHair), 0.75), 'hair', 3, 0.8);
+  hairM.map.wrapS = hairM.map.wrapT = THREE.ClampToEdgeWrapping;
+  const branch = withDetail(ownLM('#5c3a22', { shade: 0.8, ...T }), 'bark', 9, 0.9);
+  const petal = withDetail(ownLM('#ffffff', { map: m5Tex('w2glPetal', 128, 256, w2glPaintPetal), alphaTest: 0.5, side: THREE.DoubleSide, shade: 0.75, ...T }), 'skin', 12, 0.4);
+  petal.map.wrapS = petal.map.wrapT = THREE.ClampToEdgeWrapping;
+  const eyeM = { ball: wetEyeMat(m5Tex('w2snEye', 512, 256, w2snPaintEye), 0x1a1010, 0x777777, T) };   // 眼睛跟大嘴觸角蟲的同一張
+  r.mats.push(head, top, skirt, limb, white, hairM, branch, petal, eyeM.ball);
+  r.body = new THREE.Group(); g.add(r.body);
+  r.body.add(new THREE.Mesh(loftGeo('w2glTorso', W2GL_TORSO, { seg: 18, sub: 3, uv: [0, 1, 0, 1] }), top));
+  r.body.add(new THREE.Mesh(w2glSkirtGeo(), skirt));
+  // 白色的圓領：脖子底下一圈往外翻、前面分成兩片圓圓的
+  r.body.add(new THREE.Mesh(geo('w2glCollar', () => {
+    const N = 32, pos = [], uv = [], idx = [];
+    for (let i = 0; i <= 3; i++) for (let j = 0; j <= N; j++) {
+      const k = i / 3, a = -Math.PI + j / N * Math.PI * 2, fr = Math.exp(-((Math.abs(a) - Math.PI) ** 2) * 0) * 0, front = Math.cos(a) > 0 ? Math.cos(a) : 0, w = 0.05 + 0.025 * front - 0.05 * front ** 8;
+      const rr = 0.07 + w * k, y = 1.405 - 0.012 * k - 0.02 * front * k;
+      pos.push(Math.sin(a) * rr, y, Math.cos(a) * rr * 0.85 + 0.01); uv.push(j / N, k);
+      if (i < 3 && j < N) { const p = i * (N + 1) + j, q = p + 1, s2 = p + N + 1, t2 = s2 + 1; idx.push(p, s2, q, q, s2, t2); }
+    }
+    const gg = new THREE.BufferGeometry();
+    gg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); gg.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    gg.setIndex(idx); gg.computeVertexNormals();
+    return gg;
+  }), withDetail(ownLM('#efece4', { side: THREE.DoubleSide, shade: 0.75, ...T }), 'cotton', 8, 0.7)));
+  r.mats.push(r.body.children[r.body.children.length - 1].material);
+  r.body.add(new THREE.Mesh(w2TubeIn('w2glNeck', [[0, 1.39, 0.012], [0, 1.46, 0.02], [0, 1.53, 0.028]], [0.05, 0.045, 0.046], 12, 3, W2GL_LR.skin), limb));
+  // 頭（會歪、會甩）
+  r.head = new THREE.Group(); r.head.position.set(W2GL_HEAD.x, W2GL_HEAD.y, W2GL_HEAD.z); r.body.add(r.head);
+  r.head.add(new THREE.Mesh(w2glHeadGeo(), head));
+  r.head.add(new THREE.Mesh(hairGeo('w2glHair', w2glHair(), 6), hairM));
+  r.hairU = hairM.userData.hair;
+  const E = w2glEyeC();
+  r.eye = { sock: new THREE.Group(), gaze: new THREE.Group() };   // 眼球（虹膜畫在上面）：眼窩朝前，裡面那顆會轉
+  r.eye.sock.position.copy(E.C); r.eye.sock.quaternion.setFromUnitVectors(Z_AXIS, E.F); r.head.add(r.eye.sock);
+  r.eye.gaze.rotation.order = 'YXZ'; r.eye.sock.add(r.eye.gaze);
+  r.eye.gaze.add(new THREE.Mesh(geo('w2glEyeBall', () => new THREE.SphereGeometry(W2GL_EYE.R, 20, 14)), eyeM.ball));
+  r.head.add(new THREE.Mesh(w2glBranchGeo(), branch));
+  r.blooms = [];
+  for (const [x, y, z, s] of [[0.33, 0.315, 0.15, 1], [0.39, 0.08, 0.175, 0.82]]) {
+    const bl = new THREE.Group(); bl.position.set(x, y, z); bl.rotation.set(-0.2, 0.25, 0); bl.scale.setScalar(s); r.head.add(bl);
+    bl.add(new THREE.Mesh(w2glPetalsGeo(), petal));
+    const e = new THREE.Mesh(geo('w2glBloomEye', () => new THREE.SphereGeometry(0.045, 13, 10)), eyeM.ball); e.rotation.order = 'YXZ'; bl.add(e);
+    r.blooms.push(bl); bl.userData.eye = e; bl.userData.s = s;
+  }
+  // 手臂：袖子、前臂、沾滿血的手（肩膀那裡可以轉）
+  const R0 = W2GL_LR;
+  r.arms = [];
+  for (const s of [-1, 1]) {
+    const a = new THREE.Group(); a.position.set(s * 0.148, 1.335, -0.005); r.body.add(a);
+    const sl = w2TubeIn('w2glSleeve' + s, [[0, 0.02, 0], [s * 0.025, -0.12, 0.01], [s * 0.05, -0.26, 0.03]], [0.05, 0.044, 0.04], 10, 6, R0.sleeve);
+    const fa = w2TubeIn('w2glFore' + s, [[s * 0.045, -0.24, 0.03], [s * 0.065, -0.4, 0.06], [s * 0.075, -0.52, 0.08]], [0.033, 0.028, 0.022], 8, 6, R0.skin);
+    const parts = [[sl, new THREE.Matrix4()], [fa, new THREE.Matrix4()], [w2TubeIn('w2glPalm' + s, [[s * 0.075, -0.51, 0.08], [s * 0.077, -0.555, 0.088], [s * 0.076, -0.59, 0.092]], [0.022, 0.026, 0.024], 8, 4, R0.blood), new THREE.Matrix4()]];
+    [-0.014, -0.005, 0.004, 0.013].forEach((dx, k) => { const L = [0.05, 0.058, 0.055, 0.045][k]; parts.push([w2TubeIn('w2glFing' + k, [[0, 0, 0], [dx * 0.4, -L * 0.5, 0.006], [dx * 0.6, -L, 0.016]], [0.0075, 0.0066, 0.0052], 5, 4, R0.blood), new THREE.Matrix4().makeTranslation(s * 0.076 + s * dx, -0.585, 0.092)]); });
+    parts.push([w2TubeIn('w2glThumb', [[0, 0, 0], [0.002, -0.02, 0.014], [0.004, -0.038, 0.02]], [0.008, 0.007, 0.0055], 5, 4, R0.blood), new THREE.Matrix4().makeTranslation(s * 0.07, -0.54, 0.105)]);
+    a.add(new THREE.Mesh(mergeParts('w2glArm' + s, parts), limb));
+    r.arms.push(a);
+  }
+  // 腿：細細的腿、白襪、黑色圓頭皮鞋（髖關節那裡可以轉：走路時前後擺）
+  r.legs = [];
+  for (const s of [-1, 1]) {
+    const l = new THREE.Group(); l.position.set(s * 0.075, 0.72, 0); r.body.add(l);
+    const leg = w2TubeIn('w2glLeg' + s, [[0, 0.05, 0], [0, -0.25, 0.01], [0, -0.45, 0.005], [0, -0.58, 0]], [0.05, 0.04, 0.032, 0.028], 9, 8, R0.skin);
+    const sock = w2TubeIn('w2glSock' + s, [[0, -0.56, 0], [0, -0.63, 0.002], [0, -0.68, 0.005]], [0.032, 0.031, 0.03], 9, 3, R0.sock);
+    const shoe = w2TubeIn('w2glShoe' + s, [[0, -0.68, -0.035], [0, -0.69, 0.02], [0, -0.7, 0.07], [0, -0.705, 0.09]], [0.034, 0.042, 0.038, 0.012], 9, 6, R0.shoe);
+    l.add(new THREE.Mesh(mergeParts('w2glLegAll' + s, [[leg, new THREE.Matrix4()], [sock, new THREE.Matrix4()], [shoe, new THREE.Matrix4()]]), limb));
+    r.legs.push(l);
+  }
+}
+function syncGirl2(e, r, t, p, dt) {
+  // 被手電筒照到時，樹枝上的眼球花會閉起來（花瓣合起來、眼球縮進去）
+  const shut = e.blind > 0 ? 0.15 : 1;
+  for (const bl of r.blooms) { const s = bl.userData.s; bl.scale.y += (shut * s - bl.scale.y) * Math.min(1, dt * 12); bl.userData.eye.scale.y = clamp(bl.scale.y / s, 0.2, 1); bl.userData.eye.rotation.y = Math.sin(t * 1.3 + s * 4) * 0.4; }
+  // 頭：慢慢歪來歪去，被照瞎了就甩頭
+  r.head.rotation.set(-0.05 + (e.state === 'hunt' ? 0.08 : 0), Math.sin(t * 0.5) * 0.12, e.blind > 0 ? Math.sin(t * 6) * 0.15 : Math.sin(e.wob * 0.9) * 0.06 + 0.04);
+  r.g.position.y = floorH(e.x, e.y) + Math.sin(e.wob * 1.5) * 0.015;
+  // 左眼微微抖、瞪著你
+  _v.set(p.x, EYE, p.y); r.eye.sock.worldToLocal(_v);
+  r.eye.gaze.rotation.set(clamp(Math.atan2(-_v.y, Math.hypot(_v.x, _v.z)), -0.4, 0.4) + Math.sin(t * 9) * 0.04, clamp(Math.atan2(_v.x, _v.z), -0.5, 0.5) + Math.sin(t * 6.3) * 0.06, 0);
+  // 走路：腳前後擺、手跟著晃（追你時走快一點）
+  const moving = e.state === 'hunt' || e.blind > 0, ph = e.wob * (e.state === 'hunt' ? 5 : 3.5), sw = moving ? 0.32 : 0.05;
+  r.walk = (r.walk || 0) + (sw - (r.walk || 0)) * Math.min(1, dt * 4);
+  r.legs.forEach((l, i) => { l.rotation.x = Math.sin(ph + i * Math.PI) * r.walk; });
+  r.arms.forEach((a, i) => { const s = i ? 1 : -1; a.rotation.set(-Math.sin(ph + i * Math.PI) * r.walk * 0.6 - 0.05, 0, s * 0.06); });
+  // 頭髮：走路時跟著晃、被照瞎了甩頭時甩得更厲害，追你時往後飄
+  const hu = r.hairU;
+  hu.uHT.value = t;
+  hu.uHAmp.value += ((moving ? 0.022 : 0.01) - hu.uHAmp.value) * Math.min(1, dt * 4);
+  hu.uHDrag.value.set(spring(r, 'hx', e.blind > 0 ? Math.sin(t * 6) * 0.03 : Math.sin(ph) * 0.006 * r.walk / 0.32, dt), spring(r, 'hz', e.state === 'hunt' ? -0.018 : 0, dt));
+  hu.uHLift.value = spring(r, 'hl', e.state === 'hunt' ? 0.01 : 0, dt);
+}
+UPG.girl = { build: buildGirl2, sync: syncGirl2, view: { h: 2.12, cy: 1.0 } };
+
 // ---------- 第二世界到這裡 ----------
 
 
