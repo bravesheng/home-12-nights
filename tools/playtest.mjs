@@ -73,7 +73,8 @@ async function scenario(name, title, ctxOpts, fn) {
     if (m.type() === 'error' && !m.text().startsWith('Failed to load resource')) problems.push('console 錯誤：' + m.text());
   });
   page.on('response', r => { if (r.status() >= 400) loadFail(r.url(), r.status()); });
-  page.on('requestfailed', r => loadFail(r.url(), r.failure()?.errorText));
+  // 換頁時還沒載完的圖被瀏覽器中斷（ERR_ABORTED）不算載入失敗：怪物的貼圖是要用時才載的，真的缺檔案會是上面的 404
+  page.on('requestfailed', r => { const why = r.failure()?.errorText; if (why !== 'net::ERR_ABORTED') loadFail(r.url(), why); });
   const shot = label => page.screenshot({ path: path.join(OUT, `${name}-${label}.png`) });
   const check = (ok, msg) => { if (!ok) problems.push('檢查沒過：' + msg); };
   const t0 = Date.now();
@@ -699,7 +700,7 @@ await scenario('phone', '手機版面（橫放 852×393、直放 393×852：介�
   await shot('4-portrait');
 });
 
-await scenario('book', '怪物圖鑑（沒見過的只有問號；見過的卡片上是會動的 3D 怪物：三個世界各拍一張；舊存檔會照進度標成見過；?model= 看第五世界七隻怪物的模型）', {}, async ({ page, shot, check }) => {
+await scenario('book', '怪物圖鑑（沒見過的只有問號；見過的卡片上是會動的 3D 怪物：三個世界各拍一張；舊存檔會照進度標成見過；?model= 看第五世界七隻怪物的模型）', { limit: 180000 }, async ({ page, shot, check }) => {   // 圖鑑一頁有十幾隻重做過的 3D 怪物一起畫，軟體算繪很慢
   await page.goto(BASE, { waitUntil: 'load' });
   await page.waitForSelector('#btnBook');
   await page.click('#btnBook');
