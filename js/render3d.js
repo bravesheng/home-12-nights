@@ -6786,6 +6786,114 @@ function syncFast(e, r, t, p, dt) {
 }
 UPG.fast = { build: buildFast, sync: syncFast, view: { h: 1.2, d: 2.9, cy: 0.55 } };
 
+// ---------- 黑球 ----------
+// 一團黏黏稠稠、黑得發亮的焦油（原本草稿用鉛筆塗的鋸齒線，變成表面一圈一圈的波紋，帶一點點油亮的紫藍色），
+// 歪歪扭扭的一團，表面一直慢慢地蠕動（vertex shader），底下垂著幾條黏液，爬到燈上吃燈的時候會掛下來。
+// 兩顆濕濕的黑眼睛半埋在焦油裡，周圍的焦油鼓起來，眼睛裡是原本那兩個發光的紅色圈圈。
+// 大小、跳、吃燈時抖、變大都照原本的（網格是半徑 1 的一團，整個照 0.4 × size 縮放）
+const BL_EYE = { x: 0.25, y: 0.24, R: 0.13 };
+function blBodyPt(x, y, z, out) {
+  let k = 1 + 0.06 * Math.sin(3 * x + 1.3) * Math.cos(2.4 * y) + 0.04 * Math.sin(5 * z + 2 * x) + 0.025 * Math.sin(9 * y + 4 * z) + 0.07 * (fbm3(x * 1.8, y * 1.8, z * 1.8, 3, 91) - 0.5);
+  if (z > 0.3) for (const s of [-1, 1]) {   // 眼睛的地方凹下去、周圍的焦油鼓起來
+    const q = Math.hypot(x - s * BL_EYE.x, y - BL_EYE.y);
+    k += -0.07 * Math.exp(-((q / 0.09) ** 2)) + 0.05 * Math.exp(-(((q - 0.15) / 0.05) ** 2));
+  }
+  const sag = y < 0 ? 1 + 0.14 * Math.sin(-y * Math.PI) : 1 - 0.06 * y;   // 很重、往下垂：下半部鼓出來，頂上窄一點
+  return out.set(x * k * sag, Math.max(y * k * 0.88, -0.8 - 0.06 * (1 - x * x - z * z)), z * k * sag);   // 底部被自己壓扁
+}
+const blU = a => (a + Math.PI) / (Math.PI * 2), blV = th => th / Math.PI;
+blU.inv = u => u * Math.PI * 2 - Math.PI; blV.inv = v => v * Math.PI;
+// 焦油的表面：很黑，一圈一圈細細的波紋（亮一點，帶一點油亮的顏色）、小小的氣泡；bump 是同樣的波紋（被手電筒照到時反光會跟著起伏）
+function blPaint(c, W, H, bump) {
+  const img = c.createImageData(W, H), D = img.data;
+  for (let py = 0; py < H; py++) {
+    const th = blV.inv((py + 0.5) / H), st = Math.sin(th), y = Math.cos(th);
+    for (let px = 0; px < W; px++) {
+      const a = blU.inv((px + 0.5) / W), x = st * Math.sin(a), z = st * Math.cos(a);
+      const q = fbm3(x * 1.4, y * 1.4, z * 1.4, 3, 93), n = fbm3(x * 2.6 + q * 2.2, y * 2.6 - q * 1.6, z * 2.6, 4, 95);
+      const rip = sstep(0.86, 0.99, skRidge(n)) + 0.5 * sstep(0.9, 0.99, skRidge(fbm3(x * 6 + q, y * 6, z * 6, 2, 97)));
+      const bub = sstep(0.8, 0.86, fbm3(x * 14, y * 14, z * 14, 2, 99)) * (1 - sstep(0.86, 0.9, fbm3(x * 14, y * 14, z * 14, 2, 99)));
+      const i = (py * W + px) * 4;
+      if (bump) { const h = 128 + rip * 70 + bub * 60 + (n - 0.5) * 50; D[i] = D[i + 1] = D[i + 2] = h; D[i + 3] = 255; continue; }
+      const L = 7 + rip * 11 + bub * 9 + (q - 0.5) * 6, oil = n * 18;
+      D[i] = L * (0.9 + 0.12 * Math.sin(oil)); D[i + 1] = L * (0.86 + 0.1 * Math.sin(oil + 2)); D[i + 2] = L * (1.12 + 0.14 * Math.sin(oil + 4)); D[i + 3] = 255;
+    }
+  }
+  c.putImageData(img, 0, 0);
+}
+// 眼睛（球的正面是 u = 0.25）：黑得發亮的眼球、一圈紅色的虹膜和紅色的瞳孔；glow 是自己發光的那張（紅圈和中間的紅點）
+function blPaintEye(c, W, H, glow) {
+  const img = c.createImageData(W, H), D = img.data;
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const ph = (px + 0.5) / W * Math.PI * 2, th = (py + 0.5) / H * Math.PI, z = Math.sin(ph) * Math.sin(th), ang = Math.acos(clamp(z, -1, 1));
+    const ring = Math.exp(-(((ang - 0.42) / 0.07) ** 2)), dot = 1 - sstep(0.14, 0.22, ang), haze = Math.exp(-((ang / 0.55) ** 2)) * 0.35, i = (py * W + px) * 4;
+    if (glow) { const k = clamp(ring + dot + haze * 0.5, 0, 1); D[i] = 255 * k; D[i + 1] = 70 * k * k; D[i + 2] = 50 * k * k; }
+    else { const k = clamp(ring + dot, 0, 1) * 0.6 + haze * 0.3; D[i] = 12 + 160 * k; D[i + 1] = 8 + 30 * k; D[i + 2] = 10 + 26 * k; }
+    D[i + 3] = 255;
+  }
+  c.putImageData(img, 0, 0);
+}
+// 焦油的材質：表面在 vertex shader 裡慢慢蠕動（uBT 是時間，每隻一份）
+function blGooMat(opts) {
+  const m = ownPhong('#ffffff', opts), u = { uBT: { value: 0 }, uBA: { value: 0.035 } }, prev = m.onBeforeCompile, key = m.customProgramCacheKey();
+  m.onBeforeCompile = (sh, rd) => {
+    prev.call(m, sh, rd);
+    Object.assign(sh.uniforms, u);
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uBT, uBA;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        float bw = sin(uBT * 1.7 + position.x * 5.0 + position.y * 3.0) * sin(uBT * 1.3 + position.z * 4.0 - position.y * 2.0) + 0.5 * sin(uBT * 2.3 - position.y * 7.0 + position.x * 2.0);
+        transformed += normal * bw * uBA;`);
+  };
+  m.customProgramCacheKey = () => key + '-goo';
+  m.userData.goo = u;
+  return m;
+}
+const blBodyGeo = () => sculptGeo('blBody', blBodyPt, blU, blV, th => sstep(0.9, 1.1, th) * (1 - sstep(1.5, 1.7, th)), a => sstep(-0.8, -0.6, a) * (1 - sstep(0.6, 0.8, a)), [0.07, 0.07], [0.12, 0.12]);   // 黑球常常好幾隻
+// 底下垂著的黏液：從表面往下拉長、尾端一滴（在地上時縮回身體裡，爬上去吃燈時才掛下來）
+function blDripGeo() {
+  const parts = [], r = seeded(4242), v = new THREE.Vector3();
+  for (let i = 0; i < 5; i++) {
+    const a = i / 5 * Math.PI * 2 + r() * 0.8, th = 2.2 + r() * 0.5, L = 0.25 + r() * 0.35;
+    blBodyPt(Math.sin(th) * Math.sin(a), Math.cos(th), Math.sin(th) * Math.cos(a), v).multiplyScalar(0.96);
+    const P = [[v.x, v.y, v.z], [v.x * 0.97, v.y - L * 0.4, v.z * 0.97], [v.x * 0.95 + (r() - 0.5) * 0.05, v.y - L * 0.8, v.z * 0.95], [v.x * 0.95, v.y - L, v.z * 0.95]];
+    parts.push([tubeGeo('blDrip' + i, P, [0.11, 0.05, 0.03, 0.035], 6, 8), new THREE.Matrix4()]);
+    parts.push([geo('blDrop', () => new THREE.SphereGeometry(1, 8, 6)), mat4(v.x * 0.95, v.y - L - 0.02, v.z * 0.95, 0, 0, 0, 0.055, 0.075, 0.055)]);
+  }
+  return mergeParts('blDrips', parts);
+}
+function buildBlob(r, g) {
+  const T = { transparent: true };
+  r.bodyM = blGooMat({ map: m5Tex('blSkin', 1024, 512, (c, W, H) => blPaint(c, W, H, false)), bumpMap: m5Tex('blBump', 1024, 512, (c, W, H) => blPaint(c, W, H, true)), bumpScale: 2.5, specular: 0x6a6878, shininess: 85, shade: 0.7, ...T });
+  r.bodyM.map.wrapS = r.bodyM.bumpMap.wrapS = THREE.ClampToEdgeWrapping;
+  r.bodyM.bumpMap.colorSpace = THREE.NoColorSpace;
+  const eye = ownPhong('#ffffff', { map: m5Tex('blEye', 256, 128, (c, W, H) => blPaintEye(c, W, H, false)), emissiveMap: m5Tex('blEyeGlow', 256, 128, (c, W, H) => blPaintEye(c, W, H, true)), emissive: 0xffffff, specular: 0xffffff, shininess: 110, shade: 0.5, ...T });
+  r.mats.push(r.bodyM, eye);
+  r.body = new THREE.Group(); g.add(r.body);
+  r.body.add(new THREE.Mesh(blBodyGeo(), r.bodyM));
+  r.drips = new THREE.Mesh(blDripGeo(), r.bodyM); r.drips.scale.y = 0.01; r.drips.visible = false; r.body.add(r.drips);
+  const v = new THREE.Vector3();
+  for (const s of [-1, 1]) {
+    const X = s * BL_EYE.x, Y = BL_EYE.y;
+    blBodyPt(X, Y, Math.sqrt(1 - X * X - Y * Y), v);
+    const e = new THREE.Group(); e.position.copy(v).multiplyScalar(0.93); e.rotation.y = s * 0.2; r.body.add(e);
+    e.add(new THREE.Mesh(geo('blEye', () => new THREE.SphereGeometry(BL_EYE.R, 16, 12)), eye));
+    const gl = ownSprite(glowTex, 0xff3a2a); gl.position.z = BL_EYE.R * 1.2; gl.scale.setScalar(0.32); e.add(gl);
+    r.eyes.push(gl);
+  }
+}
+function syncBlob(e, r, t, p, dt) {
+  // 跟原本一樣：在地上一跳一跳的（落地時壓扁、跳起來時拉長），吃燈的時候抖；整團照大小縮放
+  const R = 0.4 * (e.size || 1), eating = e.eatT > 0, grounded = !eating && e.h < R + 0.05, hk = Math.abs(Math.sin(e.wob * 6));
+  r.g.position.set(e.x, floorH(e.x, e.y) + e.h + (grounded ? hk * 0.14 : 0), e.y);
+  const sq = eating ? Math.sin(e.wob * 14) * 0.1 : grounded ? 0.12 * (1 - sstep(0, 0.35, hk)) - 0.05 * sstep(0.5, 1, hk) : Math.sin(e.wob * 12) * 0.05;
+  r.body.scale.set(R * (1 + sq), R * (1 - sq), R * (1 + sq));
+  const hang = clamp((e.h - R - 0.1) / 0.4, 0, 1);   // 離地多高：黏液慢慢垂下來
+  r.drips.scale.y = Math.max(0.01, hang); r.drips.visible = hang > 0.02;
+  const u = r.bodyM.userData.goo;
+  u.uBT.value = t + e.wob; u.uBA.value = eating ? 0.06 : 0.035;
+}
+UPG.blob = { build: buildBlob, sync: syncBlob, view: { h: 1.0, d: 2.4, cy: 0.45 } };
+
 // ---------- 第一世界到這裡 ----------
 
 
