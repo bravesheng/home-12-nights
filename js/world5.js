@@ -330,9 +330,6 @@ function dayTips5() {
 // ====================================================================
 const GRADE5 = { daydream: 'general', gaze: 'king', slice: 'king', green: 'judge', cradle: 'judge', clone: 'rakshasa', leak: 'fengdu' };
 const INTRO5 = { daydream: 1, gaze: 2, slice: 3, green: 5, cradle: 6, clone: 8, leak: 10 };
-// 暫時關掉 7 隻新怪物（2026/11/02：平板上很卡，先關掉試玩，看是不是牠們的模型太精細）：晚上不排牠們、天黑前也不先蓋模型，
-// 黑影、黑球、血淚女、小丑照常來；圖鑑還看得到。網址加 &mon5 可以打開（自動試玩測試用）。確定之後把這行拿掉
-const MON5_ON = /[?&]mon5\b/.test(location.search);
 function monsterDmgMult5(t, src) {
   switch (t.kind) {
     case 'gaze': return t.seen ? 1.5 : 1;                         // 你看著牠的時候牠卡住了：打牠比較痛
@@ -345,7 +342,6 @@ function monsterDmgMult5(t, src) {
 // 怪物登場：每一種的提示（第一次和之後）、聲音、生在哪裡
 function spawnW5Monster(kind) {
   const ev = G.ev;
-  if (!MON5_ON) return;
   if (kind !== 'slice' && G.enemies.some(e => e.kind === kind)) return;
   if (bossFull()) return;
   const at = kind === 'slice' ? shoreSpot5() : kind === 'leak' ? findSpawn(22) : null;
@@ -375,15 +371,13 @@ function shoreSpot5() {
 }
 function scheduleNight5(add, again, night, n, hz) {
   const blood = G.ev.blood, P = { daydream: 0.4, gaze: 0.65, slice: 0.5, green: 0.35, cradle: 0.4, clone: 0.28 };
-  if (MON5_ON) {
-    for (const [k, p] of Object.entries(P)) {
-      if (night === INTRO5[k]) add(k, 25, 55);
-      else if (night > INTRO5[k] && (blood || again(p))) add(k, 30, NIGHT_LEN - 80);
-    }
-    if (night >= 4 && again(0.4)) add('slice', 60, NIGHT_LEN - 60);   // 水邊的貝殼可以有兩個
-    if (night === INTRO5.leak || night === LAST_NIGHT) add('leak', 40, 70);
-    else if (night > INTRO5.leak && again(0.3)) add('leak', 60, NIGHT_LEN - 90);
+  for (const [k, p] of Object.entries(P)) {
+    if (night === INTRO5[k]) add(k, 25, 55);
+    else if (night > INTRO5[k] && (blood || again(p))) add(k, 30, NIGHT_LEN - 80);
   }
+  if (night >= 4 && again(0.4)) add('slice', 60, NIGHT_LEN - 60);   // 水邊的貝殼可以有兩個
+  if (night === INTRO5.leak || night === LAST_NIGHT) add('leak', 40, 70);
+  else if (night > INTRO5.leak && again(0.3)) add('leak', 60, NIGHT_LEN - 90);
   // 舊怪物：黑球（只吃據點的燈）、血淚女、小丑
   if (night >= 2 && again(0.35)) add('blob', 30, NIGHT_LEN - 60);
   if (night >= 3 && again(0.25)) add('woman', 30, NIGHT_LEN - 60);
