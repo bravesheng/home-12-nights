@@ -1,7 +1,7 @@
 // 在家生存 12 夜 — 離線快取
 // 第一次打開時把整個遊戲存到平板裡，之後沒有網路也能玩。
 // 每次更新遊戲都要改 VERSION，平板連上網路時就會自動下載新版本。
-const VERSION = 'home12-v36';
+const VERSION = 'home12-v37';
 const ASSETS = [
   './', './index.html', './style.css', './manifest.webmanifest', './test.html', './manifest-test.webmanifest',
   './js/version.js', './js/data.js', './js/audio.js', './js/world2.js', './js/world3.js', './js/world4.js', './js/world5.js', './js/net.js', './js/netmon.js', './js/game.js', './js/render3d.js',
@@ -56,6 +56,7 @@ const ASSETS = [
   './tex/m5-stfHead.webp', './tex/m5-stfShirt.webp', './tex/m5-stfSleeve.webp', './tex/m5-stfPants.webp', './tex/m5-stfBadge.webp',
   './tex/m5-hubBody.webp', './tex/m5-hubLeg.webp', './tex/m5-hubPipe.webp',
   './tex/m5-embBody.webp', './tex/m5-embLimb.webp', './tex/m5-embHead.webp', './tex/m5-embGlow.webp', './tex/m5-embWing.webp', './tex/m5-embWingE.webp', './tex/m5-embFlame.webp', './tex/m5-embFlameMask.webp',
+  './tex/m5-clkCloak.webp', './tex/m5-clkSkin.webp', './tex/m5-clkPail.webp', './tex/m5-clkStick.webp', './tex/m5-clkCoal.webp',   // 神秘店員
 
 ];
 

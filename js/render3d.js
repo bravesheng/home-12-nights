@@ -3568,46 +3568,8 @@ function syncMonster4(e, r, t, p, d, dt) {
     }
   }
 }
-// 神秘店員（賣東西的，不是怪物）：黃色的塑膠雨衣和帽兜，帽兜裡一片黑，只看得到兩點發亮的眼睛和一排鋸齒狀的牙；
-// 左手提著一盞油燈、右手拿著鈴鐺，背上一個塞滿東西的大竹簍
+// 神秘店員（賣東西的，不是怪物）：照設計圖重做的在「第四世界重做的怪物」那一段（clkNew、clkSync）
 let clerk4 = null;
-function buildClerk4() {
-  // 照設計圖：破破爛爛的土黃色連帽斗篷（下擺撕成一條一條）、帽兜裡一張鋸齒狀的大嘴和兩點發亮的眼睛，
-  // 露出綠色的手和腳；一手提著鐵桶（裡面有一點光當燈籠），一手拿著一根黑色的長棍
-  makeMonster4Textures();
-  const g = new THREE.Group(); scene.add(g);
-  const robe = withDetail(ownLM('#ffffff', { map: clerkRobeTex, shade: 0.6, side: THREE.DoubleSide }), 'rag', 3, 0.9);
-  const skin = withDetail(ownLM('#4a6a3a', { shade: 0.7 }), 'skin', 6, 1.3), metal = withDetail(ownPhong('#7a7c80', { specular: 0x999999, shininess: 50 }), 'steel', 6, 0.9), stick = lm('#1e1a18');
-  // 綠色的腿和腳
-  for (const s of [-1, 1]) { taper(g, [s * 0.1, 0.5, 0], [s * 0.11, 0.05, 0.02], 0.055, 0.045, skin, 8); box(g, s * 0.11 - 0.05, s * 0.11 + 0.05, 0, 0.06, -0.04, 0.14, skin); }
-  const body = new THREE.Mesh(geo('crobe4b', () => new THREE.CylinderGeometry(0.22, 0.42, 1.1, 18, 1, true)), robe); body.position.y = 0.95; g.add(body);
-  // 下擺撕成一條一條的破布
-  for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2, len = 0.18 + (i * 7 % 5) * 0.05; box(g, -0.045, 0.045, 0.4 - len, 0.42, -0.005, 0.005, robe, false).position.set(Math.sin(a) * 0.41, 0.41 - len / 2, Math.cos(a) * 0.41); }
-  sph(g, 0.24, 0, 1.48, 0, robe, 1.12, 0.45, 0.9, 14);
-  const hood = new THREE.Mesh(geo('chood4b', () => new THREE.SphereGeometry(0.22, 18, 14, Math.PI / 2 + 0.7, Math.PI * 2 - 1.4)), robe);
-  hood.position.set(0, 1.72, -0.02); hood.scale.set(1, 1.3, 1.05); g.add(hood);
-  const tip = taper(g, [0, 1.95, -0.08], [0.06, 2.12, -0.2], 0.08, 0.01, robe, 8); void tip;   // 帽兜尖尖的頂
-  const face = new THREE.Mesh(geo('cface4b', () => new THREE.PlaneGeometry(0.3, 0.3)), ownBasic({ map: clerkFaceTex }));
-  face.position.set(0, 1.68, 0.11); g.add(face);
-  // 破袖子、綠色的手
-  for (const s of [-1, 1]) {
-    taper(g, [s * 0.24, 1.45, 0], [s * 0.3, 1.02, 0.14], 0.08, 0.1, robe, 10);
-    taper(g, [s * 0.3, 1.02, 0.14], [s * 0.3, 0.92, 0.18], 0.035, 0.03, skin, 8);
-    for (let k = -1; k <= 1; k++) taper(g, [s * 0.3 + k * 0.015, 0.92, 0.18], [s * 0.3 + k * 0.025, 0.84, 0.2], 0.01, 0.006, skin, 5);
-  }
-  // 鐵桶（左手）：舊舊的鐵皮、提把，裡面一點暖光
-  const lamp = new THREE.Group(); lamp.position.set(-0.3, 0.9, 0.2); g.add(lamp);
-  cyl(lamp, 0.12, 0.1, 0.24, 0, -0.42, 0, metal, 14, true);
-  cyl(lamp, 0.1, 0.1, 0.01, 0, -0.42, 0, metal, 14);
-  for (const y of [-0.38, -0.24]) cyl(lamp, 0.122, 0.122, 0.015, 0, y, 0, lm('#5a5c60'), 14, true);
-  const handle = new THREE.Mesh(geo('bucketH4', () => new THREE.TorusGeometry(0.11, 0.006, 4, 16, Math.PI)), lm('#3a3a3c')); handle.position.y = -0.18; lamp.add(handle);
-  const lg = ownSprite(glowTex, 0xffb060); lg.position.y = -0.2; lg.scale.setScalar(0.55); lamp.add(lg);
-  // 黑色的長棍（右手），斜斜地拄著
-  const bell = new THREE.Group(); bell.position.set(0.3, 0.9, 0.2); g.add(bell);
-  const st = cyl(bell, 0.016, 0.012, 1.2, 0, -0.85, 0, stick, 6); st.rotation.z = 0.25;
-  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
-  return { g, lamp, bell, lg };
-}
 // ====================================================================
 // 第五世界「世界夾層」的怪物（照設計師第五次手稿 docs/sketches/IMG_7436.jpeg 做成寫實風）：搖籃囈語、記憶洩漏源、白日夢、夢境切片、404視線、綠溫室、複製人
 // 貼圖（m5Tex）有的一張要算好幾百萬個像素、有的畫幾百筆模糊的線，太慢了：預先畫好存成 tex/m5-<key>.webp（tools/make-monster5-tex.mjs），遊戲直接載入，
@@ -5916,16 +5878,14 @@ function syncExtras(t) {
   const shop = !!(G.stock && G.stock.length) && merchantHere() && mode !== 'title';
   merchant.visible = shop && !isW4();
   if (merchant.visible) { merchant.position.set(MERCHANT_POS.x, floorH(MERCHANT_POS.x, MERCHANT_POS.y), MERCHANT_POS.y); merchant.rotation.y = Math.atan2(G.p.x - MERCHANT_POS.x, G.p.y - MERCHANT_POS.y); }
-  // 第四世界是神秘店員（每天在不同的地方）：面向你、鈴鐺輕輕晃、油燈的火一閃一閃
-  if (isW4() && shop && !clerk4) clerk4 = buildClerk4();
+  // 第四世界是神秘店員（每天在不同的地方）：面向你、木棍和鐵桶輕輕晃、炭火一閃一閃（照設計圖重做的，在「第四世界重做的怪物」那一段）
+  if (isW4() && shop && !clerk4) clerk4 = clkNew();
   if (clerk4) {
     clerk4.g.visible = shop && isW4();
     if (clerk4.g.visible) {
       clerk4.g.position.set(MERCHANT_POS.x, 0, MERCHANT_POS.y);
       clerk4.g.rotation.y = Math.atan2(G.p.x - MERCHANT_POS.x, G.p.y - MERCHANT_POS.y);
-      clerk4.bell.rotation.z = Math.sin(t * 0.9) * 0.06;   // 長棍慢慢晃
-      clerk4.lamp.rotation.z = Math.sin(t * 1.3) * 0.08;
-      clerk4.lg.material.opacity = 0.7 + 0.2 * Math.sin(t * 13) * Math.sin(t * 7);
+      clkSync(clerk4, t);
     }
   }
   gift.visible = !!G.gift && mode !== 'title';
@@ -10828,7 +10788,7 @@ UPG.taowu = { build: twBuild, sync: twSync, view: { h: 2.3, d: 5.0, cy: 1.1 } };
 // ---------- 第三世界到這裡 ----------
 
 
-// ---------- 第四世界重做的怪物（葵氏奶昔、紅涎偽人、SCP-3008-2、Hubert、燼皇） ----------
+// ---------- 第四世界重做的怪物（葵氏奶昔、紅涎偽人、SCP-3008-2、Hubert、燼皇；還有神秘店員） ----------
 // 這一塊自己用的小工具都是 w4u 開頭。
 // 一塊一塊的網格合成一個：grid(ss, ts, f, rect) 加一塊，ss、ts 是 0～1 的分割，f(s, t, v) 把 (s, t) 變成位置
 // （s 從外面看是左到右、t 是上到下，三角形就會朝外）；rect 是那一塊在貼圖上的位置 [x, y, 寬, 高]（畫布的像素，畫布 TW×TH）。
@@ -12228,6 +12188,362 @@ function embSync(e, r, t, p, dt) {
   r.g.position.y = floorH(e.x, e.y);
 }
 UPG.ember = { build: embBuild, sync: embSync, view: { h: 3.1, d: 6.8, cy: 1.55 } };
+
+// ---------- 神秘店員（賣東西的，不是怪物） ----------
+// 遊戲裡由 syncExtras 呼叫 clkNew、clkSync（跟舊的一樣放在場景裡）；UPG.clerk 只給 ?model=clerk 和預先畫貼圖（bake5）用。
+// 照設計圖（1792913783585_1.jpg 左下）和設計師說的「不要亂改」：一件從頭蓋到膝蓋的土黃色連帽破斗篷，帽兜尖尖的頂軟軟地垂到左肩（看的人的左邊）；
+// 斗篷的正面就是牠的臉：兩個往中間斜下來、很兇的眼洞（裡面一片黑，深處兩點發亮的黃眼睛），底下一張從胸口裂到肚子的鋸齒大嘴
+// （布剪成上下兩排交錯的尖牙，嘴裡是暗紅色、濕濕的深洞），下擺撕成一條一條的破布；
+// 斗篷底下伸出綠色、細長的手和腳：一手提著生鏽的鐵桶（裡面燒著炭，當燈籠），一手叉在腰上握著一根黑色的木棍。
+// 寫實：曬到褪色又髒的粗布（泥巴、霉斑、往下流的髒污、補丁和縫線、破洞），綠色的皮膚有深色的斑和疙瘩，鍍鋅的鐵桶生鏽、有凹痕、被燻黑
+const CLK_TOP = 2.0, CLK_HEM = 0.5, CLK_TH = 888;
+// 斗篷的大小：高度 y → [半寬, 前面的深度, 後面的深度]（帽兜是圓頂，肩膀往兩邊垂下來，越往下越寬）
+function clkProf(y) {
+  if (y > 1.7) { const k = Math.sqrt(Math.max(0, 1 - ((y - 1.7) / (CLK_TOP - 1.7)) ** 2.2)); return [0.222 * k, 0.198 * k, 0.19 * k]; }
+  return [0.222 + 0.095 * sstep(1.6, 1.4, y) + 0.03 * sstep(1.3, 0.5, y), 0.198 + 0.02 * sstep(1.62, 1.35, y) + 0.03 * sstep(1.3, 0.5, y), 0.19 + 0.02 * sstep(1.6, 1.4, y) + 0.035 * sstep(1.4, 0.5, y)];
+}
+// 從肩膀垂下來的布摺（往外推多少公尺）：越往下越深；正面的臉和嘴那一塊布是撐平的
+function clkFold(a, y) {
+  const ca = Math.cos(a), hang = (0.007 + 0.026 * sstep(1.45, 0.8, y)) * sstep(2.0, 1.85, y), face = sstep(0.55, 0.9, ca) * sstep(0.95, 1.12, y);
+  const n = fbm3(ca * 1.6, y * 2.4, Math.sin(a) * 1.6, 3, 811) - 0.5;
+  return hang * (0.5 * Math.sin(a * 7 + 0.9 * Math.sin(y * 2.3) + 0.4) + 0.3 * Math.sin(a * 12 - y * 1.7 + 1.1) + 0.2 * Math.sin(a * 4 + 2.1) + n * 1.1) * (1 - 0.75 * face);
+}
+// 臉（正面的 x、y）：兩道從外眼角上面斜到中間、壓下來的眉骨（布摺），眉骨中間皺起來的溝，凹下去的眼窩
+function clkFace(x, y) {
+  let d = -0.006 * Math.exp(-((x / 0.009) ** 2) - (((y - 1.705) / 0.02) ** 2));
+  for (const s of [-1, 1]) {
+    d -= 0.011 * Math.exp(-(((x - s * 0.077) / 0.042) ** 2) - (((y - 1.67) / 0.03) ** 2));
+    const ax = s * 0.026, ay = 1.688, vx = s * 0.112, vy = 0.057, q = clamp(((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy), 0, 1);
+    d += 0.013 * Math.exp(-((Math.hypot(x - ax - vx * q, y - ay - vy * q) / 0.016) ** 2)) * (0.6 + 0.4 * q);
+  }
+  return d;
+}
+// 斗篷表面上的一點：s 繞一圈（0.5 是正面）、t 從帽兜頂到下擺。順便把角度、高度、沒推過的 x、布摺記在 CLK_I（畫貼圖用）
+const CLK_I = { a: 0, y: 0, x: 0, fold: 0 };
+function clkCloakPt(s, t, out) {
+  const a = (s - 0.5) * Math.PI * 2, y = CLK_TOP - (CLK_TOP - CLK_HEM) * t;
+  const [A, F, B] = clkProf(y), sa = Math.sin(a), ca = Math.cos(a), e = 2 / (2.2 + 0.45 * sstep(-0.2, 0.6, ca)), D = B + (F - B) * sstep(-0.3, 0.3, ca);
+  const x = A * Math.sign(sa) * Math.abs(sa) ** e, z = D * Math.sign(ca) * Math.abs(ca) ** e;
+  const fold = clkFold(a, y), fr = sstep(0.5, 0.92, ca), r = fold + (fr > 0 ? clkFace(x, y) * fr : 0);
+  const nx = x / (A * A + 1e-6), nz = z / (D * D + 1e-6), nl = Math.hypot(nx, nz) || 1;
+  CLK_I.a = a; CLK_I.y = y; CLK_I.x = x; CLK_I.fold = fold;
+  return out.set(x + nx / nl * r - 0.025 * sstep(1.75, 1.98, y), y, z + nz / nl * r);
+}
+// 帽兜尖尖的頂：從頭頂往左邊倒、軟軟地垂到左肩（布垂下來壓扁一點、有幾道皺摺）
+const CLK_TAIL = [[-0.01, 1.93, -0.02], [-0.07, 2.0, -0.03], [-0.15, 2.0, -0.035], [-0.215, 1.94, -0.035], [-0.25, 1.81, -0.025], [-0.268, 1.66, -0.015], [-0.285, 1.52, 0.0]];
+const CLK_TAILR = [0.075, 0.07, 0.058, 0.046, 0.034, 0.022, 0.004];
+let clkTailC = null;
+function clkTailPt(s, t, out) {
+  if (!clkTailC) { const cv = new THREE.CatmullRomCurve3(CLK_TAIL.map(p => new THREE.Vector3(...p))); clkTailC = { cv, fr: cv.computeFrenetFrames(64, false) }; }
+  const { cv, fr } = clkTailC, i = Math.round(t * 64), c = cv.getPointAt(t, new THREE.Vector3()), th = s * Math.PI * 2;
+  const x = t * (CLK_TAILR.length - 1), q = Math.min(CLK_TAILR.length - 2, x | 0), R = (CLK_TAILR[q] + (CLK_TAILR[q + 1] - CLK_TAILR[q]) * (x - q)) * (1 + 0.1 * Math.sin(th * 3 + t * 11) * sstep(0.1, 0.4, t));
+  const N = fr.normals[i], Bn = fr.binormals[i], u = Math.cos(th) * R, v = Math.sin(th) * R * 0.78;
+  CLK_I.a = th; CLK_I.y = c.y; CLK_I.x = c.x; CLK_I.fold = 0.004 * Math.sin(th * 3 + t * 11);
+  return out.set(c.x + N.x * u + Bn.x * v, c.y + N.y * u + Bn.y * v, c.z + N.z * u + Bn.z * v);
+}
+// 斗篷和帽兜尖合成一個網格（貼圖 1024×1024：上面 888 像素是斗篷，空 8 行透明的，下面 128 像素是帽兜尖）；正面的格子密一點
+const clkCloakGeo = () => geo('clkCloak', () => {
+  const ss = Array.from({ length: 73 }, (_, i) => { const u = i / 72; return u - 0.05 * Math.sin(Math.PI * 2 * (u - 0.5)); });
+  const ts = [...w4uLin(26).map(f => f / 3), ...w4uLin(16).slice(1).map(f => (1 + f) / 3), ...w4uLin(10).slice(1).map(f => (2 + f) / 3)];
+  const g = w4uPatches(1024, 1024).grid(ss, ts, clkCloakPt, [0, 0, 1024, CLK_TH]).grid(w4uLin(12), w4uLin(20), clkTailPt, [0, 896, 1024, 128]).build(), N = g.attributes.normal, v = new THREE.Vector3();
+  for (let j = 0; j < ts.length; j++) { const a = j * ss.length, b = a + ss.length - 1; v.set(N.getX(a) + N.getX(b), N.getY(a) + N.getY(b), N.getZ(a) + N.getZ(b)).normalize(); N.setXYZ(a, v.x, v.y, v.z); N.setXYZ(b, v.x, v.y, v.z); }
+  return g;
+});
+// 斗篷上剪開、撕破的地方（傳回 > 0 是沒有布的地方，數值大約是離邊多遠，公尺）：眼洞、鋸齒大嘴、下擺的破布條、幾個破洞
+const CLK_UT = [[-0.158, 0.17, 0.03, 0.012], [-0.08, 0.26, 0.036, -0.006], [0.004, 0.3, 0.038, 0.004], [0.084, 0.25, 0.034, 0.01], [0.16, 0.16, 0.03, -0.01]];   // 上排的牙：[中間的 x, 多長, 根部的半寬, 牙尖往哪邊歪]
+const CLK_LT = [[-0.118, 0.19, 0.032, 0.008], [-0.04, 0.25, 0.035, -0.005], [0.042, 0.26, 0.036, 0.006], [0.12, 0.18, 0.031, -0.01]];                        // 下排的牙
+const CLK_HOLES = [[1.75, 0.86, 0.022, 0.035], [-2.35, 1.12, 0.03, 0.02], [0.95, 0.7, 0.018, 0.028], [2.8, 0.78, 0.025, 0.04]];   // 破洞：[角度, 高度, 半寬, 半高]
+// 嘴巴的範圍：上緣、下緣（x 的函式）和離邊多遠（> 0 在裡面）。上面寬、下面窄，像一面盾牌
+const clkMouth = (x, y) => {
+  const se = w => 0.268 * Math.max(0, 1 - Math.abs(x / w) ** 2.6) ** (1 / 2.6), hw = 0.208 - 0.04 * sstep(1.3, 1.035, y);
+  return [1.3 + se(0.208), 1.3 - se(0.18), (1 - Math.abs(x / hw) ** 2.6 - Math.abs((y - 1.3) / 0.268) ** 2.6) * 0.08];
+};
+function clkCut(a, y, x, p) {
+  const ca = Math.cos(a);
+  let cut = -1;
+  if (ca > 0.3) {
+    for (const s of [-1, 1]) {   // 眼洞：斜斜的杏仁形，上緣被眉骨壓成一條往中間斜下來的直線
+      const u = (x - s * 0.077) * s, v = y - 1.669;
+      cut = Math.max(cut, Math.min((1 - Math.hypot(u / 0.046, (v - 0.003 - 0.16 * u) / 0.021)) * 0.02, 0.006 + 0.22 * u - v));
+    }
+    const [top, bot, m0] = clkMouth(x, y);
+    if (m0 > -0.05) {   // 大嘴：上下兩排交錯的尖牙（布），牙齒以外的地方是洞
+      let m = m0;
+      const wob = (fbm3(p.x * 60, p.y * 60, p.z * 60, 2, 837) - 0.5) * 0.006;   // 剪得不整齊
+      for (const [cx, L, w, ln] of CLK_UT) { const d = top - y; if (d >= -0.01 && d < L) { const f = Math.max(0, d) / L; m = Math.min(m, Math.abs(x - cx - ln * f * f) - w * (1 - f) ** 1.15 + wob); } }
+      for (const [cx, L, w, ln] of CLK_LT) { const d = y - bot; if (d >= -0.01 && d < L) { const f = Math.max(0, d) / L; m = Math.min(m, Math.abs(x - cx - ln * f * f) - w * (1 - f) ** 1.15 + wob); } }
+      cut = Math.max(cut, m);
+    }
+  }
+  // 下擺：26 條寬寬窄窄的破布，每條長短不一、尾巴尖尖的；破布之間往上撕開的縫
+  const q = (a / (Math.PI * 2) + 0.5) * 26 + (fbm3(ca * 2, 0, Math.sin(a) * 2, 2, 821) - 0.5) * 1.2, i = Math.floor(q), f = q - i, k = ((i % 26) + 26) % 26;
+  const h1 = nHash3(k, 0, 0, 823), h2 = nHash3(k, 1, 0, 829);
+  const line = 0.6 + (fbm3(ca * 3, 1, Math.sin(a) * 3, 2, 827) - 0.5) * 0.05 - (0.015 + 0.065 * h1 * h1) * (1 - Math.abs(2 * f - 1)) ** 0.8 + (0.02 + 0.07 * h2 * h2) * Math.exp(-((Math.min(f, 1 - f) / 0.07) ** 2));
+  cut = Math.max(cut, line - y);
+  for (const [ha, hy, hw, hh] of CLK_HOLES) { const dd = Math.hypot(wrapA(a - ha) * 0.31 / hw, (y - hy) / hh); if (dd < 1.6) cut = Math.max(cut, (1 - dd + (fbm3(p.x * 40, p.y * 40, p.z * 40, 2, 833) - 0.5) * 0.6) * 0.02); }
+  return cut + (fbm3(p.x * 300, p.y * 300, p.z * 300, 2, 871) - 0.5) * 0.005;   // 邊緣一根一根的毛邊
+}
+// 粗布的顏色：土黃色，染得不均勻、曬到褪色，往下流的髒污，越往下越多泥巴，一小群一小群的霉斑；布摺凹下去的地方暗
+function clkCloth(p, y, fold, seed) {
+  const n = fbm3(p.x * 3, p.y * 3, p.z * 3, 4, seed) - 0.5, fib = fbm3(p.x * 140, p.y * 60, p.z * 140, 2, seed + 3) - 0.5, streak = fbm3(p.x * 9, p.y * 1.2, p.z * 9, 3, seed + 5) - 0.5;
+  const k = 1 + n * 0.22 + fib * 0.12 + streak * 0.16;
+  let r = 176 * k, g = 128 * k, b = 48 * k;
+  const sun = sstep(1.5, 1.95, y) * 0.12;
+  r += (220 - r) * sun; g += (190 - g) * sun; b += (120 - b) * sun;
+  const mud = sstep(1.0, 0.55, y) * (0.35 + 0.65 * sstep(0.4, 0.7, fbm3(p.x * 6, p.y * 9, p.z * 6, 4, seed + 7))) * 0.75;
+  r += (92 - r) * mud; g += (70 - g) * mud; b += (38 - b) * mud;
+  const mold = sstep(0.62, 0.7, fbm3(p.x * 7, p.y * 7, p.z * 7, 3, seed + 9)) * sstep(0.55, 0.75, fbm3(p.x * 90, p.y * 90, p.z * 90, 2, seed + 11)) * 0.6;
+  r += (70 - r) * mold; g += (68 - g) * mold; b += (40 - b) * mold;
+  const grime = sstep(0.45, 0.8, fbm3(p.x * 4, p.y * 2.5, p.z * 4, 4, seed + 13)) * 0.3;   // 一大片一大片洗不掉的髒
+  r += (96 - r) * grime; g += (76 - g) * grime; b += (44 - b) * grime;
+  const ao = clamp(-fold / 0.025, -1, 1), sh = 1 - Math.max(0, ao) * 0.34 + Math.max(0, -ao) * 0.07;
+  return [r * sh, g * sh, b * sh];
+}
+const CLK_PATCH = [[-1.35, 1.02, 0.07, 0.055, 0.12], [2.55, 1.27, 0.08, 0.065, -0.08], [-2.2, 0.76, 0.06, 0.05, 0.3]];   // 補丁：[角度, 高度, 半寬, 半高, 歪幾度]
+const CLK_DRIP = [[-0.13, 0.09], [-0.05, 0.14], [0.02, 0.06], [0.09, 0.12], [0.15, 0.05]];                               // 嘴巴底下流下來的髒污：[x, 多長]
+function clkPaintCloak(c, W, H) {
+  const img = c.createImageData(W, H), d = img.data, p = new THREE.Vector3(), HC = CLK_TH, HT = 896;
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    if (py >= HC && py < HT) continue;   // 透明的空隙
+    const tail = py >= HT, s = (px + 0.5) / W, t = tail ? (py - HT + 0.5) / (H - HT) : (py + 0.5) / HC, i = (py * W + px) * 4;
+    if (tail) clkTailPt(s, t, p); else clkCloakPt(s, t, p);
+    const { a, y, x, fold } = CLK_I;
+    let [r, g, b] = clkCloth(p, y, fold, 861);
+    if (tail) { w4uPx(d, i, r, g, b); continue; }
+    const ca = Math.cos(a);
+    // 補丁：顏色深一點的另一塊布，四周一針一針的粗縫線，邊上有一點影子
+    for (const [pa, pc, hw, hh, rot] of CLK_PATCH) {
+      const u0 = wrapA(a - pa) * 0.31, v0 = y - pc, u = u0 * Math.cos(rot) + v0 * Math.sin(rot), v = -u0 * Math.sin(rot) + v0 * Math.cos(rot), e = Math.min(hw - Math.abs(u), hh - Math.abs(v));
+      if (e < -0.004) continue;
+      if (e > 0) { const k = 0.8 + (fbm3(p.x * 70, p.y * 70, p.z * 70, 2, 863) - 0.5) * 0.22; r = (r * 0.4 + 90) * k; g = (g * 0.4 + 66) * k; b = (b * 0.4 + 35) * k; }
+      else { r *= 0.8; g *= 0.8; b *= 0.8; }
+      const along = Math.abs(u) > hw - 0.008 ? v : u;
+      if (e > 0.002 && e < 0.007 && ((along / 0.011) % 1 + 1) % 1 < 0.55) { r = 62; g = 50; b = 34; }
+    }
+    // 背後的接縫
+    const ds = Math.abs(wrapA(a - Math.PI)) * 0.3;
+    if (ds < 0.003) { r *= 0.72; g *= 0.72; b *= 0.72; } else if (ds > 0.005 && ds < 0.008 && ((y / 0.012) % 1) < 0.5) { r *= 0.6; g *= 0.6; b *= 0.6; }
+    if (ca > 0.3) {
+      // 眼洞周圍和眉骨底下燻得黑黑的（像兩道往中間壓下來的濃眉）
+      let soot = 0;
+      for (const s of [-1, 1]) { const u = (x - s * 0.077) * s; soot += Math.exp(-((u / 0.062) ** 2) - (((y - 1.684 - 0.2 * u) / 0.024) ** 2)); }
+      soot = Math.min(1, soot) * 0.55 * sstep(0.3, 0.8, ca);
+      r *= 1 - soot; g *= 1 - soot * 1.02; b *= 1 - soot * 1.05;
+      // 嘴巴：四周髒髒的、牙齒上有乾掉的暗紅色污漬，下排牙底下往下流的痕跡
+      const [, bot, m0] = clkMouth(x, y), ring = Math.exp(-((Math.max(0, -m0) / 0.022) ** 2)) * (m0 < 0 ? 0.3 : 0.18);
+      let st = ring;
+      for (const [dx, L] of CLK_DRIP) st += Math.exp(-(((x - dx) / 0.006) ** 2)) * sstep(bot - L, bot - L * 0.5, y) * (1 - sstep(bot, bot + 0.01, y)) * 0.45;
+      st = Math.min(0.6, st) * sstep(0.3, 0.8, ca);
+      r += (70 - r) * st; g += (32 - g) * st; b += (20 - b) * st;
+    }
+    const cut = clkCut(a, y, x, p), edge = sstep(-0.014, 0, cut);   // 剪開、撕開的邊又髒又毛
+    r *= 1 - edge * 0.35; g *= 1 - edge * 0.38; b *= 1 - edge * 0.4;
+    w4uPx(d, i, r, g, b);
+    d[i + 3] = 255 * clamp(0.5 - cut / 0.0017, 0, 1);
+  }
+  c.putImageData(img, 0, 0);
+}
+// 嘴裡的深洞（斗篷後面一個方方圓圓的殼，只畫裡面那一面）：靠近嘴邊是暗紅色濕濕的肉、一道一道的皺摺，越裡面越黑
+const clkMawGeo = () => geo('clkMaw', () => {
+  const g = new THREE.SphereGeometry(1, 22, 18), P = g.attributes.position, col = [], e = 2 / 3.4;
+  for (let i = 0; i < P.count; i++) {
+    const x = P.getX(i), y = P.getY(i), z = P.getZ(i), n = fbm3(x * 3, y * 4, z * 3, 3, 891) - 0.5, k = 1 + n * 0.12 + Math.sin(y * 14 + n * 3) * 0.02;
+    P.setXYZ(i, Math.sign(x) * Math.abs(x) ** e * 0.262 * k, 1.3 + Math.sign(y) * Math.abs(y) ** e * 0.33 * k, 0.12 + z * 0.085 * k);
+    const deep = sstep(0.3, -0.9, z), w = 0.45 + 0.55 * (n + 0.5);
+    col.push((0.12 - 0.105 * deep) * w, (0.022 - 0.019 * deep) * w, (0.02 - 0.017 * deep) * w);
+  }
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  return g;
+});
+// 綠色的皮膚：暗暗的灰綠色，偏黃綠的亮塊、深色的斑，一顆一顆的小疙瘩，關節一圈一圈的皺紋
+function clkSkinCol(x, y, z) {
+  const n = fbm3(x * 7, y * 7, z * 7, 4, 851) - 0.5, f = fbm3(x * 55, y * 55, z * 55, 3, 853) - 0.5, [c1, c2] = w4uCell(x * 60 + n * 2, y * 60, z * 60, 857);
+  const spot = sstep(0.58, 0.72, fbm3(x * 16, y * 16, z * 16, 3, 859)), lite = sstep(0.6, 0.75, fbm3(x * 9 + 3, y * 9, z * 9, 3, 861)) * 0.35, bump = sstep(0.12, 0, c2 - c1);
+  const k = 1 + n * 0.32 + f * 0.14;
+  let r = 66 * k, g = 98 * k, b = 74 * k;
+  r += (122 - r) * lite; g += (140 - g) * lite; b += (90 - b) * lite;
+  r *= 1 - spot * 0.45; g *= 1 - spot * 0.4; b *= 1 - spot * 0.35;
+  r *= 1 - bump * 0.2; g *= 1 - bump * 0.2; b *= 1 - bump * 0.18;
+  return [r, g, b];
+}
+function clkPaintSkin(c, W, H) {
+  const img = c.createImageData(W, H);
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const an = (py + 0.5) / H * Math.PI * 2, L = (px + 0.5) / W * 0.9, x = Math.cos(an) * 0.04, z = Math.sin(an) * 0.04;
+    const fr = ((L * 48 + (fbm3(x * 20, L * 3, z * 20, 2, 863) - 0.5) * 3) % 1 + 1) % 1, [r, g, b] = clkSkinCol(x, L, z), wr = Math.exp(-(((fr - 0.5) / 0.07) ** 2)) * 0.22 * sstep(0.45, 0.7, fbm3(x * 9, L * 5, z * 9, 2, 865));
+    w4uPx(img.data, (py * W + px) * 4, r * (1 - wr), g * (1 - wr), b * (1 - wr));
+  }
+  c.putImageData(img, 0, 0);
+}
+// 手（手的座標：手腕在原點、手指往 -y 長、握的東西沿著 x 軸、在手掌前面 +z）：四根細長、骨節突出的手指繞過握的東西底下勾回來，大拇指從另一邊壓住。
+// th：大拇指在哪一邊（+1 是 +x）
+const CLK_GRIP = [0, -0.062, 0.03];
+function clkHandGeo(th) {
+  const parts = [[clkSph(), mat4(0, -0.036, 0.004, 0, 0, 0, 0.034, 0.045, 0.016)]], G = CLK_GRIP;
+  [1.95, 2.05, 1.85, 1.6].forEach((end, i) => {
+    const x = th * (0.025 - i * 0.0165), pts = [];
+    for (let k = 0; k <= 4; k++) { const ph = -1.2 + (end + 1.2) * k / 4, R = 0.028 - 0.002 * k / 4; pts.push([x, G[1] - R * Math.cos(ph), G[2] + R * Math.sin(ph)]); }
+    parts.push([tubeGeo('clkFinger' + i, pts, [0.0095, 0.0088, 0.0078, 0.0068, 0.0045], 6, 8), new THREE.Matrix4()]);
+  });
+  parts.push([tubeGeo('clkThumb' + th, [[th * 0.03, -0.022, 0.01], [th * 0.034, -0.042, 0.038], [th * 0.02, -0.056, 0.057], [th * 0.002, -0.063, 0.062]], [0.012, 0.01, 0.0085, 0.006], 6, 8), new THREE.Matrix4()]);
+  return mergeParts('clkHand' + th, parts);
+}
+// 手腕的位置、手指的方向、握的東西的方向 → 手的矩陣
+function clkHandM(w, F, X) {
+  const Xv = new THREE.Vector3(...X).normalize(), Fv = new THREE.Vector3(...F).normalize(), Y = Fv.clone().addScaledVector(Xv, -Fv.dot(Xv)).normalize().negate(), Z = new THREE.Vector3().crossVectors(Xv, Y);
+  return new THREE.Matrix4().makeBasis(Xv, Y, Z).setPosition(...w);
+}
+// 手臂（從斗篷裡的肩膀伸出來）：提鐵桶的那隻往外伸、手垂下來握著提把；拿木棍的那隻手肘往外拐、手叉在腰上
+const CLK_ARM_P = [[-0.19, 1.42, -0.07], [-0.28, 1.41, 0.0], [-0.37, 1.37, 0.05], [-0.46, 1.33, 0.08], [-0.54, 1.3, 0.1]];
+const CLK_ARM_S = [[0.19, 1.42, -0.07], [0.28, 1.38, -0.02], [0.39, 1.27, -0.025], [0.4, 1.19, 0.08], [0.33, 1.15, 0.19]];
+const CLK_ARM_R = [0.046, 0.04, 0.034, 0.03, 0.024];
+const CLK_STICK = [0.47, -0.88, -0.1];   // 木棍往下斜的方向（往外、往下）
+let CLK_H = null;
+function clkHands() {
+  if (CLK_H) return CLK_H;
+  const mk = (w, F, X) => { const m = clkHandM(w, F, X); return { m, grip: new THREE.Vector3(...CLK_GRIP).applyMatrix4(m), q: new THREE.Quaternion().setFromRotationMatrix(m) }; };
+  return (CLK_H = { pail: mk(CLK_ARM_P[4], [-0.12, -1, 0.04], [0, 0, -1]), stick: mk(CLK_ARM_S[4], [-0.07, -0.04, 0.11], CLK_STICK.map(v => -v)) });
+}
+const clkSph = () => geo('clkSph', () => new THREE.SphereGeometry(1, 10, 8));
+// 腳：扁扁的腳掌、三根尖尖的腳趾
+const clkFootGeo = () => mergeParts('clkFoot', [[geo('clkFootB', () => {
+  const g = new THREE.SphereGeometry(1, 14, 10), P = g.attributes.position;
+  for (let i = 0; i < P.count; i++) { const x = P.getX(i), y = P.getY(i), z = P.getZ(i); P.setXYZ(i, x * 0.046 * (1 + 0.2 * z), Math.max(y, -0.55) * 0.042 * (1 - 0.35 * sstep(0, 1, z)) + 0.024, z * 0.1 + 0.05); }
+  g.computeVertexNormals();
+  return g;
+}), new THREE.Matrix4()], ...[-1, 0, 1].map(i => [tubeGeo('clkToe' + i, [[i * 0.022, 0.022, 0.12], [i * 0.028, 0.016, 0.165], [i * 0.031, 0.009, 0.195], [i * 0.032, 0.003, 0.212]], [0.016, 0.013, 0.008, 0.002], 6, 6), new THREE.Matrix4()])]);
+// 手、腳、手臂、腿合成一個網格（同一張皮膚貼圖）
+function clkSkinGeo() {
+  const H = clkHands(), parts = [];
+  for (const s of [-1, 1]) {
+    parts.push([tubeGeo('clkLeg' + s, [[s * 0.1, 0.9, -0.01], [s * 0.104, 0.68, 0], [s * 0.11, 0.47, 0.022], [s * 0.112, 0.27, 0], [s * 0.112, 0.1, -0.012], [s * 0.112, 0.05, 0]], [0.068, 0.062, 0.053, 0.05, 0.036, 0.034], 10, 12), new THREE.Matrix4()]);
+    parts.push([clkFootGeo(), mat4(s * 0.112, 0, 0, 0, s * 0.12, 0)]);
+  }
+  parts.push([tubeGeo('clkArmP', CLK_ARM_P, CLK_ARM_R, 8, 14), new THREE.Matrix4()], [tubeGeo('clkArmS', CLK_ARM_S, CLK_ARM_R, 8, 14), new THREE.Matrix4()]);
+  parts.push([clkSph(), mat4(0.39, 1.265, -0.02, 0, 0, 0, 0.036, 0.034, 0.034)]);   // 往外拐的手肘
+  parts.push([clkHandGeo(-1), H.pail.m], [clkHandGeo(1), H.stick.m]);
+  return mergeParts('clkSkin', parts);
+}
+// 鐵桶：鍍鋅鐵皮捲成的桶子（底部一圈、兩道壓出來的凸紋、捲邊的桶口），從外面、桶口、到裡面一路轉一圈；有幾個凹痕
+const CLK_PAIL = [[0, 0.004], [0.088, 0.004], [0.099, 0], [0.104, 0.008], [0.106, 0.05], [0.108, 0.1], [0.1115, 0.11], [0.109, 0.12], [0.113, 0.21], [0.1165, 0.22], [0.114, 0.23], [0.121, 0.316],
+  [0.1255, 0.322], [0.1285, 0.33], [0.127, 0.338], [0.1225, 0.338], [0.1235, 0.333], [0.1195, 0.316], [0.1125, 0.22], [0.1065, 0.11], [0.1035, 0.03], [0.096, 0.013], [0, 0.013]];
+const CLK_BAIL = 0.305;   // 提把的耳朵在多高；提把拱起來最高的地方（手握的地方）在 CLK_BAIL + 0.133
+const clkPailGeo = () => mergeParts('clkPail', [[geo('clkPailL', () => {
+  const g = new THREE.LatheGeometry(CLK_PAIL.map(([r, y]) => new THREE.Vector2(r, y)), 24), P = g.attributes.position;
+  for (let i = 0; i < P.count; i++) {
+    const x = P.getX(i), y = P.getY(i), z = P.getZ(i), th = Math.atan2(x, z);
+    const dent = sstep(0.6, 0.78, fbm3(Math.cos(th) * 2.2, y * 7, Math.sin(th) * 2.2, 3, 881)) * sstep(0.02, 0.05, y) * (1 - sstep(0.29, 0.315, y)), k = 1 - 0.07 * dent;
+    P.setXYZ(i, x * k * 1.015, y, z * k);
+  }
+  g.computeVertexNormals();
+  return g;
+}), new THREE.Matrix4()], [tubeGeo('clkBail', Array.from({ length: 11 }, (_, k) => [0, CLK_BAIL + 0.133 * Math.sin(Math.PI * k / 10), 0.133 * Math.cos(Math.PI * k / 10)]), [0.0035, 0.0035], 5, 20), new THREE.Matrix4()],
+  ...[-1, 1].map(s => [geo('clkEar', () => new THREE.BoxGeometry(0.026, 0.03, 0.004)), mat4(0, CLK_BAIL, s * 0.1275)])]);
+// 桶子裡燒著的炭：一層炭（貼圖）和十幾塊突出來的炭塊
+const clkCoalGeo = () => { const rr = seeded(921); return mergeParts('clkCoal', [[geo('clkCoalD', () => new THREE.CircleGeometry(0.116, 22)), mat4(0, 0.288, 0, -Math.PI / 2, 0, 0)], ...Array.from({ length: 12 }, () => { const a = rr() * 7, d = Math.sqrt(rr()) * 0.09, s = 0.016 + rr() * 0.016; return [geo('clkLump', () => new THREE.SphereGeometry(1, 6, 4)), mat4(Math.sin(a) * d, 0.29 + s * 0.15, Math.cos(a) * d, rr() * 3, rr() * 3, 0, s, s * 0.6, s * 0.85)]; })]); };
+function clkPaintPail(c, W, H) {
+  const img = c.createImageData(W, H), N = CLK_PAIL.length - 1;
+  for (let py = 0; py < H; py++) {
+    const j = (1 - (py + 0.5) / H) * N, q = Math.min(N - 1, j | 0), f = j - q, Y = CLK_PAIL[q][1] + (CLK_PAIL[q + 1][1] - CLK_PAIL[q][1]) * f, inside = j > 15.5, under = j < 2.6;
+    for (let px = 0; px < W; px++) {
+      const th = (px + 0.5) / W * Math.PI * 2, x = Math.sin(th) * 0.12, z = Math.cos(th) * 0.12, yy = Y + (inside ? 0.5 : under ? 0.9 : 0);
+      const n = fbm3(x * 20, yy * 20, z * 20, 4, 901) - 0.5, spang = Math.floor(fbm3(x * 90, yy * 90, z * 90, 1, 905) * 5) / 5;   // 鍍鋅的花紋（一塊一塊亮暗不同的結晶）
+      const grime = sstep(0.4, 0.75, fbm3(x * 9, yy * 9, z * 9, 3, 903)) * 0.45;
+      let r = (112 * (0.86 + 0.16 * spang) + n * 26) * (1 - grime), g = r * 1.01, b = r * 1.03;
+      // 鏽：一塊一塊的、從桶口往下流的鏽水痕，底部一圈最多
+      const streak = sstep(0.58, 0.8, fbm3(Math.cos(th) * 6, Y * 0.9, Math.sin(th) * 6, 3, 909)) * sstep(0.08, 0.3, Y);
+      const rust = clamp(sstep(0.56, 0.72, fbm3(x * 14, yy * 14, z * 14, 4, 907) + (Y < 0.06 ? 0.12 : 0)) + streak * 0.7, 0, 1), rn = fbm3(x * 60, yy * 60, z * 60, 2, 911);
+      r += (70 + 90 * rn - r) * rust; g += (36 + 44 * rn - g) * rust; b += (18 + 20 * rn - b) * rust;
+      // 被炭火燻黑：外面靠近桶口、整個裡面
+      const soot = inside ? 0.78 + n * 0.3 : sstep(0.24, 0.335, Y) * 0.55 + (under ? 0.35 : 0);
+      r += (28 - r) * soot; g += (24 - g) * soot; b += (22 - b) * soot;
+      w4uPx(img.data, (py * W + px) * 4, r, g, b);
+    }
+  }
+  c.putImageData(img, 0, 0);
+}
+// 炭：黑黑的炭塊、灰白色的灰，炭和炭之間的縫透出橘紅色的火，有幾塊燒得特別旺
+function clkPaintCoal(c, W, H) {
+  const img = c.createImageData(W, H);
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const X = (px + 0.5) / W * 7, Y = (py + 0.5) / H * 7, [f1, f2] = w4uCell(X, Y, 0.5, 913);
+    const hot = sstep(0.42, 0.72, fbm3(X * 0.7, Y * 0.7, 1, 3, 915)), crack = sstep(0.14, 0, f2 - f1), ash = sstep(0.55, 0.75, fbm3(X * 5, Y * 5, 2, 3, 917)) * (1 - hot), n = fbm3(X * 3, Y * 3, 3, 3, 919);
+    let r = 26 + n * 14, g = 22 + n * 10, b = 20 + n * 8;
+    r += (150 - r) * ash * 0.7; g += (144 - g) * ash * 0.7; b += (138 - b) * ash * 0.7;
+    const gl = clamp(crack * (0.35 + 0.9 * hot) + hot * sstep(0.5, 0.1, f1) * 0.6, 0, 1);
+    r += (255 - r) * gl; g += (100 + 100 * gl - g) * gl; b += (24 + 50 * gl * gl - b) * gl;
+    w4uPx(img.data, (py * W + px) * 4, r, g, b);
+  }
+  c.putImageData(img, 0, 0);
+}
+// 黑色的木棍（從握的地方往下 62 公分、往上 10 公分）：有一點彎，底下細一點、沾著泥巴，握的地方被磨得比較亮
+const clkStickGeo = () => mergeParts('clkStickM', [[tubeGeo('clkStick', [[-0.62, 0.003, 0], [-0.45, -0.004, 0.003], [-0.25, 0.003, -0.002], [-0.05, 0, 0.002], [0.1, 0.002, 0]], [0.011, 0.014, 0.016, 0.0175, 0.017], 7, 14), new THREE.Matrix4()],
+  [clkSph(), mat4(-0.62, 0.003, 0, 0, 0, 0, 0.011)], [clkSph(), mat4(0.1, 0.002, 0, 0, 0, 0, 0.017)]]);
+function clkPaintStick(c, W, H) {
+  const img = c.createImageData(W, H);
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const L = (px + 0.5) / W * 0.72, an = (py + 0.5) / H * Math.PI * 2, x = Math.cos(an) * 0.016, z = Math.sin(an) * 0.016;
+    const gr = fbm3(x * 80, L * 6, z * 80, 3, 931), line = 0.5 + 0.5 * Math.sin(gr * 38), knot = sstep(0.7, 0.8, fbm3(x * 30, L * 30, z * 30, 2, 933)), n = fbm3(x * 200, L * 40, z * 200, 2, 935) - 0.5;
+    let r = 46 + n * 10, g = 34 + n * 8, b = 26 + n * 6;
+    r *= 1 - line * 0.25 - knot * 0.3; g *= 1 - line * 0.25 - knot * 0.3; b *= 1 - line * 0.22 - knot * 0.3;
+    const worn = Math.exp(-(((L - 0.62) / 0.05) ** 2)) * 0.6;   // 握的地方
+    r += (86 - r) * worn; g += (60 - g) * worn; b += (42 - b) * worn;
+    const mud = sstep(0.06, 0.0, L) * 0.7;
+    r += (84 - r) * mud; g += (68 - g) * mud; b += (46 - b) * mud;
+    w4uPx(img.data, (py * W + px) * 4, r, g, b);
+  }
+  c.putImageData(img, 0, 0);
+}
+// 蓋一個神秘店員（放進 g）。T 是材質另外的設定（圖鑑要能淡入淡出）
+function clkParts(g, T = {}) {
+  const cloak = withDetail(ownLM('#ffffff', { map: m5Tex('clkCloak', 1024, 1024, clkPaintCloak), alphaTest: 0.5, side: THREE.DoubleSide, shade: 0.7, ...T }), 'rag', 4, 0.75);
+  const skin = withDetail(ownPhong('#ffffff', { map: m5Tex('clkSkin', 512, 256, clkPaintSkin), specular: 0x1a221c, shininess: 20, shade: 0.8, ...T }), 'skin', 7, 0.9);
+  const pail = withDetail(ownPhong('#ffffff', { map: m5Tex('clkPail', 512, 256, clkPaintPail), specular: 0x4a4a4a, shininess: 26, side: THREE.DoubleSide, shade: 0.75, ...T }), 'steel', 5, 0.6);
+  const wood = withDetail(ownPhong('#ffffff', { map: m5Tex('clkStick', 256, 64, clkPaintStick), specular: 0x2a2620, shininess: 18, shade: 0.75, ...T }), 'bark', 9, 0.6);
+  const maw = withDetail(ownPhong('#ffffff', { vertexColors: true, specular: 0x4a2020, shininess: 34, side: THREE.BackSide, shade: 0.5, ...T }), 'corpse', 7, 0.8);
+  const dark = ownBasic({ color: 0x040302, ...T }), eyeM = ownBasic({ color: 0xffc23a, ...T }), coal = ownBasic({ map: m5Tex('clkCoal', 256, 256, clkPaintCoal), ...T });
+  const H = clkHands(), body = new THREE.Group(); g.add(body);
+  body.add(new THREE.Mesh(clkCloakGeo(), cloak), new THREE.Mesh(clkMawGeo(), maw));
+  // 帽兜裡一片黑：一顆黑色的頭擋在眼洞後面，上面兩點發亮的黃眼睛
+  const head = new THREE.Mesh(geo('clkVoid', () => new THREE.SphereGeometry(1, 14, 10)), dark); head.position.set(0, 1.74, 0); head.scale.set(0.19, 0.16, 0.17); body.add(head);
+  const eyes = new THREE.Group(); eyes.position.set(0, 1.668, 0.152); body.add(eyes);
+  eyes.add(new THREE.Mesh(mergeParts('clkEyes', [-1, 1].map(s => [clkSph(), mat4(s * 0.077, 0, 0, 0, 0, s * 0.25, 0.017, 0.01, 0.01)])), eyeM));
+  const glows = [-1, 1].map(s => { const sp = ownSprite(glowTex, 0xffb030); sp.position.set(s * 0.077, 0, 0.012); sp.scale.setScalar(0.075); eyes.add(sp); return sp; });
+  g.add(new THREE.Mesh(clkSkinGeo(), skin));
+  // 鐵桶（掛在握著提把的手上晃）：桶口上面一團暖暖的火光
+  const lamp = new THREE.Group(); lamp.position.copy(H.pail.grip); g.add(lamp);
+  const pg = new THREE.Group(); pg.position.y = -(CLK_BAIL + 0.133); lamp.add(pg);
+  pg.add(new THREE.Mesh(clkPailGeo(), pail), new THREE.Mesh(clkCoalGeo(), coal));
+  const grip = new THREE.Mesh(geo('clkGrip', () => new THREE.CylinderGeometry(0.012, 0.012, 0.085, 8)), wood); grip.rotation.x = Math.PI / 2; grip.position.y = CLK_BAIL + 0.133; pg.add(grip);
+  const lg = ownSprite(glowTex, 0xffb060); lg.position.y = 0.37; lg.scale.setScalar(0.55); pg.add(lg);
+  // 木棍（握在手裡，從握的地方慢慢晃）
+  const sp = new THREE.Group(); sp.position.copy(H.stick.grip); sp.quaternion.copy(H.stick.q); g.add(sp);
+  const bell = new THREE.Group(); sp.add(bell);
+  bell.add(new THREE.Mesh(clkStickGeo(), wood));
+  return { g, body, lamp, bell, lg, eyes, glows, coal, mats: [cloak, skin, pail, wood, maw, dark, eyeM, coal] };
+}
+// 遊戲裡的神秘店員（syncExtras 用）：跟舊的一樣放在場景裡、會投影子
+function clkNew() {
+  const g = new THREE.Group(); scene.add(g);
+  const c = clkParts(g);
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return c;
+}
+// 動作（跟舊的一樣）：木棍慢慢晃、鐵桶跟著晃、炭火一閃一閃；另外斗篷微微地起伏（呼吸），帽兜裡的眼睛慢慢明暗、偶爾眨一下
+function clkSync(c, t) {
+  c.bell.rotation.z = Math.sin(t * 0.9) * 0.06;
+  c.lamp.rotation.z = Math.sin(t * 1.3) * 0.08;
+  const fl = 0.7 + 0.2 * Math.sin(t * 13) * Math.sin(t * 7);
+  c.lg.material.opacity = fl;
+  c.coal.color.setScalar(Math.min(1, 0.8 + (fl - 0.7) * 1.2));
+  const br = Math.sin(t * 1.15);
+  c.body.scale.set(1 + 0.006 * br, 1 + 0.002 * br, 1 + 0.01 * br);
+  const blink = t % 4.7 < 0.13;
+  c.eyes.scale.y = blink ? 0.12 : 1;
+  for (const s of c.glows) s.material.opacity = blink ? 0.1 : 0.5 + 0.12 * Math.sin(t * 2.3);
+}
+UPG.clerk = { build(r, g) { r.clk = clkParts(g, { transparent: true }); r.mats.push(...r.clk.mats); }, sync(e, r, t) { clkSync(r.clk, t); }, view: { h: 2.05, d: 4.3, cy: 1.05 } };
 
 // ---------- 第四世界到這裡 ----------
 
