@@ -1,7 +1,7 @@
 // 在家生存 12 夜 — 離線快取
 // 第一次打開時把整個遊戲存到平板裡，之後沒有網路也能玩。
 // 每次更新遊戲都要改 VERSION，平板連上網路時就會自動下載新版本。
-const VERSION = 'home12-v31';
+const VERSION = 'home12-v32';
 const ASSETS = [
   './', './index.html', './style.css', './manifest.webmanifest', './test.html', './manifest-test.webmanifest',
   './js/version.js', './js/data.js', './js/audio.js', './js/world2.js', './js/world3.js', './js/world4.js', './js/world5.js', './js/net.js', './js/netmon.js', './js/game.js', './js/render3d.js',
@@ -19,6 +19,12 @@ const ASSETS = [
   './tex/d-skin.webp', './tex/d-birdleg.webp', './tex/d-cotton.webp', './tex/d-bone.webp', './tex/d-steel.webp', './tex/d-rag.webp', './tex/d-bark.webp',
   './tex/d-moss.webp', './tex/d-hair.webp', './tex/d-grass.webp', './tex/d-fur.webp', './tex/d-sclera.webp', './tex/d-slug.webp', './tex/d-corpse.webp',
   './tex/m-capred.webp', './tex/m-capk.webp', './tex/m-gills.webp', './tex/m-stem.webp', './tex/m-seeds.webp', './tex/m-petal.webp', './tex/m-rock.webp', './tex/m-lava.webp',
+  // 第五世界怪物預先畫好的貼圖（render3d.js 的 m5Tex，tools/make-monster5-tex.mjs 產生）
+  './tex/m5-cr.webp', './tex/m5-lk.webp', './tex/m5-dmCloud.webp', './tex/m5-dmFace.webp', './tex/m5-slShellfalse.webp', './tex/m5-slShelltrue.webp',
+  './tex/m5-slMantle.webp', './tex/m5-slHead.webp', './tex/m5-gzSkinfalse.webp', './tex/m5-gzSkintrue.webp', './tex/m5-gzHead.webp',
+  './tex/m5-gfLeaffalse.webp', './tex/m5-gfLeaftrue.webp', './tex/m5-gfFace11.webp', './tex/m5-gfFace12.webp', './tex/m5-gfFace13.webp', './tex/m5-gfFace14.webp', './tex/m5-clHead.webp',
+  './tex/m5-crSclera.webp', './tex/m5-iris26.webp', './tex/m5-iris22.webp', './tex/m5-iris30.webp', './tex/m5-lkWisp.webp', './tex/m5-dmFlesh.webp',
+  './tex/m5-gzIris.webp', './tex/m5-slIn.webp', './tex/m5-gfCore.webp', './tex/m5-clSkin.webp',
 ];
 
 self.addEventListener('install', e => {

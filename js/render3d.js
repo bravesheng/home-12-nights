@@ -3606,9 +3606,39 @@ function buildClerk4() {
 }
 // ====================================================================
 // 第五世界「世界夾層」的怪物（照設計師第五次手稿 docs/sketches/IMG_7436.jpeg 做成寫實風）：搖籃囈語、記憶洩漏源、白日夢、夢境切片、404視線、綠溫室、複製人
-// 貼圖畫一次就記住（m5Tex）：一張要算好幾百萬個像素，同一種怪物晚上再出來就不用再畫
+// 貼圖（m5Tex）有的一張要算好幾百萬個像素、有的畫幾百筆模糊的線，太慢了：預先畫好存成 tex/m5-<key>.webp（tools/make-monster5-tex.mjs），遊戲直接載入，
+// 2048×1024 的縮成 1024×512（記憶體剩四分之一）。圖檔載入好之前先用一個像素的灰色頂著；載不到才當場畫（畫完一樣縮小）。
+// 網址有 &bake5 就一律當場畫（做圖檔的工具用）。同一張貼圖只載一次，同一種怪物晚上再出來就不用再載
 const m5Texs = {};
-const m5Tex = (key, w, h, paint) => m5Texs[key] || (m5Texs[key] = canvasTex(w, h, paint, true));
+const M5_BAKE = /[?&]bake5\b/.test(location.search);
+const m5Size = (w, h) => (w >= 2048 ? [w / 2, h / 2] : [w, h]);
+function m5Paint(w, h, paint) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  paint(c.getContext('2d', { willReadFrequently: true }), w, h);
+  const [tw, th] = m5Size(w, h);
+  if (tw === w) return c;
+  const s = document.createElement('canvas'); s.width = tw; s.height = th;
+  const g = s.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(c, 0, 0, tw, th);
+  return s;
+}
+let m5Blank = null;
+function m5Tex(key, w, h, paint) {
+  if (m5Texs[key]) return m5Texs[key];
+  const t = new THREE.Texture();
+  t.colorSpace = SRGB; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
+  // 換成不一樣大的圖：GPU 上的那份要先丟掉重新配置（three.js 的貼圖配置好就不能改大小）
+  const use = im => { if (t.image && (t.image.width !== im.width || t.image.height !== im.height)) t.dispose(); t.image = im; t.needsUpdate = true; };
+  if (M5_BAKE) use(m5Paint(w, h, paint));
+  else {
+    if (!m5Blank) { m5Blank = document.createElement('canvas'); m5Blank.width = m5Blank.height = 1; const g = m5Blank.getContext('2d'); g.fillStyle = '#a89c94'; g.fillRect(0, 0, 1, 1); }
+    use(m5Blank);
+    const im = new Image();
+    im.onload = () => use(im);
+    im.onerror = () => use(m5Paint(w, h, paint));
+    im.src = `tex/m5-${key}.webp`;
+  }
+  return (m5Texs[key] = t);
+}
 // ====================================================================
 // 搖籃囈語（判官級，4.5～5.8 公尺）：一顆光禿禿、比人還大的嬰兒頭飄在半空，後腦勺長出四片淡黃色的蛾翅膀
 // （上面兩片尖端往外勾，下面兩片拖著往下的尾巴）。翅膀上長著九顆人的眼睛（照設計圖：左上 3、右上 3、左下 2、右下 1），
@@ -4078,7 +4108,7 @@ let crScleraTex, crIrisTex, crIrisWTex, lkWispTex;
 function makeMonster5Textures() {
   if (crScleraTex) return;
   // 嬰兒的眼白：乾淨、有一點藍，細細的血絲
-  crScleraTex = canvasTex(512, 256, c => {
+  crScleraTex = m5Tex('crSclera', 512, 256, c => {
     const W = 512, H = 256, cx = W / 4, cy = H / 2, img = c.createImageData(W, H);
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const lon = (x - cx) / W * Math.PI * 2, lat = (cy - y) / H * Math.PI, th = Math.acos(clamp(Math.cos(lat) * Math.cos(lon), -1, 1)), k = clamp((th - 0.5) / 1.4, 0, 1), i = (y * W + x) * 4;
@@ -4089,7 +4119,7 @@ function makeMonster5Textures() {
     drawVeins(c, cx, cy, 60, 130, 5, 8642, 0.6, W);
   }, true);
   // 虹膜：一絲一絲的放射紋、深色的外圈、很小的瞳孔（瞪著你）、反光
-  const iris = (cols, pupil) => canvasTex(256, 256, c => {
+  const iris = (cols, pupil) => m5Tex('iris' + pupil, 256, 256, c => {
     const g = c.createRadialGradient(128, 128, 18, 128, 128, 124);
     cols.forEach((col, i) => g.addColorStop(i / (cols.length - 1), col));
     c.fillStyle = g; c.beginPath(); c.arc(128, 128, 124, 0, 7); c.fill();
@@ -4103,7 +4133,7 @@ function makeMonster5Textures() {
   crIrisWTex = iris(['#4e463e', '#7a7062', '#8a8070', '#5e554a'], 22);  // 翅膀上的：灰褐色
   slIrisTex = iris(['#2a0e0b', '#5a2219', '#6e2c21', '#3a130e'], 30);    // 夢境切片：深紅褐色
   // 記憶洩漏源的細絲：淺色的細髮絲（乘上褐色），中間密、兩邊稀疏
-  lkWispTex = canvasTex(64, 256, c => {
+  lkWispTex = m5Tex('lkWisp', 64, 256, c => {
     for (let i = 0; i < 70; i++) {
       const x = 32 + (rnd() + rnd() + rnd() - 1.5) * 34, end = 150 + rnd() * 106, g = 170 + rnd() * 70 | 0;
       c.strokeStyle = `rgba(${g},${g - 6},${g - 14},${(0.6 + rnd() * 0.35).toFixed(2)})`; c.lineWidth = 1 + rnd() * 1.6;
@@ -4583,7 +4613,7 @@ function dmPaintFace(c, W, H, o = {}) {
 let dmFleshTex = null;
 function makeDmFlesh() {
   if (dmFleshTex) return;
-  dmFleshTex = canvasTex(256, 512, (c, w, h) => {
+  dmFleshTex = m5Tex('dmFlesh', 256, 512, (c, w, h) => {
     c.fillStyle = '#ecdcb6'; c.fillRect(0, 0, w, h);
     c.filter = 'blur(4px)';
     for (let i = 0; i < 120; i++) { const x = rnd() * w; c.strokeStyle = `rgba(${rnd() < 0.65 ? '228,200,70' : '214,146,108'},${(0.05 + rnd() * 0.1).toFixed(2)})`; c.lineWidth = 2 + rnd() * 7; c.beginPath(); c.moveTo(x, rnd() * h * 0.3); c.lineTo(x + (rnd() - 0.5) * 12, h * (0.5 + rnd() * 0.5)); c.stroke(); }
@@ -4774,7 +4804,7 @@ function slPaintShell(c, W, H, up) {
 let slInTex = null;
 function makeSlInTex() {
   if (slInTex) return;
-  slInTex = canvasTex(512, 256, (c, W, H) => {
+  slInTex = m5Tex('slIn', 512, 256, (c, W, H) => {
     const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#1a130f'); g.addColorStop(0.75, '#2a1f19'); g.addColorStop(0.93, '#4c3f36'); g.addColorStop(1, '#8c7e6c');
     c.fillStyle = g; c.fillRect(0, 0, W, H);
     for (let i = 0; i < 260; i++) { const x = rnd() * W, y = H * (0.5 + rnd() * 0.5), rr = 3 + rnd() * 16, gr = c.createRadialGradient(x, y, 0, x, y, rr); gr.addColorStop(0, `rgba(${rnd() < 0.5 ? '120,104,130' : '96,80,64'},.18)`); gr.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = gr; c.fillRect(x - rr, y - rr, rr * 2, rr * 2); }
@@ -5326,7 +5356,7 @@ function buildGaze(r, g) {
 let gzIris = null;
 function gzIrisTex() {
   if (gzIris) return gzIris;
-  gzIris = canvasTex(256, 256, c => {
+  gzIris = m5Tex('gzIris', 256, 256, c => {
     const g = c.createRadialGradient(128, 128, 10, 128, 128, 124);
     g.addColorStop(0, '#1a0202'); g.addColorStop(0.3, '#6a0c0a'); g.addColorStop(0.7, '#8e1612'); g.addColorStop(1, '#2a0404');
     c.fillStyle = g; c.beginPath(); c.arc(128, 128, 124, 0, 7); c.fill();
@@ -5409,7 +5439,7 @@ function gfLeafTex(inner) {
 let gfCoreTex = null;
 function makeGfCore() {
   if (gfCoreTex) return;
-  gfCoreTex = canvasTex(256, 512, (c, W, H) => {
+  gfCoreTex = m5Tex('gfCore', 256, 512, (c, W, H) => {
     c.fillStyle = '#262220'; c.fillRect(0, 0, W, H);
     c.lineCap = 'round';
     for (let i = 0; i < 700; i++) { const x = rnd() * W, y = rnd() * H, l = 20 + rnd() * 120; c.strokeStyle = `rgba(${rnd() < 0.5 ? '70,62,56' : '8,6,6'},${(0.2 + rnd() * 0.4).toFixed(2)})`; c.lineWidth = 0.8 + rnd() * 2.2; c.beginPath(); c.moveTo(x, y); c.bezierCurveTo(x + (rnd() - 0.5) * 10, y + l * 0.3, x + (rnd() - 0.5) * 10, y + l * 0.7, x + (rnd() - 0.5) * 8, y + l); c.stroke(); }
@@ -5535,7 +5565,7 @@ function clBodyGeo() {
 let clSkinTex = null;
 function makeClSkin() {
   if (clSkinTex) return;
-  clSkinTex = canvasTex(512, 512, (c, W, H) => {
+  clSkinTex = m5Tex('clSkin', 512, 512, (c, W, H) => {
     c.fillStyle = '#c8939e'; c.fillRect(0, 0, W, H);
     for (let i = 0; i < 500; i++) { const x = rnd() * W, y = rnd() * H, rr = 10 + rnd() * 50, g = c.createRadialGradient(x, y, 0, x, y, rr), col = rnd() < 0.45 ? '206,120,128' : rnd() < 0.5 ? '160,128,168' : '226,196,198'; g.addColorStop(0, `rgba(${col},${(0.08 + rnd() * 0.1).toFixed(2)})`); g.addColorStop(1, `rgba(${col},0)`); c.fillStyle = g; c.fillRect(x - rr, y - rr, rr * 2, rr * 2); }
     c.lineCap = 'round'; c.filter = 'blur(1.5px)';
@@ -10534,6 +10564,14 @@ function warmMonsters5(t) {
   const r = buildEnemy({ kind: WARM5[warm5i++], x: 0, y: 0, wob: 0 });
   disposeGroup(r.g);
 }
+// tools/make-monster5-tex.mjs（網址有 &bake5）：7 隻都蓋一次、當場畫貼圖，把每張貼圖壓成 WebP 傳回去，存成 tex/m5-<key>.webp；
+// 沒有 &bake5 時只傳回每隻蓋多久（量卡頓用）
+function bake5() {
+  const ms = {};
+  for (const kind of WARM5) { const t0 = performance.now(); disposeGroup(buildEnemy({ kind, x: 0, y: 0, wob: 0 }).g); ms[kind] = Math.round(performance.now() - t0); }
+  const tex = !M5_BAKE ? [] : Object.entries(m5Texs).map(([key, t]) => ({ key, w: t.image.width, h: t.image.height, url: t.image.toDataURL('image/webp', 0.9) }));
+  return { ms, tex };
+}
 function syncMeadow5(t, dark) {
   warmMonsters5(t);
   const k = clamp(dark / NIGHT_DARK, 0, 1);
@@ -11037,7 +11075,7 @@ function init() {
   buildExtras();
   glowPts = makePoints(0.07, THREE.AdditiveBlending);
   smokePts = makePoints(0.3, THREE.NormalBlending);
-  window.Renderer = { render, resize, setWorld, furn4: furnChanged4, tree5: setTree5, dbg: () => ({ scene, camera, THREE }), book: { ok: bookOk, show: bookShow, stats: book.stats, aim: o => { book.aim = o; } }, pax: paxStats, friends: friendStats, photos: () => ({ loaded: Object.keys(photos), total: PHOTO_TEX.length }) };
+  window.Renderer = { render, resize, setWorld, furn4: furnChanged4, tree5: setTree5, dbg: () => ({ scene, camera, THREE }), book: { ok: bookOk, show: bookShow, stats: book.stats, aim: o => { book.aim = o; } }, pax: paxStats, friends: friendStats, photos: () => ({ loaded: Object.keys(photos), total: PHOTO_TEX.length }), bake5, m5: () => Object.fromEntries(Object.entries(m5Texs).map(([k, t]) => [k, t.image && t.image.tagName === 'IMG' ? 'file' : t.image === m5Blank ? 'wait' : 'paint'])) };
   resize();
 }
 loadPhotos().then(init);   // 照片貼圖載入好才開始（最多等 5 秒）
