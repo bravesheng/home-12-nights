@@ -6733,9 +6733,9 @@ const MIM_BODY = (() => {
   return R;
 })();
 const mimTorsoGeo = () => loftGeo('mimTorso', MIM_BODY, { seg: 20, sub: 1, capA: 0.03, bumps: [{ a: 0.75, w: 0.3, sym: true }, { a: 0.55, w: 0.45, sym: true }, { a: Math.PI, w: 0.22 }, { a: 0, w: 0.16 }, { a: 1.0, w: 0.75, sym: true }], uv: [0, 1, 1, 0] });
-// 身體貼圖上的一點 (u, v) → 身體表面的位置（照放樣出來的網格內插）
-function mimTorsoAt(u, v, out) {
-  const g = mimTorsoGeo(), P = g.attributes.position, UV = g.attributes.uv, N = 20, C1 = N + 1, R = P.count / C1;
+// 放樣（loftGeo，seg = N）貼圖上的一點 (u, v) → 表面的位置（照網格內插），逐點畫貼圖時用來取 3D 雜訊
+function w4uLoftAt(g, N, u, v, out) {
+  const P = g.attributes.position, UV = g.attributes.uv, C1 = N + 1, R = P.count / C1;
   let lo = 0, hi = R - 1;
   const vy = i => UV.getY(i * C1);
   const up = vy(R - 1) > vy(0);
@@ -6745,6 +6745,7 @@ function mimTorsoAt(u, v, out) {
   const a = at(lo, j0), b = at(lo, j0 + 1), cc = at(hi, j0), d = at(hi, j0 + 1);
   return out.set(...[0, 1, 2].map(k => (a[k] * (1 - g2) + b[k] * g2) * (1 - f) + (cc[k] * (1 - g2) + d[k] * g2) * f));
 }
+const mimTorsoAt = (u, v, out) => w4uLoftAt(mimTorsoGeo(), 20, u, v, out);
 // 從嘴巴流到胸口的涎液（身體正面）：[u（0.5 是正面中間）, 流到多高（髖關節是 0）, 寬, 相位]
 const MIM_CHEST = [[0.49, 0.32, 0.012, 0], [0.515, 0.44, 0.015, 1.5], [0.502, 0.22, 0.01, 2.7], [0.47, 0.52, 0.009, 4.1]];
 function mimPaintTorso(c, W, H, spec) {
@@ -6930,6 +6931,252 @@ function mimSync(e, r, t, p, dt) {
   r.g.position.y = floorH(e.x, e.y);
 }
 UPG.mimic = { build: mimBuild, sync: mimSync, view: { h: 2.15, d: 4.0, cy: 1.05 } };
+
+// ---------- SCP-3008-2（店員） ----------
+// 照設計圖（IMG_7429）和設計師說的「要跟我畫的一樣，不要亂改」：2.15 公尺高、頭很大、身體方方的店員。
+// 臉是一張骨白色、像骷髏一樣的長臉：兩個又大又深的黑眼窩、鼻子只剩一個黑洞、凸出來的顴骨，乾裂的紅嘴唇中間露出一排牙齒；
+// 沒有肉的脖子是一節一節的脊椎；黃底粗紫直條紋的短袖制服（洗舊的棉布、皺褶、污漬）、胸前綠色的「3008」名牌（塑膠會反光），
+// 白色的手臂、藍色的長褲、白色的球鞋
+const STF_HEAD = { y: 2.0, z: 0.025, rx: 0.148, ry: 0.215, rz: 0.158 };   // 照設計圖：頭很大
+const STF_FACE = [
+  [0, 0.62, 0.6, 0.25, 0.03, 0],         // 額頭
+  [0.3, 0.52, 0.25, 0.07, 0.05, 1],      // 眉骨
+  [0.3, 0.3, 0.235, 0.215, -0.4, 1],     // 眼窩（又大又深）
+  [0, 0.03, 0.06, 0.1, -0.2, 0],         // 鼻子的洞
+  [0.035, -0.01, 0.04, 0.07, -0.08, 1],  // 鼻洞的兩邊（倒過來的心形）
+  [0, 0.17, 0.05, 0.08, 0.03, 0],        // 鼻樑
+  [0.52, 0.04, 0.15, 0.11, 0.07, 1],     // 顴骨
+  [0.42, -0.28, 0.16, 0.15, -0.08, 1],   // 凹下去的臉頰
+  [0.82, 0.3, 0.14, 0.24, -0.05, 1],     // 太陽穴
+  [0, -0.86, 0.22, 0.1, 0.04, 0],        // 下巴
+];
+// 嘴：寬寬的，上唇中間凹下去（M 形）、下唇厚，兩片嘴唇中間一條縫露出牙齒。回傳這一點在上唇、下唇、牙齒的哪裡
+const STF_MOUTH = { y: -0.44, w: 0.68 };
+function stfMouth(x, y) {
+  const M = STF_MOUTH, u = x / M.w, k = Math.max(0, 1 - u * u);
+  const top = M.y + 0.13 * k ** 0.6 - 0.035 * Math.exp(-((x / 0.08) ** 2)), m1 = M.y + 0.03 * k, m2 = M.y - 0.04 * k, bot = M.y - 0.17 * k ** 0.7;
+  const up = y <= top && y >= m1 && k > 0 ? (y - m1) / Math.max(1e-4, top - m1) : -1, lo = y <= m2 && y >= bot && k > 0 ? (m2 - y) / Math.max(1e-4, m2 - bot) : -1;
+  return { up, lo, gap: k > 0 && y < m1 && y > m2 ? 1 : 0, k, top, bot };
+}
+function stfHeadD(x, y, z) {
+  if (z <= 0.02) return 0;
+  let d = 0;
+  for (const f of STF_FACE) for (const s of f[5] ? [-1, 1] : [1]) { const u = (x - s * f[0]) / f[2], v = (y - f[1]) / f[3]; if (u * u + v * v < 16) d += f[4] * Math.exp(-u * u - v * v); }
+  const m = stfMouth(x, y), edge = sstep(0, 0.25, m.k);
+  if (m.up >= 0) d += 0.055 * Math.sin(Math.PI * m.up) ** 0.7 * edge;
+  if (m.lo >= 0) d += 0.07 * Math.sin(Math.PI * m.lo) ** 0.6 * edge;
+  if (m.gap) d -= 0.012 * edge;
+  return d * sstep(0.02, 0.35, z);
+}
+function stfHeadPt(x, y, z, out) {
+  let X = x, Y = y, Z = z;
+  if (Y < 0) { const t = -Y; X *= 1 - 0.26 * t * t; Z *= Z > 0 ? 1 - 0.05 * t * t : 1 - 0.3 * t * t; }   // 長長的臉，下巴窄一點
+  if (Z < 0) Z *= 1.08;
+  const k = 1 + stfHeadD(x, y, z) / (Math.hypot(X, Y, Z) || 1);
+  return out.set(X * k * STF_HEAD.rx, Y * k * STF_HEAD.ry, Z * k * STF_HEAD.rz);
+}
+const stfU = crWarp(-Math.PI, Math.PI, a => 1 + 1.4 * Math.exp(-((a / 0.8) ** 2))), stfV = crWarp(0, Math.PI, th => 1 + 1.3 * Math.exp(-(((th - 1.6) / 0.7) ** 2)));
+const stfHeadGeo = () => sculptGeo('stfHead', stfHeadPt, stfU, stfV, th => sstep(0.75, 0.9, th) * (1 - sstep(2.55, 2.7, th)), a => sstep(-1.0, -0.85, a) * (1 - sstep(0.85, 1.0, a)), [0.074, 0.08], [0.17, 0.18]);   // 店員晚上會有好幾隻，格子不要太密
+// 骨白色的臉：象牙白、一點點發黃，細細的毛細裂紋，凹下去的地方暗；眼窩和鼻洞黑漆漆的；乾裂的紅嘴唇、牙齒
+function stfPaintHead(c, W, H) {
+  const img = c.createImageData(W, H), v = new THREE.Vector3();
+  for (let py = 0; py < H; py++) {
+    const th = stfV.inv((py + 0.5) / H), st = Math.sin(th), y = Math.cos(th);
+    for (let px = 0; px < W; px++) {
+      const a = stfU.inv((px + 0.5) / W), x = st * Math.sin(a), z = st * Math.cos(a), i = (py * W + px) * 4;
+      stfHeadPt(x, y, z, v);
+      const n = fbm3(v.x * 18, v.y * 18, v.z * 18, 4, 31) - 0.5, n2 = fbm3(v.x * 90, v.y * 90, v.z * 90, 2, 33) - 0.5;
+      const [f1, f2] = w4uCell(v.x * 22 + n, v.y * 22, v.z * 22 + n, 35), crack = (1 - sstep(0.004, 0.025, f2 - f1)) * sstep(0.55, 0.7, fbm3(v.x * 9, v.y * 9, v.z * 9, 3, 37)) * 0.35;
+      let r = 232 + n * 22 + n2 * 8, g = 225 + n * 22 + n2 * 8, b = 205 + n * 26 + n2 * 8;
+      r *= 1 - crack; g *= 1 - crack; b *= 1 - crack * 0.9;
+      const d = stfHeadD(x, y, z), ao = clamp(-d * 2.2, 0, 0.6);
+      r *= 1 - ao; g *= 1 - ao * 1.05; b *= 1 - ao * 1.12;
+      if (z > 0) {
+        // 眼窩、鼻洞：黑漆漆的
+        for (const s of [-1, 1]) {
+          const q = Math.hypot((x - s * 0.3) / 0.24, (y - 0.3) / 0.22), k = 1 - sstep(0.78, 1.0, q + n * 0.1), rim = Math.exp(-(((q - 1.05) / 0.12) ** 2)) * 0.3;
+          r *= 1 - rim; g *= 1 - rim; b *= 1 - rim; r += (8 - r) * k; g += (7 - g) * k; b += (7 - b) * k;
+        }
+        { const q = Math.hypot(x / 0.075, (y - 0.02) / 0.1), k = 1 - sstep(0.5, 1.0, q); r += (14 - r) * k; g += (11 - g) * k; b += (11 - b) * k; }
+        const m = stfMouth(x, y);
+        if (m.up >= 0 || m.lo >= 0) {
+          const t = m.up >= 0 ? m.up : m.lo, cn = fbm3(x * 40, y * 40, 2.2, 3, 39), cr = (1 - sstep(0.03, 0.3, Math.abs(Math.sin((x * 55 + cn * 4) * Math.PI)))) * 0.5 * sstep(0.1, 0.35, t) * (0.4 + cn);
+          const hi = Math.exp(-(((t - 0.58) / 0.16) ** 2)) * 0.12 * (1 - cr), e = sstep(0, 0.22, Math.min(t, 1 - t) + (cn - 0.5) * 0.12) * sstep(0, 0.12, m.k);   // 乾裂：一道一道直的裂紋，邊緣不整齊
+          let lr = 150 + n * 34 + (cn - 0.5) * 30, lg = 24 + n * 8, lb = 30 + n * 8;
+          lr *= 1 - cr + hi; lg *= 1 - cr + hi * 2; lb *= 1 - cr + hi * 2;
+          if (t < 0.2) { lr *= 0.7; lg *= 0.7; lb *= 0.7; }   // 嘴縫那邊暗一點
+          r += (lr - r) * e; g += (lg - g) * e; b += (lb - b) * e;
+        } else if (m.gap) {
+          // 一排牙齒：一顆一顆中間亮、邊緣暗，牙縫黑黑的
+          const tw = 0.1, tx = (x + STF_MOUTH.w + 0.02) / tw, f = tx - Math.floor(tx), sh = 1 - Math.abs(f - 0.5) * 2, mid = (M2 => Math.exp(-(((y - M2) / 0.006) ** 2)))(STF_MOUTH.y - 0.005 * m.k);
+          const k = sstep(0.0, 0.22, sh) * sstep(0.1, 0.35, m.k) * (1 - 0.7 * mid), tr = 212 + n * 24 - (1 - sh) * 30, tg = 203 + n * 24 - (1 - sh) * 30, tb = 176 + n * 24 - (1 - sh) * 30;
+          r = 40 + (tr - 40) * k; g = 32 + (tg - 32) * k; b = 28 + (tb - 28) * k;
+        }
+      }
+      w4uPx(img.data, i, r, g, b);
+    }
+  }
+  c.putImageData(img, 0, 0);
+}
+// 制服上衣：下擺（蓋住褲頭）→ 微微的小肚子 → 胸 → 方方的肩膀 → 圓領（前面比後面低）
+const STF_SHIRT = [
+  { y: 0.93, w: 0.212, f: 0.13, b: 0.138, wv: 0.004 }, { y: 0.96, w: 0.21, f: 0.128, b: 0.136, wv: 0.003 }, { y: 1.05, w: 0.204, f: 0.126, b: 0.13, wv: 0.0015 },
+  { y: 1.18, w: 0.21, f: 0.132, b: 0.127 }, { y: 1.32, w: 0.222, f: 0.131, b: 0.127 }, { y: 1.44, w: 0.23, f: 0.128, b: 0.13 },
+  { y: 1.53, w: 0.238, f: 0.115, b: 0.12, p: 0.9 }, { y: 1.6, w: 0.214, f: 0.095, b: 0.1, p: 0.86, ty: -0.01 }, { y: 1.645, w: 0.15, f: 0.075, b: 0.085, ty: -0.015 },
+  { y: 1.668, w: 0.072, f: 0.064, b: 0.07, ty: -0.02, n: 'collar' }, { y: 1.676, w: 0.066, f: 0.059, b: 0.064, ty: -0.02 }, { y: 1.665, w: 0.06, f: 0.053, b: 0.058, ty: -0.02 },
+];
+const stfShirtGeo = () => loftGeo('stfShirt', STF_SHIRT, { seg: 28, sub: 2, uv: [0, 1, 1, 0] });
+// 褲子的腰和屁股（藏在上衣下面）、兩條褲管
+const stfHipGeo = () => loftGeo('stfHip', [{ y: 0.78, w: 0.09, d: 0.08 }, { y: 0.82, w: 0.17, f: 0.11, b: 0.122 }, { y: 0.9, w: 0.196, f: 0.118, b: 0.13 }, { y: 1.0, w: 0.198, f: 0.12, b: 0.128 }], { seg: 20, sub: 2, capA: 0.02 });
+// 黃色的棉布、一條一條粗的紫色直條紋（照設計圖），洗舊的顏色、皺褶、污漬，兩側和肩膀的縫線、下擺的車線、羅紋的圓領
+function stfFabric(p, stripe, seed) {
+  const n = fbm3(p.x * 8, p.y * 3, p.z * 8, 4, seed) - 0.5, weave = fbm3(p.x * 260, p.y * 260, p.z * 260, 2, seed + 3) - 0.5;
+  const wr = fbm3(p.x * 6, p.y * 16, p.z * 6, 3, seed + 5) - 0.5, stain = sstep(0.66, 0.78, fbm3(p.x * 5 + 7, p.y * 5, p.z * 5, 4, seed + 7));
+  let r = 226, g = 170, b = 38;
+  if (stripe) { r = 112; g = 52; b = 150; }
+  const k = 1 + n * 0.12 + weave * 0.08 + wr * 0.16;
+  r *= k; g *= k; b *= k * (stripe ? 1 : 0.9);
+  r += (150 - r) * stain * 0.3; g += (118 - g) * stain * 0.3; b += (60 - b) * stain * 0.3;
+  return [r, g, b];
+}
+function stfPaintShirt(c, W, H) {
+  const img = c.createImageData(W, H), p = new THREE.Vector3(), g = stfShirtGeo();
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const u = (px + 0.5) / W, v = 1 - (py + 0.5) / H;
+    w4uLoftAt(g, 28, u, v, p);
+    const side = Math.abs(Math.sin(u * Math.PI * 2)) > 0.92, sc = side ? p.z : p.x;   // 前後片照 x、兩側照 z：條紋直直地一路到肩膀
+    const f = ((sc / 0.115 + 0.35) % 1 + 1) % 1, stripe = f < 0.32 + (fbm3(p.x * 30, p.y * 30, p.z * 30, 2, 41) - 0.5) * 0.04;
+    const col = stfFabric(p, stripe, 43);
+    let sh = 0;
+    for (const su of [0.25, 0.75]) sh += Math.exp(-(((u - su) * 1.3 / 0.006) ** 2)) * 0.25;          // 兩側的縫線
+    sh += Math.exp(-(((p.y - 1.6) / 0.004) ** 2)) * 0.2 + Math.exp(-(((p.y - 0.95) / 0.003) ** 2)) * 0.25; // 肩膀的縫線、下擺的車線
+    sh += Math.exp(-(((p.y - 1.08) / 0.03) ** 2)) * 0.12 * (0.5 + fbm3(p.x * 20, 1, p.z * 20, 2, 45));       // 腰上擠出來的皺褶
+    sh += (1 - sstep(0.92, 0.99, p.y)) * 0.15;                                                              // 下擺髒髒的
+    if (p.y > 1.648) { const rib = Math.max(0, Math.sin(u * 340)) * 0.18; sh += 0.1 + rib; }              // 羅紋的圓領
+    w4uPx(img.data, (py * W + px) * 4, col[0] * (1 - sh), col[1] * (1 - sh), col[2] * (1 - sh));
+  }
+  c.putImageData(img, 0, 0);
+}
+// 袖子（管子：x 沿著袖子、y 繞一圈）：條紋順著袖子，袖口反摺的地方有一圈車線
+function stfPaintSleeve(c, W, H) {
+  const img = c.createImageData(W, H), p = new THREE.Vector3();
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const along = (px + 0.5) / W, a = (py + 0.5) / H * Math.PI * 2;
+    p.set(Math.cos(a) * 0.075, 1.5 - along * 0.25, Math.sin(a) * 0.075);
+    const col = stfFabric(p, ((py + 0.5) / H * 5 + 0.1) % 1 < 0.3, 47);
+    const sh = Math.exp(-(((along - 0.86) / 0.012) ** 2)) * 0.3 + sstep(0.88, 1, along) * 0.12 + Math.exp(-((along / 0.03) ** 2)) * 0.2;
+    w4uPx(img.data, (py * W + px) * 4, col[0] * (1 - sh), col[1] * (1 - sh), col[2] * (1 - sh));
+  }
+  c.putImageData(img, 0, 0);
+}
+// 藍色的長褲：斜紋的棉布、洗舊的地方淺一點，膝蓋和褲腳的皺褶（管子：x 沿著褲管）
+function stfPaintPants(c, W, H) {
+  const img = c.createImageData(W, H), p = new THREE.Vector3();
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const along = (px + 0.5) / W, a = (py + 0.5) / H * Math.PI * 2;
+    p.set(Math.cos(a) * 0.08, along * 0.8, Math.sin(a) * 0.08);
+    const n = fbm3(p.x * 9, p.y * 4, p.z * 9, 4, 51) - 0.5, tw = Math.sin((px + py) * 1.6) * 0.04, wear = sstep(0.55, 0.8, fbm3(p.x * 6, p.y * 6, p.z * 6, 3, 53)) * 0.18;
+    const crease = Math.exp(-(((along - 0.5) / 0.04) ** 2)) * 0.12 * Math.max(0, Math.sin(a * 3 + 1)) + sstep(0.85, 1, along) * 0.1 * Math.max(0, Math.sin(a * 4 + along * 30));
+    const k = 1 + n * 0.16 + tw - crease + wear;
+    w4uPx(img.data, (py * W + px) * 4, 40 * k + wear * 40, 62 * k + wear * 40, 160 * k + wear * 30);
+  }
+  c.putImageData(img, 0, 0);
+}
+// 名牌：綠色的橢圓、中間一塊黃底寫著「3008」
+function stfPaintBadge(c, W, H) {
+  c.fillStyle = '#2c8a3a'; c.fillRect(0, 0, W, H);
+  c.fillStyle = '#1e6a2a'; c.beginPath(); c.arc(W / 2, H / 2, W * 0.48, 0, 7); c.fill();
+  c.fillStyle = '#3aa04a'; c.beginPath(); c.arc(W / 2, H / 2, W * 0.44, 0, 7); c.fill();
+  c.fillStyle = '#e8c83a'; c.beginPath(); c.ellipse(W / 2, H / 2, W * 0.32, H * 0.15, 0, 0, 7); c.fill();
+  c.fillStyle = '#1e3a8a'; c.font = `bold ${H * 0.2 | 0}px sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('3008', W / 2, H / 2 + 1, W * 0.55);
+}
+// 脖子：五節脊椎（椎體、往後的棘突、兩邊的橫突），合成一個網格
+function stfNeckGeo() {
+  const sp = geo('stfVert', () => new THREE.SphereGeometry(1, 9, 5)), knob = geo('stfKnob', () => new THREE.SphereGeometry(1, 5, 3)), cone = geo('stfSpine', () => new THREE.ConeGeometry(1, 1, 4, 1)), parts = [];
+  for (let i = 0; i < 5; i++) {
+    const y = 1.645 + i * 0.037, k = 1 - i * 0.04;
+    parts.push([sp, mat4(0, y, -0.004, 0, 0, 0, 0.031 * k, 0.015, 0.027 * k)], [cone, mat4(0, y - 0.004, -0.04, -Math.PI / 2 - 0.35, 0, 0, 0.007, 0.034, 0.007)],
+      [knob, mat4(0.03 * k, y, -0.012, 0, 0, 0, 0.011, 0.007, 0.008)], [knob, mat4(-0.03 * k, y, -0.012, 0, 0, 0, 0.011, 0.007, 0.008)]);
+  }
+  for (let i = 0; i < 4; i++) parts.push([knob, mat4(0, 1.663 + i * 0.037, -0.004, 0, 0, 0, 0.021, 0.006, 0.018)]);   // 椎體之間的椎間盤
+  return mergeParts('stfNeck', parts);
+}
+// 手臂（右手 s = 1 往 +x）：從短袖裡伸出來、白白的，手肘、手腕，手指微微彎著
+function stfArmGeo(s) {
+  const P = [[s * 0.012, -0.1, 0], [s * 0.022, -0.3, 0.005], [s * 0.03, -0.4, 0.01], [s * 0.034, -0.52, 0.025], [s * 0.036, -0.6, 0.035]], w = P[P.length - 1];
+  const parts = [[tubeGeo('stfArm' + s, P, [0.047, 0.04, 0.037, 0.031, 0.027], 8, 10), new THREE.Matrix4()], [geo('stfPalm', () => new THREE.SphereGeometry(1, 8, 6)), mat4(w[0], w[1] - 0.045, w[2] + 0.004, 0.1, 0, 0, 0.032, 0.05, 0.016)]];
+  for (let i = 0; i < 5; i++) {
+    const th = i === 4, L = th ? 0.06 : [0.085, 0.095, 0.09, 0.075][i];
+    const f = tubeGeo('stfFinger' + i, [[0, 0, 0], [0, -L * 0.4, 0.008], [0, -L * 0.75, 0.022], [0, -L, 0.04]], [0.0095, 0.0088, 0.0078, 0.006], 5, 6);
+    parts.push([f, mat4(w[0] + s * (th ? 0.03 : -0.022 + i * 0.015), w[1] - (th ? 0.035 : 0.085), w[2] + (th ? 0.02 : 0.006), th ? 0.35 : 0.2, 0, s * (th ? 0.5 : -0.04 + i * 0.03))]);
+  }
+  return mergeParts('stfArmH' + s, parts);
+}
+// 白色的球鞋：鞋頭圓圓的、往上翹一點，灰色的鞋底（頂點顏色）
+function stfShoeGeo() {
+  return geo('stfShoe', () => {
+    const g = sculptGeo('stfShoeS', (x, y, z, out) => {
+      const Y = y < 0 ? -0.55 - 0.45 * sstep(-0.3, -1, y) : y, toe = sstep(0, 1, z);
+      return out.set(x * 0.056 * (1 + 0.12 * z), (Y < -0.55 ? -0.042 : Y * 0.07 * (1 - 0.4 * toe)) + 0.042 + (z > 0.7 ? (z - 0.7) * 0.03 : 0), z * 0.145 + 0.035);
+    }, a => a / (Math.PI * 2) + 0.5, th => th / Math.PI, () => 0, () => 0, [0.3, 0.3], [0.3, 0.33]).clone();
+    const P = g.attributes.position, col = [];
+    for (let i = 0; i < P.count; i++) { const y = P.getY(i), k = y < 0.022 ? 0.58 : y < 0.032 ? 0.82 : 0.96; col.push(k, k, k * 0.98); }
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    return g;
+  });
+}
+function stfBuild(r, g) {
+  const T = { transparent: true };
+  const head = withDetail(ownPhong('#ffffff', { map: m5Tex('stfHead', 1024, 512, stfPaintHead), specular: 0x2a2622, shininess: 22, shade: 0.8, ...T }), 'bone', 7, 0.55);
+  head.map.wrapS = THREE.ClampToEdgeWrapping;
+  const bone = withDetail(ownLM('#e4dac2', { shade: 0.8, ...T }), 'bone', 9, 0.9);
+  const shirt = withDetail(ownLM('#ffffff', { map: m5Tex('stfShirt', 512, 512, stfPaintShirt), shade: 0.8, ...T }), 'cotton', 6, 0.7);
+  const sleeve = withDetail(ownLM('#ffffff', { map: m5Tex('stfSleeve', 256, 128, stfPaintSleeve), shade: 0.8, ...T }), 'cotton', 6, 0.7);
+  const pants = withDetail(ownLM('#ffffff', { map: m5Tex('stfPants', 256, 256, stfPaintPants), shade: 0.8, ...T }), 'cotton', 7, 0.8);
+  const skin = withDetail(ownLM('#ebe3d3', { shade: 0.8, ...T }), 'skin', 7, 0.9);
+  const shoe = withDetail(ownPhong('#ffffff', { vertexColors: true, specular: 0x222222, shininess: 16, shade: 0.75, ...T }), 'cotton', 12, 0.5);
+  const badge = ownPhong('#ffffff', { map: m5Tex('stfBadge', 128, 128, stfPaintBadge), specular: 0x444444, shininess: 50, shade: 0.6, ...T });
+  r.mats.push(head, bone, shirt, sleeve, pants, skin, shoe, badge);
+  r.body = new THREE.Group(); g.add(r.body);
+  r.body.add(new THREE.Mesh(stfShirtGeo(), shirt), new THREE.Mesh(stfHipGeo(), pants), new THREE.Mesh(stfNeckGeo(), bone));
+  // 胸前的名牌（往外凸一點、貼著上衣）
+  const bd = new THREE.Mesh(geo('stfBadgeG', () => new THREE.CylinderGeometry(1, 1, 1, 20)), badge);
+  bd.position.set(0.1, 1.39, 0.137); bd.rotation.set(Math.PI / 2 - 0.08, 0, 0); bd.scale.set(0.058, 0.005, 0.032); r.body.add(bd);
+  r.legs = [];
+  for (const s of [-1, 1]) {
+    const leg = new THREE.Group(); leg.position.set(s * 0.095, 0.86, 0); r.body.add(leg);
+    leg.add(new THREE.Mesh(tubeGeo('stfLeg', [[0, 0.03, 0], [0, -0.25, 0.006], [0, -0.48, 0.012], [0, -0.66, 0.004], [0, -0.79, 0]], [0.09, 0.083, 0.078, 0.076, 0.08], 10, 10), pants));
+    const sh = new THREE.Mesh(stfShoeGeo(), shoe); sh.position.set(0, -0.86, -0.02); leg.add(sh);
+    r.legs.push(leg);
+  }
+  r.head = new THREE.Group(); r.head.position.set(0, STF_HEAD.y, STF_HEAD.z); r.body.add(r.head);
+  r.head.add(new THREE.Mesh(stfHeadGeo(), head));
+  r.arms = [];
+  for (const s of [-1, 1]) {
+    const a = new THREE.Group(); a.position.set(s * 0.25, 1.53, 0); a.rotation.z = s * 0.07; r.body.add(a);   // 照設計圖：手臂離身體一點點
+    a.add(new THREE.Mesh(tubeGeo('stfSleeve' + s, [[-s * 0.06, 0.05, 0], [-s * 0.01, -0.01, 0], [s * 0.012, -0.1, 0], [s * 0.022, -0.2, 0], [s * 0.026, -0.25, 0]], [0.06, 0.078, 0.078, 0.074, 0.077], 10, 8), sleeve));
+    a.add(new THREE.Mesh(stfArmGeo(s), skin));
+    r.arms.push(a);
+  }
+}
+function stfSync(e, r, t, p, dt) {
+  const mv = moveSpeed4(e, r, dt), walk = clamp(mv / 1.4, 0, 1.4);
+  r.wph = (r.wph || 0) + dt * mv * 3.4;
+  const w = r.wph;
+  if (e.state !== 'chase' || e.idle) r.g.rotation.y = faceRot(e.face || 0);
+  r.legs[0].rotation.x = Math.sin(w) * 0.5 * walk; r.legs[1].rotation.x = -Math.sin(w) * 0.5 * walk;
+  const punch = e.cd > 1.1 ? (e.cd - 1.1) / 0.5 : 0;
+  r.arms[0].rotation.x = -Math.sin(w) * 0.3 * walk;
+  r.arms[1].rotation.x = Math.sin(w) * 0.3 * walk - punch * 1.6;
+  r.body.position.y = Math.abs(Math.sin(w)) * 0.04 * walk;
+  r.body.rotation.x = e.state === 'chase' ? 0.1 : 0;
+  // 頭：白天你靠近時慢慢轉過來看你（轉得比人能轉的還多）
+  const hy = e.look != null ? clamp(wrapA(faceRot(e.look) - r.g.rotation.y), -2.3, 2.3) : 0;
+  r.head.rotation.y += (hy - r.head.rotation.y) * Math.min(1, dt * 1.1);
+  r.head.rotation.z = Math.sin(t * 0.7 + (e.x || 0)) * 0.05 + (e.look != null ? 0.2 : 0);
+  r.g.position.y = floorH(e.x, e.y);
+}
+UPG.staff = { build: stfBuild, sync: stfSync, view: { h: 2.2, d: 4.3, cy: 1.1 } };
 
 // ---------- 第四世界到這裡 ----------
 
