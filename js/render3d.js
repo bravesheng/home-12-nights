@@ -6097,7 +6097,7 @@ function shHeadPt(x, y, z, out) {
   return out.set(X * k * SH_HEAD.rx, Y * k * SH_HEAD.ry, Z * k * SH_HEAD.rz);
 }
 const shU = crWarp(-Math.PI, Math.PI, a => 1 + 1.2 * Math.exp(-((a / 0.8) ** 2))), shV = crWarp(0, Math.PI, th => 1 + 1.0 * Math.exp(-(((th - 1.5) / 0.6) ** 2)));
-const shHeadGeo = () => sculptGeo('shHead', shHeadPt, shU, shV, th => sstep(0.85, 1.0, th) * (1 - sstep(2.2, 2.4, th)), a => sstep(-1.0, -0.85, a) * (1 - sstep(0.85, 1.0, a)), [0.024, 0.028], [0.07, 0.08]);
+const shHeadGeo = () => sculptGeo('shHead', shHeadPt, shU, shV, th => sstep(0.85, 1.0, th) * (1 - sstep(2.2, 2.4, th)), a => sstep(-1.0, -0.85, a) * (1 - sstep(0.85, 1.0, a)), [0.05, 0.055], [0.13, 0.14]);   // 五官都是大範圍的起伏，格子不用很密（一隻黑影常常好幾隻一起出來）
 // 身體：脖子往下到散開的煙（往前駝，肩膀在脖子後面一點）；SH_SHELL 是外面那層薄薄的煙（大一圈）
 const SH_BODY = [
   { y: 0.08, w: 0.03, d: 0.03, x: 0.05, z: -0.12 }, { y: 0.28, w: 0.075, d: 0.065, x: 0.025, z: -0.09 }, { y: 0.52, w: 0.13, d: 0.1, z: -0.06 },
@@ -6205,7 +6205,7 @@ function buildShadow(r, g) {
   r.body = new THREE.Group(); g.add(r.body);
   r.body.add(new THREE.Mesh(loftGeo('shBody', SH_BODY, { seg: 26, sub: 4, capA: 0.04, capB: 0.02, uv: [0, 1, 1, 0] }), body));
   // 外面那層薄薄的煙：不寫深度、慢慢轉，邊緣看起來一直在飄（透明度在 syncShadow 照怪物的透明度算）
-  r.shellM = ownBasic({ map: m5Tex('shShell', 256, 512, shPaintShell), transparent: true, depthWrite: false, side: THREE.DoubleSide });
+  r.shellM = ownBasic({ map: m5Tex('shShell', 256, 512, shPaintShell), transparent: true, depthWrite: false });
   r.shell = new THREE.Mesh(loftGeo('shShell', SH_SHELL, { seg: 22, sub: 3, uv: [0, 1, 1, 0] }), r.shellM); r.body.add(r.shell);
   // 頭和眼睛（眼睛縮在眼窩最裡面：黑黑亮亮的眼球、紅色的瞳孔、往外透的紅光）
   r.head = new THREE.Group(); r.head.position.set(SH_HEAD.x, SH_HEAD.y, SH_HEAD.z); r.body.add(r.head);
@@ -6233,7 +6233,7 @@ function buildShadow(r, g) {
   // 冒出來的黑煙：從肩膀、頭、背、手臂和散開的下半身往上飄、越飄越大、越淡
   r.puffs = [];
   const puffTex = m5Tex('shPuff', 128, 128, shPaintPuff);
-  const at = [[0.18, 1.5, -0.02], [-0.2, 1.48, 0], [0, 1.82, 0.1], [0.06, 1.3, -0.1], [-0.08, 1.1, -0.1], [0.3, 0.95, 0.1], [-0.3, 0.9, 0.1], [0.04, 0.45, -0.05], [-0.06, 0.25, -0.08], [0.02, 0.6, 0.06]];
+  const at = [[0.18, 1.5, -0.02], [-0.2, 1.48, 0], [0, 1.82, 0.1], [-0.06, 1.15, -0.1], [0.3, 0.92, 0.1], [0.02, 0.4, -0.05]];
   at.forEach((p, i) => {
     const m = new THREE.SpriteMaterial({ map: puffTex, color: 0xffffff, transparent: true, depthWrite: false, fog: true }); m.userData.own = true;
     const sp = new THREE.Sprite(m); sp.userData = { p, ph: hash01(i * 3.7 + 1), rate: 0.35 + hash01(i * 1.3) * 0.25, dx: (hash01(i * 5.1) - 0.5) * 0.25, rot: (hash01(i * 2.9) - 0.5) * 2 };
