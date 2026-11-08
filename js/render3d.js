@@ -7178,6 +7178,228 @@ function wlSync(e, r, t, p, dt) {
 }
 UPG.warlord = { build: wlBuild, sync: wlSync, view: { h: 2.75, d: 5.0, cy: 1.3 } };
 
+// ---------- 檮杌・九瞳 ----------
+// 四腳的巨獸（肩高 2.2 公尺、連頭 3 公尺長），前面高後面低、肩膀很粗壯：全身紫灰色亂蓬蓬的粗毛（一片一片會飄，脖子一圈特別長），
+// 毛上有一條一條深紫色的紋路；背上和兩側伸出彎彎的紫黑色骨刺，尾巴上也有；腳掌很大、爪子又長又彎。
+// 臉上沒有鼻子和嘴，只有一團九顆大小不一的眼睛（紫色的虹膜、充血的眼白，各自會轉，被手電筒照到的那顆變白、一顆一顆閉上），頭上兩隻尖耳朵
+const TW_EYE = [   // [X, Y（頭上的位置，正面看）, 半徑（公尺）]：順序跟 e.eyes 一樣（照到的時候從第一顆開始閉）
+  [0, 0.02, 0.085], [-0.4, 0.22, 0.06], [0.42, 0.17, 0.065], [-0.24, -0.33, 0.055], [0.26, -0.36, 0.058],
+  [-0.62, -0.1, 0.045], [0.64, -0.05, 0.05], [0, -0.56, 0.045], [0.03, 0.47, 0.04],
+];
+const TW_HEAD = { rx: 0.3, ry: 0.27, rz: 0.34 };
+function twHeadPt(x, y, z, out) {
+  let X = x, Y = y, Z = z;
+  if (Z > 0) { Z *= 1 - 0.18 * sstep(0.3, 1, Z) * (1 - Math.abs(Y)); }   // 臉平平的一片（沒有口鼻）
+  if (Y < 0) X *= 1 - 0.12 * -Y;
+  let d = 0;
+  if (z > 0) for (const [ex, ey, R] of TW_EYE) {   // 每顆眼睛一個凹下去的眼窩，周圍一圈腫起來的肉
+    const r0 = R / 0.3, q = Math.hypot(x - ex, y - ey) / r0;
+    if (q < 2.4) d += -0.32 * r0 * (1 - sstep(0.75, 1.05, q)) + 0.22 * r0 * Math.exp(-(((q - 1.2) / 0.35) ** 2));
+  }
+  const k = 1 + d * sstep(0.1, 0.5, z) / (Math.hypot(X, Y, Z) || 1);
+  return out.set(X * k * TW_HEAD.rx, Y * k * TW_HEAD.ry, Z * k * TW_HEAD.rz);
+}
+const twU = crWarp(-Math.PI, Math.PI, a => 1 + 1.2 * Math.exp(-((a / 0.9) ** 2))), twV = crWarp(0, Math.PI, () => 1);
+// 毛的貼圖：一張代表繞一圈 1 公尺、長 2 公尺（繞一圈沒有接縫）：一撮一撮的粗毛往同一個方向（v）、毛尖亮一點，
+// 一條一條歪歪扭扭的深紫色紋路（設計圖上的紫色線）
+const TW_FUR = { c: 1, h: 2 };
+function twFurAt(X, Y, Z, o) {
+  const wx = 2.2 * (fbm3(X * 5, Y * 2, Z * 5, 3, 209) - 0.5), wz = 2.2 * (fbm3(X * 5, Y * 2, Z * 5, 3, 210) - 0.5);   // 毛的方向扭來扭去
+  const s1 = fbm3(X * 60 + wx * 8, Y * 14, Z * 60 + wz * 8, 3, 203), s2 = fbm3(X * 150 + wx * 12, Y * 35, Z * 150 + wz * 12, 2, 204);   // 粗的、細的毛
+  const clump = fbm3(X * 12 + wx, Y * 4, Z * 12 + wz, 3, 201), tone = fbm3(X * 4, Y * 1.2, Z * 4, 3, 207);
+  const stripe = (1 - sstep(0.006, 0.022, Math.abs(fbm3(X * 2.2, Y * 0.8, Z * 2.2, 3, 205) - 0.5))) * 0.85;
+  const L = (0.42 + 0.4 * s1 + 0.25 * s2) * (0.72 + 0.38 * clump) + 0.15 * sstep(0.72, 0.9, s1);
+  let R = 156 - 40 * tone, G = 142 - 38 * tone, B = 172 - 36 * tone;   // 淺紫灰色（照設計圖），深一點的地方偏紫黑
+  R = R * (1 - stripe) + 70 * stripe; G = G * (1 - stripe) + 34 * stripe; B = B * (1 - stripe) + 104 * stripe;
+  o[0] = R * L; o[1] = G * L; o[2] = B * L;
+}
+function twPaintFur(c, W, H) {
+  const R0 = TW_FUR.c / (Math.PI * 2);
+  w3mPix(c, W, H, (u, v, o) => { const a = u * Math.PI * 2; twFurAt(Math.cos(a) * R0, v * TW_FUR.h, Math.sin(a) * R0, o); });
+}
+// 頭的貼圖：後面和上面是毛，臉上是皺皺的暗紫灰色皮（沒有毛），眼窩周圍一圈紅紅濕濕的
+function twPaintHead(c, W, H) {
+  const P = new THREE.Vector3();
+  w3mPix(c, W, H, (u, v, o) => {
+    const th = twV.inv(v), a = twU.inv(u), st = Math.sin(th), x = st * Math.sin(a), y = Math.cos(th), z = st * Math.cos(a);
+    twHeadPt(x, y, z, P);
+    twFurAt(P.x * 1.4, -P.z * 1.4 + P.y * 0.3, P.y * 1.4, o);
+    const face = sstep(0.35, 0.6, z) * (1 - sstep(0.75, 0.95, Math.abs(y)));
+    if (face <= 0) return;
+    const n = fbm3(x * 9, y * 9, z * 9, 4, 211), wr = Math.abs(fbm3(x * 14, y * 30, z * 6, 3, 213) - 0.5) < 0.04 ? 1 : 0;
+    let R = (74 + 30 * n) * (1 - 0.3 * wr), G = (58 + 22 * n) * (1 - 0.3 * wr), B = (78 + 26 * n) * (1 - 0.3 * wr);
+    for (const [ex, ey, Re] of TW_EYE) {
+      const q = Math.hypot(x - ex, y - ey) / (Re / 0.3);
+      if (q > 1.8) continue;
+      const rim = Math.exp(-(((q - 1.05) / 0.25) ** 2)), sock = 1 - sstep(0.7, 1.0, q);
+      R = R * (1 - 0.5 * rim) + 96 * 0.5 * rim; G = G * (1 - 0.5 * rim) + 40 * 0.5 * rim; B = B * (1 - 0.5 * rim) + 58 * 0.5 * rim;
+      R *= 1 - 0.7 * sock; G *= 1 - 0.7 * sock; B *= 1 - 0.7 * sock;
+    }
+    o[0] = o[0] * (1 - face) + R * face; o[1] = o[1] * (1 - face) + G * face; o[2] = o[2] * (1 - face) + B * face;
+  });
+}
+// 眼睛：充血、偏黃的眼白，很大的紫色虹膜（一絲一絲的），黑色瞳孔、反光（正面在 u = 0.25）
+function twPaintEye(c, W, H) {
+  w3mPix(c, W, H, (u, v, o) => {
+    const lon = (u - 0.25) * Math.PI * 2, lat = (0.5 - v) * Math.PI, th = Math.acos(clamp(Math.cos(lat) * Math.cos(lon), -1, 1)), ang = Math.atan2(lat, lon);
+    const vein = sstep(0.5, 0.66, fbm3(Math.cos(lon) * 7, lat * 7, Math.sin(lon) * 7, 3, 221)) * sstep(0.6, 1.0, th), blot = fbm3(Math.cos(lon) * 3, lat * 3, Math.sin(lon) * 3, 3, 225);
+    let R = (196 - 60 * sstep(0.8, 1.6, th)) * (0.85 + 0.2 * blot), G = (170 - 80 * sstep(0.8, 1.6, th)) * (0.85 + 0.2 * blot), B = (144 - 64 * sstep(0.8, 1.6, th)) * (0.85 + 0.2 * blot);
+    R -= 20 * vein; G -= 110 * vein; B -= 90 * vein;
+    if (th < 0.72) {
+      const q = th / 0.72, f = fbm3(Math.cos(ang) * 4, Math.sin(ang) * 4, q * 6, 3, 223), fib = 0.75 + 0.25 * Math.sin(ang * 60 + f * 8);
+      R = (88 - 40 * q) * fib + 18 * f; G = (36 - 20 * q) * fib; B = (132 - 50 * q) * fib + 18 * f;
+      if (q > 0.88) { R *= 0.4; G *= 0.4; B *= 0.45; }
+      if (th < 0.2) { R = 6; G = 3; B = 10; }
+      const hl = Math.hypot(lon + 0.12, lat - 0.14); if (hl < 0.07) { R = G = B = 245; }
+    }
+    o[0] = R; o[1] = G; o[2] = B;
+  });
+}
+// 一片一片的長毛：很多細細的毛（透明的地方是毛跟毛中間），毛尖亮一點
+function twPaintStrand(c, W, H) {
+  const rr = seeded(9301), img = c.createImageData(W, H), d = img.data;
+  for (let i = 0; i < 90; i++) {
+    let x = W / 2 + (rr() + rr() + rr() - 1.5) * W * 0.55;
+    const end = H * (0.55 + 0.45 * rr()), w = 1 + rr() * 1.5, g = 0.6 + 0.4 * rr(), dx = (rr() - 0.5) * 0.06;
+    for (let y = 0; y < end; y++) {
+      x += dx + (rr() - 0.5) * 0.25;
+      const t = y / end, L = (0.55 + 0.45 * t) * g, al = 1 - sstep(0.75, 1, t) * 0.8;
+      for (let k = -1; k <= 1; k++) {
+        const px = Math.round(x + k * w * 0.5);
+        if (px < 0 || px >= W) continue;
+        const j = (y * W + px) * 4;
+        d[j] = Math.max(d[j], 200 * L); d[j + 1] = Math.max(d[j + 1], 186 * L); d[j + 2] = Math.max(d[j + 2], 214 * L); d[j + 3] = Math.max(d[j + 3], 255 * al);
+      }
+    }
+  }
+  c.putImageData(img, 0, 0);
+}
+// 身體：從屁股到脖子（rings 的 y 是身體的長度方向，做好轉成往 +z；z 是往下多少）：前面高、肩膀隆起
+const TW_BODY = [
+  { y: -1.05, w: 0.2, f: 0.2, b: 0.2, z: 0.08 }, { y: -0.85, w: 0.36, f: 0.34, b: 0.36, z: 0.08 }, { y: -0.5, w: 0.4, f: 0.38, b: 0.42, z: 0.06 },
+  { y: -0.1, w: 0.44, f: 0.44, b: 0.5, z: 0 }, { y: 0.28, w: 0.5, f: 0.5, b: 0.58, z: -0.06 }, { y: 0.55, w: 0.42, f: 0.46, b: 0.5, z: -0.07 },
+  { y: 0.74, w: 0.3, f: 0.32, b: 0.34, z: -0.12 }, { y: 0.92, w: 0.22, f: 0.22, b: 0.24, z: -0.24 },
+];
+const TW_BODY_AT = { y: 1.45, z: -0.1 }, TW_HEAD_AT = { y: 1.72, z: 1.08 };
+// 腿：肩膀／屁股的位置、往下的點（前腳直直的、後腳是彎的），粗細
+const TW_LEGS = [
+  { x: 0.34, y: 1.45, z: 0.5, P: [[0, 0.05, 0], [0.04, -0.5, -0.05], [0.02, -1.15, 0.06], [0, -1.39, 0.16]], R: [0.24, 0.18, 0.13, 0.12] },
+  { x: 0.32, y: 1.35, z: -0.82, P: [[0, 0.05, 0], [0.04, -0.45, 0.2], [0.02, -0.92, -0.15], [0, -1.29, 0.02]], R: [0.27, 0.2, 0.12, 0.11] },
+];
+function twPawGeo(key) {
+  const parts = [[geo('twPaw', () => new THREE.SphereGeometry(1, 12, 8)), mat4(0, 0.03, 0.06, 0, 0, 0, 0.12, 0.07, 0.16)]];
+  return mergeParts(key, parts);
+}
+function twClawGeo() {
+  const parts = [];
+  for (let i = 0; i < 4; i++) parts.push([tubeGeo('twClaw', [[0, 0, 0], [0, -0.01, 0.07], [0, -0.05, 0.13], [0, -0.1, 0.15]], [0.022, 0.016, 0.008, 0.002], 6, 8), mat4(-0.075 + i * 0.05, 0.04, 0.18, 0, (i - 1.5) * 0.15, 0)]);
+  return mergeParts('twClaws', parts);
+}
+function twBuild(r, g) {
+  const T = { transparent: true };
+  const furT = m5Tex('twFur', 512, 1024, twPaintFur), headT = m5Tex('twHead', 1024, 512, twPaintHead);
+  headT.wrapS = THREE.ClampToEdgeWrapping;
+  const fur = withDetail(ownPhong('#ffffff', { map: furT, bumpMap: furT, bumpScale: 2.0, specular: 0x14101a, shininess: 8, shade: 0.8, ...T }), 'fur', 4, 0.6);
+  const head = withDetail(ownPhong('#ffffff', { map: headT, bumpMap: headT, bumpScale: 1.5, specular: 0x241c28, shininess: 16, shade: 0.75, ...T }), 'fur', 5, 0.4);
+  const stT = m5Tex('twStrand', 64, 256, twPaintStrand); stT.wrapS = stT.wrapT = THREE.ClampToEdgeWrapping;
+  const hair = withDetail(hairMat(stT, 0.75), 'fur', 5, 0.5); hair.color.set('#a092b2');
+  const spine = withDetail(ownPhong('#3e2054', { specular: 0x6a4a80, shininess: 40, shade: 0.7, ...T }), 'bone', 7, 0.8);
+  const claw = withDetail(ownPhong('#201824', { specular: 0x55505a, shininess: 50, shade: 0.6, ...T }), 'bone', 12, 0.7);
+  const eyeT = m5Tex('twEye', 256, 128, twPaintEye);
+  r.mats.push(fur, head, hair, spine, claw);
+  r.hairU = hair.userData.hair;
+  r.body = new THREE.Group(); g.add(r.body);
+  // 身體（橫著放）
+  const bodyG = loftGeo('twBody', TW_BODY, { seg: 32, sub: 3, capA: 0.12, uv: [0, 3, 0, 2.2 / TW_FUR.h] });
+  const bm = new THREE.Mesh(bodyG, fur); bm.position.set(0, TW_BODY_AT.y, TW_BODY_AT.z); bm.rotation.x = Math.PI / 2; r.body.add(bm);
+  // 身上一片一片的長毛：從身體表面的點長出來，往下垂、往後飄（背上的往兩邊垂，脖子一圈特別長，肚子底下一排垂著）
+  const S = [], rr = seeded(9311), P = bodyG.attributes.position, Nn = bodyG.attributes.normal, m = new THREE.Matrix4().compose(new THREE.Vector3(0, TW_BODY_AT.y, TW_BODY_AT.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0)), new THREE.Vector3(1, 1, 1));
+  const nm = new THREE.Matrix3().getNormalMatrix(m), v = new THREE.Vector3(), nv = new THREE.Vector3();
+  for (let i = 0, tries = 0; i < 230 && tries < 4000; tries++) {
+    const k = Math.floor(rr() * P.count); v.fromBufferAttribute(P, k).applyMatrix4(m); nv.fromBufferAttribute(Nn, k).applyMatrix3(nm).normalize();
+    if (v.z < -1.08 || v.z > 0.85) continue;
+    const neck = sstep(0.3, 0.7, v.z), belly = nv.y < -0.5 ? 1 : 0, Lh = (0.26 + 0.2 * rr()) * (1 + 0.8 * neck) * (belly ? 1.1 : 1);
+    if (nv.y < -0.85 && rr() < 0.6) continue;
+    const dn = new THREE.Vector3(nv.x * 0.5, -1, -0.35 - 0.3 * (1 - neck)).normalize();
+    const a = [v.x - nv.x * 0.02, v.y - nv.y * 0.02, v.z - nv.z * 0.02], b = [a[0] + nv.x * Lh * 0.35 + dn.x * Lh * 0.3, a[1] + nv.y * Lh * 0.35 + dn.y * Lh * 0.3, a[2] + nv.z * Lh * 0.35 + dn.z * Lh * 0.3];
+    S.push({ a, b, c: [b[0] + dn.x * Lh * 0.7, b[1] + dn.y * Lh * 0.7, b[2] + dn.z * Lh * 0.7], w: 0.07 + 0.05 * rr(), f: Math.atan2(nv.x, nv.z) + (rr() - 0.5) * 0.6, ph: rr() * 6, tp: 0.5 });
+    i++;
+  }
+  r.body.add(new THREE.Mesh(hairGeo('twCoat', S), hair));
+  // 背上和兩側彎彎的骨刺、尾巴
+  const sp = [];
+  for (let i = 0; i < 11; i++) {
+    const t = i / 10, z = 0.6 - t * 1.5, side = i % 3 === 1 ? -1 : i % 3 === 2 ? 1 : 0, top = TW_BODY_AT.y + 0.5 + 0.12 * Math.sin(t * 2.6 + 0.6) - 0.06 * t;
+    const L = (0.32 + 0.22 * Math.sin(t * Math.PI)) * (side ? 0.8 : 1), x = side * 0.28, y = top - (side ? 0.12 : 0);
+    sp.push([tubeGeo('twSpine' + i, [[0, 0, 0], [side * L * 0.25, L * 0.45, -L * 0.15], [side * L * 0.55, L * 0.85, -L * 0.5], [side * L * 0.7, L * 1.0, -L * 0.95]], [0.04, 0.03, 0.015, 0.002], 6, 9), mat4(x, y, z)]);
+  }
+  r.body.add(new THREE.Mesh(mergeParts('twSpines', sp), spine));
+  r.tail = new THREE.Group(); r.tail.position.set(0, TW_BODY_AT.y + 0.05, -1.12); r.body.add(r.tail);
+  r.tail.add(new THREE.Mesh(w3mTube('twTail', [[0, 0, 0], [0, 0.12, -0.45], [0, -0.05, -0.95], [0, -0.3, -1.3]], [0.1, 0.075, 0.05, 0.02], 8, 14, 0.7), fur));
+  const ts = []; for (let i = 0; i < 4; i++) ts.push([tubeGeo('twTSp', [[0, 0, 0], [0, 0.09, -0.05], [0, 0.16, -0.14]], [0.022, 0.012, 0.002], 5, 5), mat4(0, 0.08 - i * 0.07, -0.25 - i * 0.25, 0, 0, 0, 1 - i * 0.12)]);
+  r.tail.add(new THREE.Mesh(mergeParts('twTailSp', ts), spine));
+  // 四條腿（毛、大腳掌、長爪子）
+  r.legs = [];
+  for (const [li, s] of [[0, -1], [0, 1], [1, -1], [1, 1]]) {
+    const L = TW_LEGS[li], leg = new THREE.Group(); leg.position.set(s * L.x, L.y, L.z); r.body.add(leg);
+    const pts = L.P.map(([x, y, z]) => [s * x, y, z]);
+    leg.add(new THREE.Mesh(w3mTube('twLeg' + li + s, pts, L.R, 12, 14, 0.7), fur));
+    const paw = new THREE.Group(); paw.position.set(...pts[pts.length - 1]); paw.position.y = -L.y + 0.05; leg.add(paw);
+    paw.scale.setScalar(1.2); paw.add(new THREE.Mesh(twPawGeo('twPawM'), fur), new THREE.Mesh(twClawGeo(), claw));
+    r.legs.push(leg);
+  }
+  // 頭：臉上九顆眼睛（每顆有自己的材質：被照到的那顆變白）、上眼皮（閉眼）、兩隻尖耳朵
+  r.head = new THREE.Group(); r.head.position.set(0, TW_HEAD_AT.y, TW_HEAD_AT.z); r.body.add(r.head);
+  r.head.add(new THREE.Mesh(sculptGeo('twHead', twHeadPt, twU, twV, th => sstep(0.9, 1.1, th) * (1 - sstep(2.3, 2.5, th)), a => sstep(-1.1, -0.95, a) * (1 - sstep(0.95, 1.1, a)), [0.07, 0.085], [0.2, 0.22]), head));
+  const ear = loftGeo('twEar', [{ y: 0, w: 0.06, d: 0.025 }, { y: 0.06, w: 0.065, d: 0.02 }, { y: 0.15, w: 0.045, d: 0.015, z: -0.01 }, { y: 0.24, w: 0.022, d: 0.01, z: -0.02 }, { y: 0.3, w: 0.003, d: 0.003, z: -0.03 }], { seg: 10, sub: 2, uv: [0, 1, 0, 0.15] });
+  r.head.add(new THREE.Mesh(mergeParts('twEars', [[ear, mat4(-0.17, 0.2, -0.12, -0.35, 0, 0.35)], [ear, mat4(0.17, 0.2, -0.12, -0.35, 0, -0.35)]]), fur));
+  const Q = new THREE.Vector3(), Z = new THREE.Vector3(0, 0, 1), lidM = withDetail(ownPhong('#4e3c52', { specular: 0x2a2030, shininess: 20, shade: 0.7, ...T }), 'skin', 30, 0.8);
+  r.mats.push(lidM);
+  r.tEyes = TW_EYE.map(([ex, ey, R], i) => {
+    twHeadPt(ex, ey, Math.sqrt(Math.max(0, 1 - ex * ex - ey * ey)), Q);
+    const sock = new THREE.Group(); sock.position.set(Q.x, Q.y, Q.z - R * 0.5); sock.quaternion.setFromUnitVectors(Z, new THREE.Vector3(Q.x * 2.2, Q.y * 1.6, 0.6).normalize()); r.head.add(sock);
+    const em = wetEyeMat(eyeT, 0x200a30, 0x666666, T); r.mats.push(em);
+    const gaze = new THREE.Group(); gaze.rotation.order = 'YXZ'; sock.add(gaze);
+    gaze.add(new THREE.Mesh(geo('twEyeBall', () => new THREE.SphereGeometry(1, 14, 10)), em)); gaze.scale.setScalar(R);
+    const lid = new THREE.Mesh(geo('twLid', () => new THREE.SphereGeometry(1.08, 12, 5, 0, Math.PI * 2, 0, Math.PI * 0.55)), lidM); lid.scale.setScalar(R); sock.add(lid);
+    return { sock, gaze, lid, em, ph: hash01(i * 3.7) * 6, k: 0 };
+  });
+  r.litGlow = ownSprite(glowTex, 0xffffff); r.litGlow.scale.setScalar(0.22); r.litGlow.visible = false; r.head.add(r.litGlow);
+}
+function twSync(e, r, t, p, dt) {
+  const a = enemyAlpha(e), moving = !e.pose && !(e.stunT > 0);
+  r.g.position.y = floorH(e.x, e.y);
+  if (moving || e.pose) r.g.rotation.y = faceRot(e.face || 0);
+  // 頭轉過來看你（瞎了就亂晃），咆哮時頭往上抬
+  let dy = Math.atan2(p.x - e.x, p.y - e.y) - r.g.rotation.y;
+  while (dy > Math.PI) dy -= Math.PI * 2;
+  while (dy < -Math.PI) dy += Math.PI * 2;
+  const blind = e.blind > 0;
+  r.head.rotation.set(-0.5 * (e.roar || 0) + (blind ? Math.sin(t * 3) * 0.15 : 0), clamp(dy, -1.2, 1.2) * (blind ? 0.2 : 1) + (blind ? Math.sin(t * 2.3) * 0.4 : 0), blind ? Math.sin(t * 1.7) * 0.15 : 0);
+  // 走路：四條腳輪流（對角的一起）、身體上下晃；撲過來時整隻往前躍
+  const w = e.wob * 5, mv = moving && !(e.pounce > 0);
+  r.legs.forEach((leg, i) => { leg.rotation.x = mv ? Math.sin(w + (i % 2 ? Math.PI : 0) + (i < 2 ? 0 : Math.PI * 0.5)) * 0.4 : e.pounce > 0 ? (i < 2 ? -0.6 : 0.5) : 0; });
+  r.body.position.y = e.pounce > 0 ? 0.25 : mv ? Math.abs(Math.sin(w)) * 0.04 : 0;
+  r.body.rotation.x = e.pounce > 0 ? -0.25 : 0;
+  r.tail.rotation.set(Math.sin(t * 1.7) * 0.1, Math.sin(t * 2.5) * 0.3, 0);
+  const hu = r.hairU; hu.uHT.value = t; hu.uHAmp.value = 0.02 + (mv ? 0.015 : 0) + (e.roar > 0 ? 0.06 : 0);
+  hu.uHDrag.value.set(spring(r, 'hx', mv ? Math.sin(w) * 0.02 : 0, dt), spring(r, 'hz', mv ? 0.05 : e.pounce > 0 ? 0.12 : 0, dt));
+  // 九顆眼睛：各自轉來轉去；閉上的（被照瞎的）眼皮蓋下來；正在被照的那顆變白、一閃一閃
+  const openIdx = e.eyes ? e.eyes.findIndex(x => !x.shut) : -1, litI = e.lit && openIdx >= 0 && !blind ? openIdx : -1;
+  r.tEyes.forEach((ey, i) => {
+    const shut = blind || !!(e.eyes && e.eyes[i] && e.eyes[i].shut);
+    ey.k += ((shut ? 1 : 0) - ey.k) * Math.min(1, dt * 10);
+    ey.lid.rotation.x = -1.35 + 1.75 * ey.k;   // 張開時眼皮縮在上面、閉上時蓋住整個眼睛
+    ey.gaze.rotation.set(Math.sin(t * 1.3 + ey.ph) * 0.25 + (blind ? Math.sin(t * 9 + i) * 0.2 : 0), Math.sin(t * 0.9 + ey.ph * 2) * 0.35, 0);
+    const lit = i === litI ? 0.5 + 0.5 * Math.sin(t * 20) : 0;
+    ey.em.emissive.setRGB(blind ? 0.03 : 0.13 + 0.07 * Math.sin(t * 3 + ey.ph) + 0.8 * lit, blind ? 0.02 : 0.05 + 0.8 * lit, blind ? 0.04 : 0.2 + 0.8 * lit);
+    ey.em.opacity = a;
+  });
+  r.litGlow.visible = litI >= 0;
+  if (litI >= 0) { const s = r.tEyes[litI].sock; r.litGlow.position.copy(s.position); r.litGlow.position.z += 0.06; r.litGlow.material.opacity = a * (0.5 + 0.4 * Math.sin(t * 20)); }
+}
+UPG.taowu = { build: twBuild, sync: twSync, view: { h: 2.3, d: 5.0, cy: 1.1 } };
+
 // ---------- 第三世界到這裡 ----------
 
 
