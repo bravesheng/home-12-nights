@@ -7017,6 +7017,212 @@ function syncShroom2(f, r, t, p, awake) {
 const W2MU_FLOWER = { build: buildShroom2, sync: syncShroom2 };
 UPG.shroom = { flower: W2MU_FLOWER, build: (r, g) => w2FakeFlower('shroom', r, g, W2MU_FLOWER), sync: w2FakeSync(W2MU_FLOWER), view: { h: 1.95, d: 3.7 } };   // 鏡頭跟圖鑑的 BOOK_VIEW.shroom 一樣
 
+// ---------- 草叢人（grass） ----------
+// 平常只看得到一叢比腰還高、一直在搖的長草（躲著走的時候沙沙地抖，撲過來時往後倒）；
+// 站起來時，一個乾瘦、駝背、皮膚像乾掉的泥巴的長身體從草裡升上來：長長的臉，頭頂像腦一樣皺皺的、長滿會搖的草，
+// 兩個很深的黑洞眼睛（最裡面一點紅光），咧開到耳邊的紅色大嘴和一排咖啡色的爛牙；臉和身上一道道紅色和綠色的痕跡往下流。
+// 兩隻細長的手往前伸，手指像樹根一樣（撲過來抓你的腳）
+const W2GR_HEAD = { x: 0, y: 1.5, z: 0.07, rx: 0.15, ry: 0.27, rz: 0.165 };
+const W2GR_EYE = { x: 0.36, y: 0.13 };
+// 臉上的起伏：[X, Y, 寬, 高, 凸起多少, 左右對稱, 邊緣多陡]
+const W2GR_FACE = [
+  [0, 0.34, 0.6, 0.12, 0.05, 0, 1],            // 眉骨
+  [W2GR_EYE.x, W2GR_EYE.y, 0.17, 0.15, -0.62, 1, 2.4],   // 黑洞眼睛（又深又陡）
+  [0.5, -0.12, 0.17, 0.2, -0.08, 1, 1],         // 凹下去的臉頰
+  [0.55, 0.0, 0.12, 0.08, 0.04, 1, 1],          // 顴骨
+  [0, 0.0, 0.06, 0.2, 0.04, 0, 1],              // 鼻樑
+  [0.05, -0.16, 0.03, 0.025, -0.06, 1, 1.5],    // 鼻孔（沒有鼻子，只有兩個洞）
+  [0, -0.8, 0.22, 0.12, 0.05, 0, 1],            // 長長的下巴
+];
+// 咧開的大嘴：上唇 yu、下唇 yl（嘴角往上翹，像一彎月亮）
+const W2GR_MW = 0.68, w2grMouth = x => { const q = (x / W2GR_MW) ** 2; return [-0.37 + 0.19 * q, -0.7 + 0.45 * q]; };
+function w2grHeadPt(x, y, z, out) {
+  let X = x, Y = y, Z = z;
+  if (Y < 0) { const t = -Y; X *= 1 - 0.18 * t * t; if (Z > 0) Z *= 1 + 0.08 * t; }
+  if (Z < 0) Z *= 1.1;
+  else Z *= 1 - 0.18 * (1 - Y * Y);
+  let d = 0;
+  if (z > 0) {
+    for (const f of W2GR_FACE) for (const s of f[5] ? [-1, 1] : [1]) { const u = (x - s * f[0]) / f[2], v = (y - f[1]) / f[3], q = u * u + v * v; if (q < 16) d += f[4] * Math.exp(-(q ** f[6])); }
+    // 嘴：開口裡面凹進去（裡面另外畫成暗紅色），開口周圍一圈嘴唇鼓起來
+    if (Math.abs(x) < W2GR_MW * 1.15) {
+      const [yu, yl] = w2grMouth(Math.min(Math.abs(x), W2GR_MW)), mid = (yu + yl) / 2, hh = Math.max(0.004, (yu - yl) / 2), side = sstep(W2GR_MW * 1.0, W2GR_MW * 1.12, Math.abs(x));
+      const e = Math.abs(y - mid) / hh;   // 0 在開口中間、1 在嘴唇邊上
+      d += (1 - side) * (-0.28 * sstep(1.12, 0.55, e) + 0.04 * Math.exp(-(((e - 1.25) / 0.35) ** 2)));
+    }
+    d *= sstep(0.05, 0.45, z);
+  }
+  if (y > 0.55) d += 0.025 * (fbm3(x * 7, y * 7, z * 7, 3, 601) - 0.5) * sstep(0.55, 0.75, y);   // 頭頂皺皺的（像腦）
+  const k = 1 + d / (Math.hypot(X, Y, Z) || 1);
+  return out.set(X * k * W2GR_HEAD.rx, Y * k * W2GR_HEAD.ry, Z * k * W2GR_HEAD.rz);
+}
+const W2GR_U = crWarp(-Math.PI, Math.PI, a => 1 + 1.3 * Math.exp(-((a / 0.8) ** 2))), W2GR_V = crWarp(0, Math.PI, th => 1 + 1.1 * Math.exp(-(((th - 1.75) / 0.6) ** 2)));
+const w2grHeadGeo = () => sculptGeo('w2grHead', w2grHeadPt, W2GR_U, W2GR_V, th => sstep(0.85, 1.0, th) * (1 - sstep(2.35, 2.5, th)), a => sstep(-1.05, -0.9, a) * (1 - sstep(0.9, 1.05, a)), [0.064, 0.07], [0.17, 0.18]);
+// 臉的貼圖：灰綠色、乾掉的泥巴一樣的皮（一道道裂紋），頭頂是粉紅色、皺皺的（像腦）；眼窩最裡面全黑；
+// 嘴唇紅紅的、嘴裡暗紅色；紅色和綠色的痕跡從眼睛和嘴角往下流
+function w2grPaintHead(c, W, H) {
+  w2PaintRect(c, 0, 0, W, H, (u, t, o) => {
+    const th = W2GR_V.inv(1 - t), a = W2GR_U.inv(u), st = Math.sin(th), x = st * Math.sin(a), y = Math.cos(th), z = st * Math.cos(a);
+    const n = fbm3(x * 4, y * 4, z * 4, 5, 611), crack = Math.pow(1 - Math.abs(fbm3(x * 9, y * 9, z * 9, 4, 613) - 0.5) * 2, 14);
+    let col = w2Mix([176, 170, 134], [214, 206, 172], n);
+    col = w2Mix(col, [118, 112, 82], crack * 0.55);
+    // 頭頂：粉紅色、一條條像腦的皺褶
+    const brain = sstep(0.42, 0.6, y + (n - 0.5) * 0.15), fold = Math.pow(Math.abs(fbm3(x * 6, y * 3, z * 6, 4, 615) - 0.5) * 2, 0.4);
+    col = w2Mix(col, w2Mix([132, 80, 78], [204, 160, 150], fold), brain);
+    if (z > 0) {
+      for (const s of [-1, 1]) { const q = Math.hypot((x - s * W2GR_EYE.x) / 0.17, (y - W2GR_EYE.y) / 0.15); col = w2Mix(col, [70, 34, 26], sstep(1.6, 1.25, q) * 0.8); col = w2Mix(col, [2, 1, 1], sstep(1.28, 1.08, q)); }
+      if (Math.abs(x) < W2GR_MW * 1.15) {
+        const [yu, yl] = w2grMouth(Math.min(Math.abs(x), W2GR_MW)), mid = (yu + yl) / 2, hh = Math.max(0.004, (yu - yl) / 2), e = Math.abs(y - mid) / hh, side = sstep(W2GR_MW, W2GR_MW * 1.12, Math.abs(x));
+        col = w2Mix(col, [176, 30, 40], (1 - side) * sstep(1.75, 1.15, e));
+        col = w2Mix(col, [44, 4, 8], (1 - side) * sstep(1.0, 0.8, e));
+      }
+      // 往下流的紅色、綠色痕跡
+      for (let i = 0; i < 9; i++) {
+        const x0 = [-0.42, -0.3, 0.33, 0.44, -0.55, 0.58, -0.12, 0.16, 0.02][i], y0 = i < 4 ? 0.02 : -0.45, red = i % 2 === 0;
+        const xx = x0 + Math.sin(y * 9 + i) * 0.02, w = 0.018 + 0.012 * hash01(i * 3.3);
+        const m = Math.exp(-(((x - xx) / w) ** 2)) * sstep(y0 + 0.02, y0 - 0.05, y) * sstep(-1.0, y0 - 0.15 - hash01(i) * 0.5, y);
+        col = w2Mix(col, red ? [140, 16, 22] : [56, 110, 44], m * 0.8);
+      }
+    }
+    o[0] = col[0]; o[1] = col[1]; o[2] = col[2];
+  });
+}
+// 身體：脖子細細的、肩膀窄、往前駝，胸口一根根肋骨凸出來，下面一直延伸到草裡
+const W2GR_BODY = [
+  { y: -0.25, w: 0.15, d: 0.13 }, { y: 0.15, w: 0.15, d: 0.13 }, { y: 0.55, w: 0.135, d: 0.11, z: 0.01 }, { y: 0.85, w: 0.15, d: 0.11, z: 0.0 },
+  { y: 1.05, w: 0.175, d: 0.115, z: -0.01 }, { y: 1.18, w: 0.18, d: 0.11, z: 0.0 }, { y: 1.26, w: 0.13, d: 0.085, z: 0.02 }, { y: 1.31, w: 0.055, d: 0.055, z: 0.04 }, { y: 1.4, w: 0.05, d: 0.05, z: 0.06 },
+];
+function w2grPaintBody(c, W, H) {
+  w2PaintRect(c, 0, 0, W, H, (u, t, o) => {
+    const a = u * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a), n = fbm3(ca * 2, t * 6, sa * 2, 5, 621), crack = Math.pow(1 - Math.abs(fbm3(ca * 5, t * 14, sa * 5, 4, 623) - 0.5) * 2, 12);
+    let col = w2Mix([126, 122, 88], [176, 168, 130], n);
+    col = w2Mix(col, [84, 80, 54], crack * 0.6);
+    col = w2Mix(col, [70, 64, 40], sstep(0.35, 0.0, t) * 0.7);   // 下面沾著泥土
+    const rib = Math.pow(0.5 + 0.5 * Math.cos(t * 80), 3) * sstep(0.68, 0.74, t) * (1 - sstep(0.86, 0.9, t)) * Math.exp(-((angD(a, Math.PI) / 1.1) ** 2));
+    col = w2Mix(col, [92, 88, 60], rib * 0.5);
+    for (let i = 0; i < 7; i++) {
+      const a0 = Math.PI + (hash01(i * 5.1) - 0.5) * 2.2, red = i % 2 === 0, w = 0.05 + 0.04 * hash01(i * 2.2), d = angD(a + Math.sin(t * 12 + i) * 0.04, a0);
+      col = w2Mix(col, red ? [128, 18, 24] : [52, 104, 40], Math.exp(-((d / w) ** 2)) * sstep(0.98, 0.9, t) * sstep(0.2 + hash01(i * 7.7) * 0.5, 0.75, t) * 0.75);
+    }
+    o[0] = col[0]; o[1] = col[1]; o[2] = col[2];
+  });
+}
+// 草葉的貼圖（一束一束：根在上面、葉尖在下面，跟頭髮一樣用 hairGeo）：細長的葉子，根部深綠、往葉尖變淡，中間一條葉脈，有幾片枯黃的
+function w2grPaintBlades(c, W, H) {
+  const r = seeded(6311);
+  c.clearRect(0, 0, W, H);
+  for (let i = 0; i < 26; i++) {
+    const x = W / 2 + (r() + r() - 1) * W * 0.42, end = H * (0.6 + r() * 0.4), w = W * (0.025 + r() * 0.025), dead = r() < 0.18;
+    const xm = x + (r() - 0.5) * W * 0.2, xt = xm + (r() - 0.5) * W * 0.3;
+    const lo = dead ? '#5e4e24' : `rgb(${24 + r() * 16 | 0},${58 + r() * 26 | 0},${22 + r() * 12 | 0})`, hi = dead ? '#b89a4e' : `rgb(${60 + r() * 40 | 0},${126 + r() * 60 | 0},${42 + r() * 24 | 0})`;
+    const g = c.createLinearGradient(0, 0, 0, end); g.addColorStop(0, lo); g.addColorStop(0.6, hi); g.addColorStop(1, dead ? '#d6bc70' : '#b8cc78');
+    c.fillStyle = g; c.beginPath(); c.moveTo(x - w, 0); c.quadraticCurveTo(xm - w * 0.7, end * 0.5, xt, end); c.quadraticCurveTo(xm + w * 0.7, end * 0.5, x + w, 0); c.fill();
+    c.strokeStyle = dead ? 'rgba(70,50,20,.5)' : 'rgba(16,40,14,.5)'; c.lineWidth = W * 0.006; c.beginPath(); c.moveTo(x, 0); c.quadraticCurveTo(xm, end * 0.5, xt, end * 0.97); c.stroke();
+    c.strokeStyle = 'rgba(255,255,220,.18)'; c.lineWidth = W * 0.004; c.beginPath(); c.moveTo(x + w * 0.4, 0); c.quadraticCurveTo(xm + w * 0.3, end * 0.5, xt, end * 0.95); c.stroke();
+  }
+}
+// 手：細長的手掌、五根像樹根的長手指（尾端尖尖的、彎彎的），合成一個網格
+function w2grHandGeo(s) {
+  const parts = [[geo('w2grPalm', () => new THREE.SphereGeometry(1, 8, 6)), mat4(0, -0.04, 0.01, 0, 0, 0, 0.032, 0.05, 0.016)]];
+  for (let i = 0; i < 5; i++) {
+    const th = i === 4, L = th ? 0.1 : [0.19, 0.23, 0.22, 0.17][i];
+    const f = tubeGeo('w2grFinger' + i, [[0, 0, 0], [0.005, -L * 0.35, 0.02], [-0.004, -L * 0.7, 0.05], [0.006, -L, 0.085]], [0.011, 0.009, 0.006, 0.0018], 4, 5);
+    parts.push([f, mat4(s * (th ? 0.03 : -0.024 + i * 0.016), th ? -0.03 : -0.08, th ? 0.015 : 0.01, th ? 0.3 : 0, 0, s * (th ? 0.6 : -0.12 + i * 0.07))]);
+  }
+  return mergeParts('w2grHand' + s, parts);
+}
+// 牙齒：一顆顆咖啡色、歪歪的爛牙，沿著上下嘴唇排（臉的座標）
+function w2grTeethGeo() {
+  const parts = [], r = seeded(6421), v = new THREE.Vector3(), tooth = geo('w2grTooth', () => new THREE.CylinderGeometry(0.5, 0.35, 1, 5, 1).translate(0, -0.5, 0));
+  for (const up of [true, false]) for (let i = 0; i < (up ? 12 : 10); i++) {
+    const X = (i / ((up ? 12 : 10) - 1) * 2 - 1) * W2GR_MW * (up ? 0.84 : 0.7), [yu, yl] = w2grMouth(Math.abs(X)), Y = up ? yu + 0.01 : yl - 0.01;
+    w2grHeadPt(X, Y, Math.sqrt(Math.max(0, 1 - X * X - Y * Y)), v);
+    const open = (yu - yl) * W2GR_HEAD.ry, len = Math.max(0.008, open * (0.3 + r() * 0.22)), wd = 0.012 + r() * 0.006;
+    parts.push([tooth, new THREE.Matrix4().compose(v.clone().add(new THREE.Vector3(0, 0, -0.016)), new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.25 * (up ? 1 : -1) + (r() - 0.5) * 0.3, 0, (up ? 0 : Math.PI) + (r() - 0.5) * 0.35)), new THREE.Vector3(wd, len, wd * 0.8))]);
+  }
+  return mergeParts('w2grTeeth', parts);
+}
+function buildGrass2(r, g) {
+  const T = { transparent: true };
+  const blades = m5Tex('w2grBlade', 128, 512, w2grPaintBlades); blades.wrapS = blades.wrapT = THREE.ClampToEdgeWrapping;
+  const gm = hairMat(blades, 0.7), hm = hairMat(blades, 0.7);
+  r.tuft = new THREE.Group(); g.add(r.tuft);
+  r.tuft.add(new THREE.Mesh(hairGeo('w2grTuft', [...grassStrands(64, 0.36, 0.6, 1.15, 0.24, 6501, 0, 0, 0.85), ...grassStrands(24, 0.22, 0.3, 0.6, 0.12, 6502, 0, 0, 0.85)], 6), gm));
+  r.grassU = gm.userData.hair;
+  r.body = new THREE.Group(); g.add(r.body);
+  const head = withDetail(ownLM('#ffffff', { map: m5Tex('w2grHead', 1024, 512, w2grPaintHead), shade: 0.85, ...T }), 'skin', 6, 0.8);
+  head.map.wrapS = THREE.ClampToEdgeWrapping;
+  const skin = withDetail(ownLM('#ffffff', { map: m5Tex('w2grBody', 256, 512, w2grPaintBody), shade: 0.85, ...T }), 'bark', 3, 0.7);
+  const limb = withDetail(ownLM('#9c966e', { shade: 0.85, ...T }), 'bark', 6, 0.8);
+  const tooth = withDetail(ownPhong('#6e5232', { specular: 0x3a3020, shininess: 30, shade: 0.7, ...T }), 'bone', 14, 0.7);
+  r.mats.push(gm, hm, head, skin, limb, tooth);
+  r.body.add(new THREE.Mesh(loftGeo('w2grBody', W2GR_BODY, { seg: 14, sub: 2 }), skin));
+  r.head = new THREE.Group(); r.head.position.set(W2GR_HEAD.x, W2GR_HEAD.y, W2GR_HEAD.z); r.body.add(r.head);
+  r.head.add(new THREE.Mesh(w2grHeadGeo(), head));
+  r.head.add(new THREE.Mesh(w2grTeethGeo(), tooth));
+  // 眼窩最裡面一點紅光
+  const v = new THREE.Vector3();
+  for (const s of [-1, 1]) {
+    w2grHeadPt(s * W2GR_EYE.x, W2GR_EYE.y, Math.sqrt(1 - W2GR_EYE.x ** 2 - W2GR_EYE.y ** 2), v);
+    const gl = ownSprite(glowTex, 0xff4020); gl.position.copy(v).add(new THREE.Vector3(s * 0.004, -0.004, 0.05)); gl.scale.setScalar(0.045); r.head.add(gl);
+    r.eyes.push(gl);
+  }
+  // 頭頂的草：從皺皺的頭頂長出來，往上、往外翻
+  const hs = [], rr = seeded(6503);
+  for (let i = 0; i < 34; i++) {
+    const a = rr() * Math.PI * 2, y0 = 0.55 + rr() * 0.43, rad = Math.sqrt(1 - y0 * y0), x = Math.cos(a) * rad, z = Math.sin(a) * rad;
+    w2grHeadPt(x, y0, z, v); const h = 0.18 + rr() * 0.3, out = 0.4 + rr() * 0.5;
+    hs.push({ a: [v.x, v.y, v.z], b: [v.x + x * h * out * 0.4, v.y + h * 0.6, v.z + z * h * out * 0.4], c: [v.x + x * h * out, v.y + h, v.z + z * h * out], w: 0.05 + rr() * 0.04, f: a + Math.PI / 2, ph: rr() * 6, tp: 0.8 });
+  }
+  r.head.add(new THREE.Mesh(hairGeo('w2grHeadGrass', hs, 6), hm));
+  r.headU = hm.userData.hair;
+  // 纏在身上的藤蔓（兩條螺旋）、從腰往下伸進草裡的鬚根（各自合成一個網格）
+  const vine = withDetail(ownLM('#3e6a2a', { shade: 0.8, ...T }), 'moss', 8, 0.8);
+  r.mats.push(vine);
+  const vp = [];
+  for (let k = 0; k < 2; k++) {
+    const P = [];
+    for (let i = 0; i <= 14; i++) { const y = 0.1 + i * 0.075, a = k * Math.PI + i * 0.75, ring = W2GR_BODY.reduce((p, q) => (q.y <= y ? q : p)), rr = (ring.w + ring.d) / 2 + 0.008; P.push([Math.sin(a) * rr, y, Math.cos(a) * rr * 0.85 + (ring.z || 0)]); }
+    vp.push([tubeGeo('w2grVine' + k, P, [0.014, 0.012, 0.01], 4, 26), new THREE.Matrix4()]);
+  }
+  r.body.add(new THREE.Mesh(mergeParts('w2grVines', vp), vine));
+  const rp = [];
+  for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2 + 0.3, ca = Math.cos(a), sa = Math.sin(a); rp.push([tubeGeo('w2grRoot' + i, [[sa * 0.12, 0.42, ca * 0.1], [sa * 0.2, 0.25, ca * 0.18], [sa * 0.3, 0.06, ca * 0.28], [sa * 0.36, -0.08, ca * 0.34]], [0.022, 0.016, 0.01, 0.004], 4, 5), new THREE.Matrix4()]); }
+  r.body.add(new THREE.Mesh(mergeParts('w2grRoots', rp), limb));
+  // 手臂（肩膀那裡可以轉：撲過來時往前伸）
+  r.arms = [];
+  for (const s of [-1, 1]) {
+    const a = new THREE.Group(); a.position.set(s * 0.165, 1.16, 0.0); r.body.add(a);
+    const P = [[0, 0, 0], [s * 0.05, -0.18, 0.05], [s * 0.09, -0.36, 0.14], [s * 0.08, -0.5, 0.28], [s * 0.05, -0.6, 0.42]];
+    a.add(new THREE.Mesh(mergeParts('w2grArmAll' + s, [[tubeGeo('w2grArm' + s, P, [0.04, 0.03, 0.024, 0.022, 0.018], 7, 10), new THREE.Matrix4()], [w2grHandGeo(s), mat4(...P[P.length - 1], -0.9, 0, 0)]]), limb));
+    r.arms.push(a);
+  }
+}
+function syncGrass2(e, r, t, p, dt) {
+  // 草叢一直在搖：躲著走的時候每片草沙沙地抖、整叢晃，撲過來時草往後倒；站起來時身體和臉從草裡升上來，頭頂的草也在搖
+  const k = e.rise || 0, hidden = e.hidden, gu = r.grassU, hu = r.headU, st = e.state;
+  gu.uHT.value = t * (hidden ? 2.6 : 1); hu.uHT.value = t;
+  gu.uHAmp.value += ((hidden ? 0.09 : 0.045) - gu.uHAmp.value) * Math.min(1, dt * 5);
+  hu.uHAmp.value = st === 'grab' ? 0.06 : 0.03;
+  gu.uHDrag.value.set(spring(r, 'gx', hidden ? Math.sin(e.wob * 9) * 0.05 + Math.sin(t * 0.7) * 0.03 : Math.sin(t * 0.7) * 0.04, dt), spring(r, 'gz', st === 'lunge' ? -0.2 : st === 'rise' ? -0.08 : 0, dt));
+  hu.uHDrag.value.set(spring(r, 'hx', Math.sin(t * 0.9) * 0.02, dt), spring(r, 'hz', st === 'lunge' ? -0.06 : 0, dt));
+  r.tuft.rotation.z = Math.sin(e.wob * (hidden ? 9 : 3)) * (hidden ? 0.07 : 0.025);
+  r.tuft.rotation.x = Math.sin(e.wob * (hidden ? 7 : 2.3) + 1) * (hidden ? 0.05 : 0.015);
+  r.tuft.scale.set(1, hidden ? 0.92 + Math.abs(Math.sin(e.wob * 7)) * 0.16 : 1, 1);
+  r.body.visible = k > 0.02;
+  r.body.position.y = -1.6 * (1 - k);
+  r.body.rotation.x = st === 'lunge' ? 0.5 : st === 'grab' ? 0.14 + Math.sin(t * 20) * 0.04 : 0.08;
+  // 頭：歪一邊、偶爾抽一下；抓到你時一直抖
+  const jerk = Math.sin(t * 0.5 + e.wob) > 0.92 ? Math.sin(t * 38) * 0.07 : 0;
+  r.head.rotation.set(-0.12 + (st === 'lunge' ? -0.25 : 0), Math.sin(t * 0.6 + e.wob) * 0.1, 0.16 + Math.sin(t * 0.8) * 0.05 + jerk + (st === 'grab' ? Math.sin(t * 22) * 0.05 : 0));
+  // 手：撲過來、抓住時往前伸到腳邊，平常垂著、手指慢慢動
+  const reach = st === 'lunge' || st === 'grab' ? 1 : st === 'rise' ? 0.5 : 0;
+  r.reach = (r.reach || 0) + (reach - (r.reach || 0)) * Math.min(1, dt * 8);
+  r.arms.forEach((a, i) => { const s = i ? 1 : -1; a.rotation.set(-r.reach * 0.7 + Math.sin(t * 1.3 + i * 2) * 0.05, 0, s * 0.05 + (st === 'grab' ? Math.sin(t * 18 + i) * 0.05 : 0)); });
+  r.g.position.y = floorH(e.x, e.y);
+}
+UPG.grass = { build: buildGrass2, sync: syncGrass2, view: { h: 1.95, cy: 0.98 } };
+
 // ---------- 第二世界到這裡 ----------
 
 
