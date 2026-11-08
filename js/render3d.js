@@ -6712,6 +6712,199 @@ function krSync(e, r, t, p, dt) {
 }
 UPG.kronos = { build: krBuild, sync: krSync, view: { h: 1.7, d: 3.3, cy: 0.8 } };
 
+// ---------- 熔岩暴君 ----------
+// 2.6 公尺的岩石巨人，站得像大猩猩：肩膀又寬又厚、背上隆起，小小的頭陷在兩肩中間，長長的手臂垂到膝蓋、拳頭很大，短短的粗腿。
+// 全身是冷卻的黑灰色岩塊，岩塊的縫隙透出橘紅色的熔岩光（走動時一明一暗）；臉是一塊兇狠的岩石：往中間壓的眉骨、兩個熔岩洞的眼睛、
+// 咧開的嘴裡也是熔岩，上下一排尖尖的碎石牙。被聖水冷卻時全身變黑、不會發光。
+// 岩石用 m-rock 和 m-lava 這組照片（兩張的裂縫在同一個位置）：從模型自己的座標三向投影，網格照 m-lava 的裂縫往內壓、岩塊凸出來，
+// 所以凹下去的縫剛好是發光的地方（w3mRockify、w3mRockMat）
+const W3M_ROCK = { s: 0.65 };   // 一公尺排幾張照片（一張大約有五塊岩石寬）
+let w3mLavaPx = null;
+function w3mLavaData() {
+  if (w3mLavaPx !== null) return w3mLavaPx;
+  const im = photos['m-lava'];
+  if (!im) return (w3mLavaPx = false);
+  const N = 128, c = document.createElement('canvas'); c.width = c.height = N;
+  const x = c.getContext('2d', { willReadFrequently: true }); x.filter = 'blur(1.2px)'; x.drawImage(im, 0, 0, N, N);
+  const d = x.getImageData(0, 0, N, N).data, a = new Float32Array(N * N);
+  for (let i = 0; i < N * N; i++) a[i] = (d[i * 4] * 0.5 + d[i * 4 + 1] * 0.5) / 255;
+  return (w3mLavaPx = a);
+}
+// 跟 GPU 一樣取照片上的點（圖是上下翻過來的、會重複）
+function w3mLavaAt(a, u, v) {
+  const N = 128, x = (u - Math.floor(u)) * N - 0.5, y = (1 - (v - Math.floor(v))) * N - 0.5, x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0;
+  const g = (i, j) => a[(((j % N) + N) % N) * N + (((i % N) + N) % N)];
+  return (g(x0, y0) * (1 - fx) + g(x0 + 1, y0) * fx) * (1 - fy) + (g(x0, y0 + 1) * (1 - fx) + g(x0 + 1, y0 + 1) * fx) * fy;
+}
+// 把網格變成岩石：每個點照它在 m-lava 上的位置（三向投影）往內壓（裂縫）或往外凸（岩塊，高低不一）；aLava 是裂縫有多深（發光用）
+// grid = [N, R]：一圈一圈排的網格，算完法線把接縫兩邊平均（fixSeam）；wf(v) 回傳這個地方要凹凸多少（臉上少一點）
+function w3mRockify(g, D, grid, wf) {
+  const P = g.attributes.position, Nn = g.attributes.normal, L = w3mLavaData(), n = P.count, lava = new Float32Array(n), v = new THREE.Vector3(), nv = new THREE.Vector3(), s = W3M_ROCK.s;
+  for (let i = 0; i < n; i++) {
+    v.fromBufferAttribute(P, i); nv.fromBufferAttribute(Nn, i).normalize();
+    const w0 = nv.x ** 4, w1 = nv.y ** 4, w2 = nv.z ** 4, ws = w0 + w1 + w2 + 1e-5;
+    const q = L ? (w0 * w3mLavaAt(L, v.z * s, v.y * s) + w1 * w3mLavaAt(L, v.x * s, v.z * s) + w2 * w3mLavaAt(L, v.x * s, v.y * s)) / ws : 0;
+    const lump = fbm3(v.x * 2.4, v.y * 2.4, v.z * 2.4, 3, 7), big = fbm3(v.x * 1.1, v.y * 1.1, v.z * 1.1, 2, 9), k = wf ? wf(v) : 1;
+    const d = D * k * (0.8 * (lump - 0.5) + 1.6 * (big - 0.5) + 0.45 - 1.5 * sstep(0.1, 0.5, q));
+    P.setXYZ(i, v.x + nv.x * d, v.y + nv.y * d, v.z + nv.z * d);
+    lava[i] = sstep(0.12, 0.55, q) * (0.4 + 0.6 * k);
+  }
+  g.computeVertexNormals();
+  if (grid) fixSeam(g, grid[0], grid[1]);
+  g.setAttribute('aLava', new THREE.BufferAttribute(lava, 1));
+  return g;
+}
+// 岩石的材質：顏色是 m-rock、發的光是 m-lava（三向投影，跟 w3mRockify 用一樣的座標），再加上深的裂縫透出來的光（aLava）。
+// u.uGlow 熔岩多亮（0 是冷卻了，全身黑掉）、u.uCool 冷卻了多少（岩石變更黑）
+function w3mRockMat() {
+  const m = ownPhong('#c8c2bc', { emissive: 0xffffff, specular: 0x2a2622, shininess: 10, shade: 0.8, transparent: true });
+  const u = { uRk: { value: rockTex }, uLv: { value: lavaCrackTex }, uRkS: { value: W3M_ROCK.s }, uGlow: { value: 1 }, uCool: { value: 0 } };
+  const prev = m.onBeforeCompile;
+  m.onBeforeCompile = (sh, rd) => {
+    prev.call(m, sh, rd);
+    Object.assign(sh.uniforms, u);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aLava;\nvarying float vLava;\nvarying vec3 vRkP;\nvarying vec3 vRkN;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvRkP = position; vRkN = normal; vLava = aLava;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vLava;\nvarying vec3 vRkP;\nvarying vec3 vRkN;\nuniform sampler2D uRk, uLv;\nuniform float uRkS, uGlow, uCool;')
+      .replace('#include <map_fragment>', `#include <map_fragment>
+        vec3 rkW = pow(abs(normalize(vRkN)), vec3(4.0)); rkW /= rkW.x + rkW.y + rkW.z + 1e-5;
+        vec3 rkP = vRkP * uRkS;
+        vec3 rkC = texture2D(uRk, rkP.zy).rgb * rkW.x + texture2D(uRk, rkP.xz).rgb * rkW.y + texture2D(uRk, rkP.xy).rgb * rkW.z;
+        vec3 lvC = texture2D(uLv, rkP.zy).rgb * rkW.x + texture2D(uLv, rkP.xz).rgb * rkW.y + texture2D(uLv, rkP.xy).rgb * rkW.z;
+        diffuseColor.rgb *= rkC * (1.0 - 0.55 * uCool) * (1.0 - 0.5 * vLava);`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        totalEmissiveRadiance *= (lvC * (0.6 + 1.4 * vLava) + vec3(1.0, 0.36, 0.06) * vLava * 0.55) * uGlow;`);
+  };
+  m.customProgramCacheKey = () => 'lightmap-w3mrock';
+  m.userData.rock = u;
+  return m;
+}
+// 身體（從屁股到隆起的背）：肩膀很寬、胸口厚，往前駝一點
+const TY_TORSO = [
+  { y: 0.78, w: 0.5, f: 0.32, b: 0.34, z: -0.06 }, { y: 0.98, w: 0.53, f: 0.37, b: 0.36, z: -0.04 }, { y: 1.18, w: 0.44, f: 0.4, b: 0.32, z: 0.01 },
+  { y: 1.42, w: 0.52, f: 0.44, b: 0.36, z: 0.07 }, { y: 1.66, w: 0.66, f: 0.47, b: 0.44, z: 0.14 }, { y: 1.88, w: 0.8, f: 0.46, b: 0.52, z: 0.2 },
+  { y: 2.06, w: 0.8, f: 0.4, b: 0.56, z: 0.19 }, { y: 2.22, w: 0.6, f: 0.3, b: 0.5, z: 0.12 }, { y: 2.33, w: 0.32, f: 0.22, b: 0.32, z: 0.06 },
+];
+const TY_LEAN = 0.24, TY_HEAD = { rx: 0.25, ry: 0.23, rz: 0.23, y: 2.06, z: 0.5 }, TY_SH = { x: 0.72, y: 1.96, z: 0.2 };
+const TY_FACE = [   // [X, Y, 寬, 高, 凸起多少, 左右對稱, 斜多少]
+  [0.24, 0.26, 0.22, 0.075, 0.42, 1, 0.45],  // 往中間壓的粗眉骨（V 字形，壓住半個眼睛，很兇）
+  [0, 0.16, 0.09, 0.07, 0.3, 0, 0],          // 眉心
+  [0.26, 0.07, 0.13, 0.085, -0.3, 1, 0.3],   // 熔岩洞的眼窩（很深）
+  [0, -0.1, 0.1, 0.12, 0.22, 0, 0],          // 塌塌的大鼻子
+  [0.11, -0.18, 0.07, 0.05, 0.12, 1, 0],
+  [0.45, -0.1, 0.15, 0.12, 0.15, 1, 0],      // 顴骨
+  [0, -0.74, 0.38, 0.14, 0.22, 0, 0],        // 往前凸的大下巴
+  [0.45, -0.52, 0.15, 0.15, 0.1, 1, 0],
+];
+const TY_MOUTH = { y: -0.42, c: -0.25, w: 0.42, h: 0.13 };   // 張開往下撇的嘴（裡面是熔岩）
+function tyFaceD(x, y, cav = true) {
+  let d = 0;
+  for (const f of TY_FACE) for (const s of f[5] ? [-1, 1] : [1]) {
+    let u = x - s * f[0], v = y - f[1];
+    if (f[6]) { const c = Math.cos(f[6] * s), sn = Math.sin(f[6] * s), u2 = u * c + v * sn; v = -u * sn + v * c; u = u2; }
+    u /= f[2]; v /= f[3];
+    if (u * u + v * v < 16) d += f[4] * Math.exp(-u * u - v * v);
+  }
+  const k = Math.max(0, 1 - (x / TY_MOUTH.w) ** 2), h = TY_MOUTH.h * Math.sqrt(k), dy = y - TY_MOUTH.y - TY_MOUTH.c * x * x;
+  if (cav && h > 0) d -= 0.4 * sstep(-0.02, 0.02, h - Math.abs(dy));
+  d += (1 - sstep(0.4, 0.55, Math.abs(x))) * 0.07 * (Math.exp(-(((dy - h - 0.04) / 0.035) ** 2)) + Math.exp(-(((dy + h + 0.04) / 0.035) ** 2)));
+  return d;
+}
+// 頭：方方的一塊岩石（超橢圓），下巴寬、頭頂平
+function tyHeadPt(x, y, z, out, cav = true) {
+  const sq = t => Math.sign(t) * Math.abs(t) ** 0.75;
+  let X = sq(x), Y = sq(y), Z = sq(z);
+  if (Y < 0) X *= 1 + 0.12 * Math.min(1, -Y * 1.5);
+  if (Z < 0) Z *= 0.85;
+  const d = z > 0 ? tyFaceD(x, y, cav) * sstep(0.05, 0.4, z) : 0, k = 1 + d / (Math.hypot(X, Y, Z) || 1);
+  return out.set(X * k * TY_HEAD.rx, Y * k * TY_HEAD.ry, Z * k * TY_HEAD.rz);
+}
+const tyU = crWarp(-Math.PI, Math.PI, a => 1 + Math.exp(-((a / 0.8) ** 2))), tyV = crWarp(0, Math.PI, () => 1);
+// 一顆一顆的岩塊（拳頭、腳掌、肩膀上的大石頭）：壓扁拉長的球再變成岩石
+const tyBoulder = (key, sx, sy, sz, ws = 20, hs = 14, D = 0.05) => geo(key, () => w3mRockify(new THREE.SphereGeometry(1, ws, hs).scale(sx, sy, sz), D, [ws, hs + 1]));
+const tyTube = (key, pts, rs, seg, n, D = 0.05) => geo(key, () => w3mRockify(tubeGeo(key + '~', pts, rs, seg, n).clone(), D, [seg, n + 1]));
+function tyBuild(r, g) {
+  const rock = w3mRockMat(), T = { transparent: true };
+  const lavaM = ownBasic({ color: 0xff7a18, ...T }), hotM = ownBasic({ color: 0xffd060, ...T });
+  r.rock = rock.userData.rock; r.lavaM = [lavaM, hotM];
+  r.mats.push(rock, lavaM, hotM);
+  r.body = new THREE.Group(); r.body.scale.set(1.04, 1.08, 1.04); g.add(r.body);   // 往前駝之後還是 2.6 公尺高
+  // 短短的粗腿、扁扁的大腳掌
+  r.legs = [];
+  for (const s of [-1, 1]) {
+    const leg = new THREE.Group(); leg.position.set(s * 0.3, 0.95, 0); r.body.add(leg);
+    const hip = new THREE.Mesh(tyBoulder('tyHip', 0.36, 0.34, 0.38, 18, 12, 0.07), rock); hip.position.set(s * 0.02, 0.02, 0); leg.add(hip);
+    leg.add(new THREE.Mesh(tyTube('tyLeg' + s, [[0, 0.06, 0], [s * 0.04, -0.18, 0.05], [s * 0.06, -0.4, 0.1], [s * 0.04, -0.58, 0.02], [s * 0.03, -0.76, -0.02]], [0.35, 0.31, 0.23, 0.27, 0.2], 24, 16, 0.085), rock));
+    const ft = new THREE.Mesh(tyBoulder('tyFoot', 0.28, 0.15, 0.38, 18, 10, 0.06), rock); ft.position.set(s * 0.03, -0.8, 0.09); leg.add(ft);
+    r.legs.push(leg);
+  }
+  // 上半身：身體、頭、手臂
+  r.up = new THREE.Group(); r.up.position.y = 0.95; r.up.rotation.x = TY_LEAN; r.body.add(r.up);
+  const upIn = new THREE.Group(); upIn.position.y = -0.95; r.up.add(upIn);
+  upIn.add(new THREE.Mesh(geo('tyTorso', () => { const lg = loftBuild(TY_TORSO, { seg: 56, sub: 3, capA: 0.06, capB: 0.07 }); return w3mRockify(lg, 0.09, [56, lg.attributes.position.count / 57]); }), rock));
+  // 兩肩上隆起的大石頭
+  for (const s of [-1, 1]) { const b = new THREE.Mesh(tyBoulder('tySh', 0.36, 0.26, 0.38, 20, 12, 0.06), rock); b.position.set(s * 0.62, 2.1, 0.12); b.rotation.set(0.2, 0, s * 0.35); upIn.add(b); }
+  // 頭（陷在兩肩中間）、熔岩洞的眼睛、嘴裡的熔岩、碎石牙
+  r.head = new THREE.Group(); r.head.position.set(0, TY_HEAD.y, TY_HEAD.z); upIn.add(r.head);
+  r.head.add(new THREE.Mesh(geo('tyHead', () => w3mRockify(sculptGeo('tyHead~', tyHeadPt, tyU, tyV, th => sstep(1.1, 1.3, th) * (1 - sstep(2.4, 2.6, th)), a => sstep(-1.1, -0.9, a) * (1 - sstep(0.9, 1.1, a)), [0.1, 0.12], [0.24, 0.26]),
+    0.045, null, v => 0.25 + 0.75 * sstep(0.05, 0.16, -v.z + 0.12))), rock));
+  const P = new THREE.Vector3();
+  for (const s of [-1, 1]) {
+    const X = s * 0.27, Y = 0.1; tyHeadPt(X, Y, Math.sqrt(1 - X * X - Y * Y), P);
+    const e = new THREE.Group(); e.position.set(P.x, P.y, P.z - 0.004); r.head.add(e);
+    e.add(new THREE.Mesh(geo('tyEye', () => new THREE.SphereGeometry(0.07, 12, 8).scale(1.15, 0.85, 0.6)), lavaM));
+    const core = new THREE.Mesh(geo('tyEyeC', () => new THREE.SphereGeometry(0.042, 10, 6).scale(1.1, 0.85, 0.5)), hotM); core.position.z = 0.03; e.add(core);
+    const gl = ownSprite(glowTex, 0xffb020); gl.position.z = 0.07; gl.scale.setScalar(0.26); e.add(gl); r.eyes.push(gl);
+  }
+  tyHeadPt(0, TY_MOUTH.y, Math.sqrt(1 - TY_MOUTH.y ** 2), P);
+  const mouth = new THREE.Mesh(geo('tyMouth', () => new THREE.SphereGeometry(1, 14, 8).scale(0.18, 0.05, 0.05)), hotM); mouth.position.set(0, P.y + 0.005, P.z + 0.0); r.head.add(mouth);
+  r.mouthGlow = ownSprite(glowTex, 0xff6a10); r.mouthGlow.position.set(0, P.y, P.z + 0.05); r.mouthGlow.scale.set(0.45, 0.2, 1); r.head.add(r.mouthGlow);
+  const tp = [];
+  for (let i = 0; i < 8; i++) for (const dn of [1, -1]) {
+    const x = -0.33 + i * 0.094 + (dn < 0 ? 0.047 : 0), k = Math.max(0, 1 - (x / TY_MOUTH.w) ** 2);
+    if (k <= 0.1 || (dn < 0 && i === 7)) continue;
+    const y = TY_MOUTH.y + TY_MOUTH.c * x * x + dn * TY_MOUTH.h * Math.sqrt(k);
+    tyHeadPt(x, y, Math.sqrt(Math.max(0, 1 - x * x - y * y)), P, false);
+    const L = (0.045 + 0.04 * hash01(i * 3 + dn)) * (0.55 + 0.45 * k);
+    tp.push([geo('tyTooth', () => new THREE.ConeGeometry(1, 1, 4).translate(0, -0.5, 0)), mat4(P.x * 0.97, P.y, P.z - 0.012, dn > 0 ? 0.25 : Math.PI - 0.25, x * 0.8 + (hash01(i) - 0.5) * 0.6, (hash01(i + 5) - 0.5) * 0.4, 0.022, L, 0.017)]);
+  }
+  r.head.add(new THREE.Mesh(mergeParts('tyTeeth', tp), rock));
+  // 長長的手臂（垂到膝蓋）、很大的拳頭
+  r.arms = [];
+  for (const s of [-1, 1]) {
+    const arm = new THREE.Group(); arm.position.set(s * TY_SH.x, TY_SH.y, TY_SH.z); arm.rotation.z = s * 0.04; upIn.add(arm);
+    arm.add(new THREE.Mesh(tyTube('tyArm' + s, [[0, 0.04, 0], [s * 0.08, -0.35, 0.02], [s * 0.14, -0.65, 0.06], [s * 0.13, -0.95, 0.14], [s * 0.1, -1.18, 0.2]], [0.31, 0.27, 0.2, 0.28, 0.19], 24, 18, 0.08), rock));
+    const fist = new THREE.Mesh(tyBoulder('tyFist', 0.26, 0.24, 0.3, 20, 14, 0.045), rock); fist.position.set(s * 0.09, -1.32, 0.24); fist.rotation.set(0.3, 0, s * 0.2); arm.add(fist);
+    r.arms.push(arm);
+  }
+  // 身上的熱氣（很淡的一團光）
+  r.heat = ownSprite(glowTex, 0xff6020); r.heat.position.set(0, 1.5, 0); r.heat.scale.setScalar(2.4); r.body.add(r.heat);
+}
+function tySync(e, r, t, p, dt) {
+  const a = enemyAlpha(e), moving = !e.pose && !(e.stunT > 0) && !(e.cooled > 0), cool = e.cooled > 0;
+  r.g.position.y = floorH(e.x, e.y);
+  const w = e.wob * 2.2, st = e.stomp > 0 ? 1 - e.stomp / 0.6 : 0;
+  // 熔岩一明一暗（走路時縫隙一開一合）；冷卻了全身變黑
+  r.cool = (r.cool || 0) + ((cool ? 1 : 0) - (r.cool || 0)) * Math.min(1, dt * 6);
+  const k = (0.55 + 0.45 * Math.sin(t * 2.2)) * (moving ? 0.8 + 0.2 * Math.abs(Math.sin(w * 2)) : 1) * (1 - r.cool);
+  r.rock.uGlow.value = 0.2 + 0.85 * k; r.rock.uCool.value = r.cool;
+  if (r.cool > 0.98) r.rock.uGlow.value = 0;
+  for (const m of r.lavaM) m.color.setRGB(1 - 0.92 * r.cool, (m === r.lavaM[1] ? 0.82 : 0.48) * (1 - 0.95 * r.cool), (m === r.lavaM[1] ? 0.38 : 0.1) * (1 - r.cool));
+  for (const ey of r.eyes) ey.material.opacity = a * (cool ? 0.05 : 0.7 + 0.3 * Math.sin(t * 5));
+  r.mouthGlow.material.opacity = a * (cool ? 0 : 0.35 + 0.15 * Math.sin(t * 3.1));
+  r.heat.material.opacity = a * (cool ? 0 : 0.08 + 0.05 * Math.sin(t * 3));
+  // 走路（很重）、跺腳（右腳抬起來再踩下去，整隻往上一頓）
+  r.legs[0].rotation.x = moving ? Math.sin(w) * 0.3 : 0; r.legs[1].rotation.x = moving ? -Math.sin(w) * 0.3 : 0;
+  if (st > 0) { r.legs[1].rotation.x = -1.1 * Math.sin(st * Math.PI); r.body.position.y = 0.15 * Math.sin(st * Math.PI); } else r.body.position.y = moving ? Math.abs(Math.sin(w)) * 0.05 : 0;
+  r.body.rotation.z = moving ? Math.sin(w) * 0.04 : 0;
+  r.arms[0].rotation.x = -TY_LEAN + (moving ? -Math.sin(w) * 0.25 : 0); r.arms[1].rotation.x = -TY_LEAN + (moving ? Math.sin(w) * 0.25 : 0);
+  if (st > 0) for (const arm of r.arms) arm.rotation.x -= 0.4 * Math.sin(st * Math.PI);
+  r.head.rotation.set(-TY_LEAN * 0.7 + Math.sin(t * 0.7) * 0.04 + 0.15 * Math.sin(st * Math.PI), Math.sin(t * 0.45 + e.wob) * 0.12, 0);
+}
+UPG.tyrant = { build: tyBuild, sync: tySync, view: { h: 3.0, d: 5.4, cy: 1.4 } };
+
 // ---------- 第三世界到這裡 ----------
 
 
