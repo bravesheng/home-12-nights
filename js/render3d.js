@@ -6905,6 +6905,279 @@ function tySync(e, r, t, p, dt) {
 }
 UPG.tyrant = { build: tyBuild, sync: tySync, view: { h: 3.0, d: 5.4, cy: 1.4 } };
 
+// ---------- 墮落戰神 ----------
+// 2.4 公尺、又高又瘦的骷髏戰士：披著一件很大的破爛白斗篷（從肩膀垂到地上，前面敞開，下擺一條一條破破的、沾著鏽和血），
+// 戴著鐵頭盔、兩根很大的彎角往外再往上翹，頭盔底下是咧著嘴的骷髏臉（很深的黑眼窩、一點暗紅的光），領口兩顆暗紅色的扣子；
+// 胸口的鐵甲破了一個大洞，露出肋骨、脊椎和空空的黑色胸腔；腰上垂著咖啡色的破布，腿上綁著髒布條；
+// 右手拖著一把比人還長的大劍，劍尖在前面的地上磨出火花。走路很慢、很重
+// 一片彎彎的布或盔甲（斗篷、胸甲、胸腔）：照 loftGeo 的斷面（y、x、z、w、f、b，加上 open：前面敞開的半個角度），
+// 角度從 open 繞到 2π - open（0 是正前方，往 +x 是正的；sweep 是只繞多少，例如胸甲只做前面）；
+// fn(P, t, u, a) 可以再改每個點（t 從上到下、u 從一邊到另一邊）；aHair（上面 0、下面 1）給 hairMat 的擺動用
+function w3mSheet(key, rings, N, o = {}) {
+  return geo(key, () => {
+    const sub = o.sub || 3, F = ['y', 'x', 'z', 'w', 'f', 'b', 'open'];
+    const K = rings.map(r => ({ y: r.y, x: r.x || 0, z: r.z || 0, w: r.w, f: r.f ?? r.d, b: r.b ?? r.d, open: r.open || 0 }));
+    const cr = (a, b, c, d, t) => 0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (3 * b - a - 3 * c + d) * t * t * t), rs = [];
+    K.forEach((B, i) => { rs.push(B); if (i === K.length - 1) return; const A = K[Math.max(0, i - 1)], C = K[i + 1], D = K[Math.min(K.length - 1, i + 2)]; for (let j = 1; j < sub; j++) { const t = j / sub, r = {}; for (const k of F) r[k] = cr(A[k], B[k], C[k], D[k], t); rs.push(r); } });
+    const R = rs.length, C1 = N + 1, pos = new Float32Array(R * C1 * 3), uv = new Float32Array(R * C1 * 2), hr = new Float32Array(R * C1 * 2), P = new THREE.Vector3();
+    for (let i = 0; i < R; i++) for (let j = 0; j <= N; j++) {
+      const r = rs[i], t = i / (R - 1), u = j / N, a0 = o.a0 ?? r.open, a1 = o.a1 ?? Math.PI * 2 - r.open, a = a0 + (a1 - a0) * u, sx = Math.sin(a), cz = Math.cos(a);
+      P.set(r.x + sx * r.w, r.y, r.z + cz * (cz > 0 ? r.f : r.b));
+      if (o.fn) o.fn(P, t, u, a);
+      const k = i * C1 + j; pos[k * 3] = P.x; pos[k * 3 + 1] = P.y; pos[k * 3 + 2] = P.z;
+      uv[k * 2] = u; uv[k * 2 + 1] = 1 - t; hr[k * 2] = t; hr[k * 2 + 1] = a * 3;
+    }
+    const idx = [];
+    for (let i = 0; i < R - 1; i++) for (let j = 0; j < N; j++) { const a = i * C1 + j, b = a + 1, c = a + C1, d = c + 1; idx.push(a, b, c, b, d, c); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setAttribute('aHair', new THREE.BufferAttribute(hr, 2));
+    g.setIndex(idx); g.computeVertexNormals();
+    return g;
+  });
+}
+// 斗篷：從肩膀垂到地上，越往下越寬、前面越敞開；有直的皺褶（越往下越深）
+const WL_CLOAK = [
+  { y: 2.09, w: 0.17, f: 0.1, b: 0.12, open: 0.5 }, { y: 2.04, w: 0.33, f: 0.15, b: 0.17, open: 0.55 }, { y: 1.94, w: 0.42, f: 0.2, b: 0.22, open: 0.62 },
+  { y: 1.6, w: 0.48, f: 0.27, b: 0.3, open: 0.75 }, { y: 1.05, w: 0.6, f: 0.36, b: 0.42, open: 0.85 }, { y: 0.45, w: 0.72, f: 0.45, b: 0.54, open: 0.9 },
+  { y: 0.04, w: 0.8, f: 0.5, b: 0.62, open: 0.92 },
+];
+const wlCloakFold = (a, t) => (0.01 + 0.075 * t * t) * Math.sin(a * 9 + 1.6 * fbm3(Math.cos(a) * 1.5, Math.sin(a) * 1.5, t * 2, 2, 131) * 4) + 0.03 * t * (fbm3(Math.cos(a) * 4, Math.sin(a) * 4, t * 3, 2, 132) - 0.5);
+// 斗篷的貼圖：泛黃的白麻布、皺褶的地方偏藍灰（設計圖的淡藍色）、下面越來越髒，鏽和乾掉的血；下擺一條一條破破的（透明），前面的邊也破、有破洞
+function wlPaintCloak(c, W, H) {
+  w3mPix(c, W, H, (u, v, o) => {
+    const a = 0.8 + (Math.PI * 2 - 1.6) * u, fold = Math.sin(a * 9 + 1.6 * fbm3(Math.cos(a) * 1.5, Math.sin(a) * 1.5, v * 2, 2, 131) * 4);
+    const n = fbm3(u * 6, v * 9, 0.5, 4, 133), m = fbm3(u * 40, v * 60, 1.5, 3, 135), weave = 0.93 + 0.07 * Math.sin(u * W * 2.2) * Math.sin(v * H * 2.2);
+    const sh = clamp(0.5 - 0.5 * fold * (0.3 + v), 0, 1) * 0.45 + 0.15 * (1 - n);
+    let R = 222 - 50 * sh, G = 216 - 44 * sh, B = 200 - 26 * sh;
+    const dirt = sstep(0.45, 1, v) * (0.5 + 0.5 * n), rust = sstep(0.62, 0.82, fbm3(u * 9, v * 7, 3.3, 3, 137)) * (0.3 + 0.7 * v), blood = sstep(0.7, 0.85, fbm3(u * 14, v * 14, 7.1, 3, 139)) * (1 - sstep(0.2, 0.5, v) * 0.6);
+    const L = (0.9 + 0.2 * (m - 0.5)) * weave * (1 - 0.35 * dirt);
+    R = (R * (1 - 0.5 * rust) + 128 * 0.5 * rust) * L; G = (G * (1 - 0.55 * rust) + 86 * 0.55 * rust) * L; B = (B * (1 - 0.6 * rust) + 52 * 0.6 * rust) * L;
+    R = R * (1 - 0.6 * blood) + 92 * 0.6 * blood; G = G * (1 - 0.7 * blood) + 26 * 0.7 * blood; B = B * (1 - 0.7 * blood) + 22 * 0.7 * blood;
+    o[0] = R; o[1] = G; o[2] = B;
+    // 下擺：一條一條往上撕開的破布；前面的邊、破洞
+    const tat = fbm3(u * 46, 0.5, 2.5, 2, 141), hem = 0.86 + 0.1 * fbm3(u * 7, 1.5, 0.5, 3, 143) - 0.3 * sstep(0.5, 0.75, tat);
+    let al = v < hem ? 1 : 0;
+    const edge = Math.min(u, 1 - u) * 14 - 0.6 * fbm3(v * 18, u * 3, 4.4, 2, 145) - 0.2 * v * 6;
+    if (edge < 0) al = 0;
+    if (v > 0.25 && fbm3(u * 13, v * 11, 5.5, 3, 147) > 0.74) al = 0;
+    o[3] = al * 255;
+  });
+}
+// 胸甲的貼圖：刮傷、凹痕、鏽水往下流；下半中間破了一個大洞（透明，邊緣是撕開的鐵）
+function wlPaintPlate(c, W, H) {
+  w3mPix(c, W, H, (u, v, o) => {
+    const n = fbm3(u * 8, v * 8, 0.3, 4, 151), scr = Math.abs(fbm3(u * 30, v * 4, 2.2, 3, 153) - 0.5) < 0.012 ? 1 : 0, dent = sstep(0.68, 0.8, fbm3(u * 16, v * 16, 4.1, 2, 155));
+    const rust = sstep(0.55, 0.8, fbm3(u * 20, v * 2.5, 6.6, 3, 157)) * sstep(0.2, 0.8, v);
+    let L = 0.75 + 0.35 * n + 0.25 * scr - 0.25 * dent;
+    o[0] = (150 * (1 - rust) + 120 * rust) * L; o[1] = (152 * (1 - rust) + 72 * rust) * L; o[2] = (158 * (1 - rust) + 40 * rust) * L;
+    const dx = (u - 0.5) / 0.28, dy = (v - 0.84) / 0.38, hole = Math.hypot(dx, dy) + 0.35 * (fbm3(u * 9, v * 9, 8.8, 3, 159) - 0.5);
+    o[3] = hole < 1 ? 0 : 255;
+    if (hole >= 1 && hole < 1.12) { o[0] *= 0.6; o[1] *= 0.55; o[2] *= 0.5; }   // 撕開的邊（黑黑的、捲起來）
+  });
+}
+// 腿上的布條：一圈一圈斜著綁的髒布（每一圈顏色、髒的程度不一樣），邊上有陰影
+function wlPaintWrap(c, W, H) {
+  w3mPix(c, W, H, (u, v, o) => {
+    const s = v * 9 + u * 1.0, b = Math.floor(s), f = s - b, hsh = hash01(b * 7.7 + 3), n = fbm3(Math.cos(u * Math.PI * 2) * 2, v * 8, Math.sin(u * Math.PI * 2) * 2, 4, 161);
+    const edge = sstep(0, 0.12, f) * (1 - sstep(0.85, 1, f)), stain = sstep(0.55, 0.8, fbm3(Math.cos(u * Math.PI * 2) * 3, v * 5, Math.sin(u * Math.PI * 2) * 3, 3, 163));
+    const L = (0.55 + 0.45 * edge) * (0.85 + 0.3 * n) * (1 - 0.35 * stain) * (0.85 + 0.25 * hsh);
+    o[0] = 176 * L; o[1] = 134 * L; o[2] = 92 * L;
+  });
+}
+// 骷髏的臉（單位球上，正面看）
+const WL_SKULL = { rx: 0.122, ry: 0.152, rz: 0.135 };
+const WL_FACE = [
+  [0.3, 0.215, 0.17, 0.055, 0.16, 1, 0.32],   // 往中間壓的眉骨
+  [0.3, 0.06, 0.175, 0.16, -0.6, 1, 0.1, 1],    // 很深的眼窩（邊緣銳利的洞）
+  [0, -0.16, 0.065, 0.1, -0.45, 0, 0, 1],      // 鼻子的洞
+  [0, 0.05, 0.04, 0.07, 0.06, 0, 0],         // 鼻骨
+  [0.5, -0.1, 0.12, 0.06, 0.2, 1, -0.2],     // 顴骨
+  [0.42, -0.34, 0.12, 0.12, -0.2, 1, 0],     // 顴骨底下凹進去
+  [0, -0.35, 0.27, 0.06, 0.1, 0, 0],         // 上排牙齒的地方
+  [0, -0.5, 0.24, 0.05, 0.08, 0, 0],         // 下排牙齒的地方
+  [0, -0.425, 0.3, 0.014, -0.08, 0, 0],      // 咬合的縫
+  [0, -0.76, 0.15, 0.08, 0.1, 0, 0],         // 下巴
+];
+function wlFaceD(x, y) {
+  let d = 0;
+  for (const f of WL_FACE) for (const s of f[5] ? [-1, 1] : [1]) {
+    let u = x - s * f[0], v = y - f[1];
+    if (f[6]) { const c = Math.cos(f[6] * s), sn = Math.sin(f[6] * s), u2 = u * c + v * sn; v = -u * sn + v * c; u = u2; }
+    u /= f[2]; v /= f[3];
+    if (f[7]) d += f[4] * (1 - sstep(0.62, 1.0, Math.hypot(u, v)));   // 洞：底是平的、邊緣很陡
+    else if (u * u + v * v < 16) d += f[4] * Math.exp(-u * u - v * v);
+  }
+  return d;
+}
+function wlSkullPt(x, y, z, out) {
+  let X = x, Y = y, Z = z;
+  if (Y < 0) { const t = -Y; X *= 1 - 0.3 * t ** 1.5; if (Z > 0) Z *= 1 + 0.08 * sstep(0.2, 0.6, t) - 0.1 * sstep(0.7, 1, t); else Z *= 1 - 0.35 * t; }
+  if (Z < 0) Z *= 1.12;
+  const d = z > 0 ? wlFaceD(x, y) * sstep(0.05, 0.4, z) : 0, k = 1 + d / (Math.hypot(X, Y, Z) || 1);
+  return out.set(X * k * WL_SKULL.rx, Y * k * WL_SKULL.ry, Z * k * WL_SKULL.rz);
+}
+const wlU = crWarp(-Math.PI, Math.PI, a => 1 + 1.4 * Math.exp(-((a / 0.8) ** 2))), wlV = crWarp(0, Math.PI, th => 1 + 1.2 * Math.exp(-(((th - 1.75) / 0.5) ** 2)));
+// 骷髏的貼圖：泛黃的舊骨頭、裂紋和髒污，眼窩、鼻子的洞、咬合的縫是黑的
+function wlPaintSkull(c, W, H) {
+  w3mPix(c, W, H, (u, v, o) => {
+    const th = wlV.inv(v), a = wlU.inv(u), st = Math.sin(th), x = st * Math.sin(a), y = Math.cos(th), z = st * Math.cos(a);
+    const n = fbm3(x * 5, y * 5, z * 5, 4, 171), cl = w3mCell(x * 9, y * 9, z * 9, 173), crack = 1 - sstep(0, 0.035, cl[1] - cl[0]), dirt = sstep(0.5, 0.8, fbm3(x * 3, y * 3, z * 3, 3, 175));
+    let L = (0.82 + 0.3 * (n - 0.5)) * (1 - 0.35 * crack * sstep(0.5, 0.7, fbm3(x * 4, y * 4, z * 4, 2, 177))) * (1 - 0.3 * dirt);
+    let gr = dirt * 0.4;
+    if (z > 0.05) { const d = wlFaceD(x, y) * sstep(0.05, 0.4, z); L *= 1 - 0.95 * clamp(-d * 3.5, 0, 1); gr += clamp(-d * 6, 0, 1) * 0.5; }   // 凹下去的地方卡著髒污
+    o[0] = (218 - 90 * gr) * L; o[1] = (206 - 100 * gr) * L; o[2] = (178 - 100 * gr) * L;
+  });
+}
+// 大劍：寬寬的劍身（有幾個缺口）、劍格、纏著皮的劍柄、圓圓的劍首（劍尖朝 -y）
+const wlBladeGeo = () => geo('wlBlade', () => {
+  const s = new THREE.Shape(), L = 1.62, W0 = 0.068, nick = [[0.35, 0.012], [0.8, 0.008], [1.15, 0.014]];
+  s.moveTo(-W0, 0); s.lineTo(W0, 0);
+  for (const [y, d] of nick) { s.lineTo(W0 - 0.012 * y / L, -y + 0.015); s.lineTo(W0 - 0.012 * y / L - d, -y); s.lineTo(W0 - 0.012 * y / L, -y - 0.02); }
+  s.lineTo(0.05, -L + 0.18); s.lineTo(0, -L); s.lineTo(-0.05, -L + 0.18);
+  for (const [y, d] of [...nick].reverse().map(([y, d]) => [y * 0.93, d * 0.8])) { s.lineTo(-W0 + 0.012 * y / L, -y - 0.02); s.lineTo(-W0 + 0.012 * y / L + d, -y); s.lineTo(-W0 + 0.012 * y / L, -y + 0.015); }
+  s.lineTo(-W0, 0);
+  const g = new THREE.ExtrudeGeometry(s, { depth: 0.006, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.012, bevelSegments: 1 });
+  g.translate(0, -0.14, -0.003); g.computeVertexNormals();
+  return g;
+});
+function wlHiltGeo() {
+  return mergeParts('wlHilt', [
+    [geo('wlGuard', () => new THREE.BoxGeometry(0.34, 0.035, 0.05)), mat4(0, -0.12, 0)],
+    [geo('wlGuardEnd', () => new THREE.SphereGeometry(0.026, 8, 6)), mat4(0.17, -0.12, 0)], [geo('wlGuardEnd', () => null), mat4(-0.17, -0.12, 0)],
+    [geo('wlPommel', () => new THREE.SphereGeometry(0.04, 10, 8)), mat4(0, 0.16, 0, 0, 0, 0, 1, 0.8, 1)],
+  ]);
+}
+// 骨頭的手：細細的手指骨，彎起來（c）
+function wlHandGeo(s, c) {
+  const parts = [[geo('wlPalm', () => new THREE.SphereGeometry(1, 8, 6)), mat4(0, -0.035, 0.005, 0, 0, 0, 0.032, 0.04, 0.014)]];
+  for (let i = 0; i < 5; i++) {
+    const th = i === 4, L = th ? 0.06 : [0.085, 0.095, 0.09, 0.075][i], cc = c * (th ? 0.6 : 1);
+    parts.push([tubeGeo('wlFinger' + i + '_' + c, [[0, 0, 0], [0, -L * 0.45, L * 0.2 * cc], [0, -L * 0.75 * (1 - 0.4 * cc), L * 0.7 * cc], [0, -L * (1 - 0.8 * cc), L * 1.05 * cc]], [0.009, 0.006, 0.007, 0.004], 5, 6), mat4(s * (th ? 0.03 : -0.024 + i * 0.016), th ? -0.02 : -0.07, th ? 0.015 : 0, 0, 0, s * (th ? 0.8 : -0.05 + i * 0.035))]);
+  }
+  return mergeParts('wlHand' + s + '_' + c, parts);
+}
+const WL_SH = { x: 0.27, y: 2.0, z: 0 };
+function wlBuild(r, g) {
+  const T = { transparent: true };
+  const bone = withDetail(ownPhong('#b4a684', { specular: 0x2c2a24, shininess: 20, shade: 0.75, ...T }), 'bone', 6, 1.1);
+  const skT = m5Tex('wlSkull', 1024, 512, wlPaintSkull); skT.wrapS = THREE.ClampToEdgeWrapping;
+  const skull = withDetail(ownPhong('#ddd4c2', { map: skT, bumpMap: skT, bumpScale: 1.0, specular: 0x2c2a24, shininess: 20, shade: 0.65, ...T }), 'bone', 8, 0.9);
+  const steel = withDetail(ownPhong('#62666b', { specular: 0x5a5a5a, shininess: 30, shade: 0.75, ...T }), 'steel', 4, 1.2);
+  const plT = m5Tex('wlPlate', 256, 256, wlPaintPlate); plT.wrapS = plT.wrapT = THREE.ClampToEdgeWrapping;
+  const plate = withDetail(ownPhong('#c8c8c8', { map: plT, alphaTest: 0.5, side: THREE.DoubleSide, specular: 0x5a5a5a, shininess: 30, shade: 0.75, ...T }), 'steel', 4, 1.2);
+  const horn = withDetail(ownPhong('#5a544c', { specular: 0x26241f, shininess: 25, shade: 0.7, ...T }), 'bone', 10, 0.8);
+  const clT = m5Tex('wlCloak', 512, 512, wlPaintCloak); clT.wrapS = clT.wrapT = THREE.ClampToEdgeWrapping;
+  const cloak = withDetail(hairMat(clT, 0.75), 'rag', 9, 0.45);
+  const wrT = m5Tex('wlWrap', 256, 256, wlPaintWrap);
+  const wrap = withDetail(ownPhong('#ffffff', { map: wrT, bumpMap: wrT, bumpScale: 1.5, specular: 0x111111, shininess: 6, shade: 0.75, ...T }), 'rag', 10, 0.6);
+  const stT = m5Tex('krStrip', 64, 256, (c, W, H) => krPaintRag(c, W, H, true)); stT.wrapS = stT.wrapT = THREE.ClampToEdgeWrapping;
+  const rag = withDetail(hairMat(stT, 0.7), 'rag', 14, 0.5); rag.color.set('#5e4532');
+  const leather = withDetail(ownLM('#30241a', { shade: 0.7, ...T }), 'rag', 14, 0.7);
+  const dark = ownBasic({ color: 0x070405, side: THREE.DoubleSide, ...T });
+  const jewel = ownPhong('#6a0c10', { specular: 0xff9090, shininess: 90, emissive: 0x1a0204, shade: 0.5, ...T });
+  r.mats.push(bone, skull, steel, plate, horn, cloak, wrap, rag, leather, dark, jewel);
+  r.hairU = [cloak.userData.hair, rag.userData.hair];
+  r.body = new THREE.Group(); g.add(r.body);
+  // 腿：骨頭外面綁著髒布條，腳也包著布，腳踝垂著破布條
+  r.legs = [];
+  for (const s of [-1, 1]) {
+    const leg = new THREE.Group(); leg.position.set(s * 0.13, 1.12, 0); r.body.add(leg);
+    leg.add(new THREE.Mesh(w3mTube('wlLeg' + s, [[0, 0.04, 0], [s * 0.01, -0.25, 0.02], [s * 0.01, -0.5, 0.03], [0, -0.78, 0.0], [0, -1.02, -0.01]], [0.07, 0.062, 0.055, 0.058, 0.05], 10, 18, 2.1), wrap));
+    leg.add(new THREE.Mesh(w3mTube('wlFoot', [[0, -1.06, -0.05], [0, -1.08, 0.04], [0, -1.1, 0.13]], [0.05, 0.052, 0.035], 8, 5, 0.4), wrap));
+    const S = []; for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2 + 0.3, x = Math.sin(a) * 0.055, z = Math.cos(a) * 0.055; S.push({ a: [x, -0.9, z], b: [x * 1.3, -1.0, z * 1.3], c: [x * 1.5, -1.1 + 0.02 * hash01(i + s), z * 1.5], w: 0.03, f: a, ph: i * 2, tp: 0.5 }); }
+    leg.add(new THREE.Mesh(hairGeo('wlAnkle' + s, S), rag));
+    r.legs.push(leg);
+  }
+  // 骨盆、脊椎、肋骨（有幾根斷了）、後面黑黑的胸腔
+  const sp = [[geo('wlPelvis', () => new THREE.SphereGeometry(1, 12, 8)), mat4(0, 1.16, -0.02, 0, 0, 0, 0.16, 0.08, 0.1)]];
+  for (let k = 0; k < 16; k++) { const y = 1.18 + k * 0.058, z = -0.07 + 0.025 * Math.sin(k * 0.35); sp.push([geo('wlVert', () => new THREE.CylinderGeometry(0.024, 0.026, 0.036, 8)), mat4(0, y, z)], [geo('wlProc', () => new THREE.BoxGeometry(0.014, 0.03, 0.05)), mat4(0, y, z - 0.035, 0.4, 0, 0)]); }
+  for (let k = 0; k < 7; k++) for (const s of [-1, 1]) {
+    const y = 1.95 - k * 0.075, w = 0.15 + 0.03 * Math.sin(k * 0.6 + 0.6), br = (k === 4 && s > 0) || (k === 6) ? 0.55 : (k === 5 && s < 0) ? 0.7 : 1;
+    const pts = [[s * 0.02, y, -0.08], [s * w, y - 0.02, -0.05], [s * (w + 0.04), y - 0.06, 0.06], [s * w * 0.75, y - 0.1, 0.15], [s * 0.03, y - 0.12, 0.17]];
+    sp.push([tubeGeo('wlRib' + k + s + br, pts.slice(0, br < 1 ? Math.max(2, Math.round(5 * br)) : 5), [0.012, 0.011, 0.01, 0.009], 5, 8), mat4(0, 0, 0)]);
+  }
+  sp.push([geo('wlSternum', () => new THREE.BoxGeometry(0.035, 0.3, 0.016)), mat4(0, 1.78, 0.175, 0.12, 0, 0)]);
+  r.body.add(new THREE.Mesh(mergeParts('wlBones', sp), bone));
+  r.body.add(new THREE.Mesh(w3mSheet('wlCavity', [{ y: 2.0, w: 0.16, f: 0.05, b: 0.1 }, { y: 1.62, w: 0.17, f: 0.05, b: 0.11 }, { y: 1.3, w: 0.13, f: 0.04, b: 0.09 }], 10, { a0: Math.PI / 2, a1: Math.PI * 1.5 }), dark));
+  // 破掉的胸甲、兩肩的護肩（兩層）、腰上的破布和皮帶
+  r.body.add(new THREE.Mesh(w3mSheet('wlPlate', [{ y: 2.06, w: 0.17, f: 0.13, b: 0.12 }, { y: 1.97, w: 0.24, f: 0.2, b: 0.15 }, { y: 1.78, w: 0.235, f: 0.22, b: 0.15 }, { y: 1.58, w: 0.2, f: 0.19, b: 0.13 }], 18, { a0: -1.7, a1: 1.7, sub: 3 }), plate));
+  const pd = []; for (const s of [-1, 1]) for (const [y, sc] of [[2.05, 1], [1.97, 1.12]]) pd.push([geo('wlPaul', () => new THREE.SphereGeometry(1, 14, 6, 0, Math.PI * 2, 0, 1.3)), mat4(s * WL_SH.x, y, 0, 0, 0, -s * 0.5, 0.135 * sc, 0.1 * sc, 0.145 * sc)]);
+  r.body.add(new THREE.Mesh(mergeParts('wlPauls', pd), steel));
+  const L = [];
+  for (let i = 0; i < 14; i++) { const a = i / 14 * Math.PI * 2, x = Math.sin(a) * 0.17, z = Math.cos(a) * 0.12; L.push({ a: [x, 1.24, z], b: [x * 1.2, 1.0, z * 1.25], c: [x * 1.25, 0.68 - 0.12 * hash01(i * 3.1), z * 1.3], w: 0.07 + 0.04 * hash01(i), f: a, ph: i * 1.9, tp: 0.4 }); }
+  r.body.add(new THREE.Mesh(hairGeo('wlSkirt', L), rag));
+  const bp = []; for (let i = 0; i <= 20; i++) { const a = i / 20 * Math.PI * 2; bp.push([Math.sin(a) * 0.175, 1.25 - 0.03 * Math.cos(a), Math.cos(a) * 0.125]); }
+  r.body.add(new THREE.Mesh(tubeGeo('wlBelt', bp, [0.018, 0.018], 5, 20), leather));
+  // 斗篷（領口兩顆暗紅色的扣子）
+  r.cloak = new THREE.Mesh(w3mSheet('wlCloak', WL_CLOAK, 40, { sub: 4, fn: (P, t, u, a) => { const d = wlCloakFold(a, t); P.x += Math.sin(a) * d; P.z += Math.cos(a) * d; } }), cloak);
+  r.body.add(r.cloak);
+  for (const s of [-1, 1]) { const j = new THREE.Mesh(geo('wlJewel', () => new THREE.SphereGeometry(0.022, 10, 8)), jewel); j.position.set(s * 0.11, 2.06, 0.115); r.body.add(j); }
+  // 頭：骷髏、頭盔、兩根大彎角、眼窩裡一點暗紅的光、脖子的骨頭
+  r.head = new THREE.Group(); r.head.position.set(0, 2.27, 0.03); r.body.add(r.head);
+  r.head.add(new THREE.Mesh(sculptGeo('wlSkull', wlSkullPt, wlU, wlV, th => sstep(1.0, 1.2, th) * (1 - sstep(2.6, 2.8, th)), a => sstep(-1.05, -0.9, a) * (1 - sstep(0.9, 1.05, a)), [0.058, 0.07], [0.2, 0.22]), skull));
+  const P = new THREE.Vector3(), tp = [];
+  for (const [y0, dn] of [[-0.39, 1], [-0.455, -1]]) for (let i = 0; i < 8; i++) {
+    const x = -0.24 + i * 0.068; if (dn < 0 && (i === 1 || i === 6)) continue;
+    wlSkullPt(x, y0, Math.sqrt(1 - x * x - y0 * y0), P);
+    tp.push([geo('wlTooth', () => new THREE.BoxGeometry(1, 1, 1)), mat4(P.x * 0.98, P.y, P.z - 0.001, 0, x * 0.9, (hash01(i * 2 + dn) - 0.5) * 0.15, 0.011, 0.021 + 0.006 * hash01(i + dn), 0.01)]);
+  }
+  r.head.add(new THREE.Mesh(mergeParts('wlTeeth', tp), bone));
+  for (const s of [-1, 1]) {
+    const X = s * 0.3, Y = 0.06; wlSkullPt(X, Y, Math.sqrt(1 - X * X - Y * Y), P);
+    const gl = ownSprite(glowTex, 0x8a1810); gl.position.set(P.x, P.y, P.z + 0.005); gl.scale.setScalar(0.035); r.head.add(gl); r.eyes.push(gl);
+  }
+  const helm = geo('wlHelmTop', () => new THREE.SphereGeometry(1, 20, 6, 0, Math.PI * 2, 0, 1.0)), helmBack = geo('wlHelmBack', () => new THREE.SphereGeometry(1, 18, 5, Math.PI / 2 + 0.75, Math.PI * 2 - 1.5, 1.0, 0.95));
+  r.head.add(new THREE.Mesh(mergeParts('wlHelm', [[helm, mat4(0, 0.01, -0.005, 0, 0, 0, 0.13, 0.16, 0.148)], [helmBack, mat4(0, 0.01, -0.005, 0, 0, 0, 0.13, 0.16, 0.148)],
+    [geo('wlBrow', () => new THREE.TorusGeometry(1, 0.08, 5, 24)), mat4(0, 0.075, -0.005, Math.PI / 2 + 0.12, 0, 0, 0.128, 0.146, 0.12)]]), steel));
+  const hp = [], hr = Array.from({ length: 16 }, (_, i) => (0.058 - 0.052 * (i / 15) ** 0.85) * (1 + 0.07 * (i % 2)));
+  for (const s of [-1, 1]) hp.push([tubeGeo('wlHorn' + s, [[0, 0, 0], [s * 0.09, 0.02, 0.01], [s * 0.18, 0.07, 0.03], [s * 0.24, 0.17, 0.05], [s * 0.25, 0.29, 0.08], [s * 0.21, 0.39, 0.11]], hr, 8, 18), mat4(s * 0.115, 0.085, -0.02)]);
+  r.head.add(new THREE.Mesh(mergeParts('wlHorns', hp), horn));
+  r.head.add(new THREE.Mesh(mergeParts('wlNeck', [0, 1, 2].map(i => [geo('wlVert', () => null), mat4(0, -0.13 - i * 0.04, -0.03, 0, 0, 0, 0.9)])), bone));
+  // 手臂：骨頭、前臂套著鐵護腕；右手拿著大劍（平常劍尖拖在前面的地上）
+  r.arms = [];
+  for (const s of [-1, 1]) {
+    const arm = new THREE.Group(); arm.position.set(s * WL_SH.x, WL_SH.y, WL_SH.z); r.body.add(arm);
+    arm.add(new THREE.Mesh(mergeParts('wlArm' + s, [
+      [tubeGeo('wlHum' + s, [[0, 0, 0], [s * 0.03, -0.2, 0.01], [s * 0.04, -0.42, 0.03]], [0.042, 0.026, 0.024, 0.036], 7, 8), mat4(0, 0, 0)],
+      [tubeGeo('wlFore' + s, [[s * 0.04, -0.42, 0.03], [s * 0.04, -0.62, 0.08], [s * 0.03, -0.8, 0.12]], [0.03, 0.022, 0.026], 7, 8), mat4(0, 0, 0)],
+    ]), bone));
+    arm.add(new THREE.Mesh(tubeGeo('wlBracer' + s, [[s * 0.04, -0.52, 0.055], [s * 0.04, -0.62, 0.08], [s * 0.035, -0.74, 0.105]], [0.044, 0.042, 0.038], 10, 4), steel));
+    const hand = new THREE.Mesh(wlHandGeo(s, s > 0 ? 1 : 0.5), bone); hand.position.set(s * 0.03, -0.81, 0.12); hand.rotation.set(s > 0 ? -0.3 : 0.1, 0, 0); arm.add(hand);
+    r.arms.push(arm);
+  }
+  r.armR = r.arms[1]; r.armR.rotation.order = 'YXZ';   // 橫掃：先往前伸、再水平轉
+  r.sword = new THREE.Group(); r.sword.position.set(0.03, -0.84, 0.14); r.armR.add(r.sword);
+  r.sword.add(new THREE.Mesh(wlBladeGeo(), steel), new THREE.Mesh(wlHiltGeo(), steel));
+  r.sword.add(new THREE.Mesh(tubeGeo('wlGrip', [[0, 0.13, 0], [0, 0, 0], [0, -0.1, 0]], [0.018, 0.02, 0.018], 6, 6), leather));
+  const D = new THREE.Vector3(0, -1, 0);
+  r.qDrag = new THREE.Quaternion().setFromUnitVectors(D, new THREE.Vector3(0.12, -0.72, 0.68).normalize());
+  r.qUp = new THREE.Quaternion().setFromUnitVectors(D, new THREE.Vector3(0, -1, 0.2).normalize());
+  r.spark = ownSprite(glowTex, 0xffd080); r.spark.position.set(0, -1.76, 0); r.spark.scale.setScalar(0.25); r.sword.add(r.spark);
+}
+function wlSync(e, r, t, p, dt) {
+  const a = enemyAlpha(e), moving = !e.pose && !(e.stunT > 0), mv = moving && e.state !== 'wait', w = e.wob * 3.0;
+  r.g.position.y = floorH(e.x, e.y);
+  r.g.rotation.y = faceRot(e.face || 0);   // 面向牠走的方向（不是一直看著你：從背後打傷害 3 倍）
+  // 走路很慢、很重：腿前後擺、身體一頓一頓
+  r.legs[0].rotation.x = mv ? Math.sin(w) * 0.42 : 0; r.legs[1].rotation.x = mv ? -Math.sin(w) * 0.42 : 0;
+  r.body.position.y = mv ? Math.abs(Math.sin(w)) * 0.05 : 0;
+  r.body.rotation.z = mv ? Math.sin(w) * 0.025 : 0;
+  r.arms[0].rotation.x = mv ? Math.sin(w) * 0.18 : 0;
+  // 揮劍：先把劍舉過頭（0.6 秒，看到就要退開），再從右往左橫掃一劍，慢慢放下來
+  const sw = e.swing > 0 ? 1 - e.swing / 0.6 : 0, cdk = e.cd > 0 && e.swing <= 0 ? clamp(e.cd / 1.2, 0, 1) : 0;
+  const q = cdk > 0 ? 1 - cdk : 0, sweep = cdk > 0 ? sstep(0, 0.3, q) : 0, back = cdk > 0 ? sstep(0.45, 1, q) : 0, raise = sstep(0, 0.8, sw);
+  r.armR.rotation.set(-2.6 * raise + (cdk > 0 ? -1.5 * (1 - back) : 0) + (mv && !raise && !cdk ? -Math.sin(w) * 0.06 : 0), cdk > 0 ? (1.1 - 2.4 * sweep) * (1 - back) : 0, 0);
+  const along = Math.max(raise, cdk > 0 ? 1 - back : 0);
+  r.sword.quaternion.copy(r.qDrag).slerp(r.qUp, along);
+  r.spark.material.opacity = a * (mv && along < 0.05 ? 0.5 + 0.5 * Math.random() : 0);
+  r.head.rotation.set(0.05 + (mv ? Math.abs(Math.sin(w)) * 0.04 : 0) - 0.2 * raise, 0, mv ? Math.sin(w) * 0.03 : 0);
+  // 斗篷跟著飄：衝過來的時候往後甩
+  const ch = e.state === 'charge' ? 1 : 0;
+  for (const u of r.hairU) { u.uHT.value = t; u.uHAmp.value = 0.02 + 0.03 * ch; }
+  r.hairU[0].uHDrag.value.set(spring(r, 'hx', Math.sin(w) * 0.012, dt), spring(r, 'hz', ch ? -0.14 : mv ? -0.04 : 0, dt));
+}
+UPG.warlord = { build: wlBuild, sync: wlSync, view: { h: 2.75, d: 5.0, cy: 1.3 } };
+
 // ---------- 第三世界到這裡 ----------
 
 

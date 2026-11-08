@@ -33,6 +33,7 @@ const ASSETS = [
 
   // 第三世界重做的怪物（新的檔名加在這一行下面）
   './tex/m5-krSkin.webp', './tex/m5-krHead.webp', './tex/m5-krCap.webp', './tex/m5-krCapE.webp', './tex/m5-krEye.webp', './tex/m5-krRag.webp', './tex/m5-krStrip.webp',
+  './tex/m5-wlSkull.webp', './tex/m5-wlPlate.webp', './tex/m5-wlCloak.webp', './tex/m5-wlWrap.webp',
 
   // 第四世界重做的怪物（新的檔名加在這一行下面）
 
