@@ -29,6 +29,7 @@ const ASSETS = [
   './tex/m5-shBody.webp', './tex/m5-shLimb.webp', './tex/m5-shHead.webp', './tex/m5-shGlow.webp', './tex/m5-shShell.webp', './tex/m5-shPuff.webp',
   // 第一世界重做的怪物（新的檔名加在這一行下面）
   './tex/m5-skLimb.webp', './tex/m5-skEmber.webp', './tex/m5-skHead.webp', './tex/m5-skGlow.webp',
+  './tex/m5-fsSkin.webp', './tex/m5-fsHead.webp', './tex/m5-fsEye.webp',
 
   // 第二世界重做的怪物（新的檔名加在這一行下面）
 
