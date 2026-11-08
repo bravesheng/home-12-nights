@@ -6267,6 +6267,315 @@ UPG.shadow = { build: buildShadow, sync: syncShadow, view: { h: 1.9, d: 3.7, cy:
 
 // ---------- 第一世界重做的怪物（火柴人、衣櫃怪、黑球、血淚女、小丑和紅氣球、爬行女、鳥腳女、它；眼球花） ----------
 
+// ---------- 火柴人 ----------
+// 圖鑑說牠「紙做的身體被手電筒照到就會燒起來」：又高又瘦（頭頂大約 2 公尺），手腳是一條一條扭緊的黑紙
+// （斜斜的一圈一圈紙縫、關節鼓起來、手指又長又尖）；頭是揉皺的紙糊成的，一摺一摺的稜角，臉的邊緣燒焦了（遠看就是原本那圈黑筆描的輪廓）。
+// 眼睛是撕開的兩個黑洞，洞裡一條紅線（原本畫的紅色直線眼睛）微微發光，紅色從洞裡流下來；
+// 咧到耳朵的大嘴也是撕開的，上下兩排又尖又黃的牙，嘴唇塗滿了紅，嘴角裂到臉頰。
+// 動作跟原本一樣：一手長長地垂著、一手舉起來慢慢揮，頭歪一邊，像手繪動畫一格一格地抖，越靠近你越興奮；
+// 被手電筒照到時整個縮下去，紙縫透出火光。脖子、手腳、手指是同一個網格，每幀照關節的位置重算頂點（一隻只要畫一次）
+const SK_HEAD = { rx: 0.185, ry: 0.19, rz: 0.165, y: 0.17 };   // 頭的半徑；頭的中心在脖子頂端上面多高
+const SK_EYE = { x: 0.35, y: 0.2, w: 0.15, h: 0.18 };         // 眼睛的洞（單位球上，正面看）
+const SK_M = { w: 0.76 }, skMouthUp = u => -0.1 - 0.15 * (1 - u * u), skMouthLo = u => -0.1 - 0.7 * Math.max(0, 1 - u * u) ** 0.7;
+const SK_FACE = [   // [X, Y, 寬, 高, 凸起多少, 左右對稱]
+  [0.31, 0.43, 0.2, 0.07, 0.05, true],    // 眉骨
+  [0.6, -0.02, 0.15, 0.12, 0.06, true],   // 咧嘴擠上來的臉頰
+  [0, 0.27, 0.08, 0.14, 0.02, false],     // 兩個洞中間
+  [0, -0.93, 0.25, 0.08, 0.035, false],   // 下巴
+];
+const skRidge = n => 1 - Math.abs(2 * n - 1);
+// 揉皺的紙：十幾道直直的摺痕（每一道是一個穿過頭的平面，摺痕兩邊各往同一邊彎，像揉過再攤開的紙），加上一點小皺紋
+const SK_FOLD = (() => {
+  const r = seeded(4711), F = [];
+  for (let i = 0; i < 26; i++) {
+    const a = r() * Math.PI * 2, b = Math.acos(r() * 2 - 1), a2 = r() * Math.PI * 2, b2 = Math.acos(r() * 2 - 1), p = [Math.sin(b2) * Math.cos(a2), Math.cos(b2), Math.sin(b2) * Math.sin(a2)];
+    const n = [Math.sin(b) * Math.cos(a), Math.cos(b), Math.sin(b) * Math.sin(a)];
+    F.push({ n, c: n[0] * p[0] + n[1] * p[1] + n[2] * p[2], p, R: 0.35 + r() * 0.4, a: (r() < 0.5 ? -1 : 1) * (0.14 + r() * 0.2), w: 0.07 + r() * 0.12 });
+  }
+  return F;
+})();
+function skCrumple(x, y, z) {
+  let d = 0;
+  for (const f of SK_FOLD) {   // 每道摺痕只摺到附近一塊（離 p 越遠越淡）
+    const q = ((x - f.p[0]) ** 2 + (y - f.p[1]) ** 2 + (z - f.p[2]) ** 2) / (f.R * f.R);
+    if (q < 4) d += f.a * (Math.min(Math.abs(f.n[0] * x + f.n[1] * y + f.n[2] * z - f.c), f.w) - f.w * 0.6) * Math.exp(-q);
+  }
+  const b = skRidge(fbm3(x * 3.6, y * 3.6 - 2, z * 3.6, 2, 17));
+  return d + 0.012 * (b * b - 0.45);
+}
+// 摺痕的線有多深（畫貼圖用）：離最近的摺痕多近
+function skCrease(x, y, z) {
+  let k = 0;
+  for (const f of SK_FOLD) {
+    const s = Math.abs(f.n[0] * x + f.n[1] * y + f.n[2] * z - f.c);
+    if (s < 0.03) k = Math.max(k, Math.exp(-((s / 0.008) ** 2)) * Math.exp(-((x - f.p[0]) ** 2 + (y - f.p[1]) ** 2 + (z - f.p[2]) ** 2) / (f.R * f.R) * 1.5));
+  }
+  return k;
+}
+// 眼睛的洞：q < 1 在洞裡面，邊緣是撕開的（鋸齒）
+function skEyeQ(x, y) {
+  const s = x < 0 ? -1 : 1, dx = (x - s * SK_EYE.x) / SK_EYE.w, dy = (y - SK_EYE.y) / SK_EYE.h;
+  return Math.hypot(dx, dy) + 0.16 * (vnoise3(x * 16, y * 16, s, 23) - 0.5) + 0.06 * (vnoise3(x * 40, y * 40, s, 29) - 0.5);
+}
+// 撕開的嘴：e 離嘴的邊多遠（負的是在嘴裡面），upper 靠上面那排牙，u 橫的位置
+const _skm = { e: 0, upper: false, u: 0 };
+function skMouth(x, y) {
+  const o = _skm, u = x / SK_M.w;
+  o.u = u;
+  if (Math.abs(u) <= 1) { const up = skMouthUp(u), lo = skMouthLo(u); o.upper = y > (up + lo) / 2; o.e = o.upper ? y - up : lo - y; }
+  else { const cy = skMouthUp(1); o.upper = y > cy; o.e = Math.hypot((Math.abs(u) - 1) * SK_M.w, y - cy); }
+  o.e += 0.014 * (vnoise3(x * 34, y * 34, 0, 31) - 0.5);
+  return o;
+}
+// 洞和嘴是往後壓進去的（不是往頭的中心：嘴在臉的下半部，往中心壓的話嘴底會翹起來蓋住下排的牙）
+function skHeadPt(x, y, z, out) {
+  let X = x, Z = z;
+  if (Z > 0) Z *= 0.74 + 0.26 * sstep(0.5, 1, Math.hypot(x, y));   // 臉平平的，像紙糊的面具
+  if (y < 0) X *= 1 - 0.08 * y * y;
+  let d = skCrumple(x, y, z) * (z > 0.3 ? 0.7 : 1), back = 0;
+  if (z > 0.05) {
+    let f = 0;
+    for (const b of SK_FACE) for (const s of b[5] ? [-1, 1] : [1]) { const u = (x - s * b[0]) / b[2], v = (y - b[1]) / b[3]; if (u * u + v * v < 16) f += b[4] * Math.exp(-u * u - v * v); }
+    const q = skEyeQ(x, y);
+    if (q < 1.6) { back += 0.3 * (1 - sstep(0.82, 1.02, q)); f += 0.02 * Math.exp(-(((q - 1.08) / 0.08) ** 2)); }   // 洞很深，撕開的邊微微翹起來
+    const m = skMouth(x, y);
+    if (m.e < 0.12) { back += 0.36 * sstep(0.004, -0.03, m.e); f += 0.024 * Math.exp(-(((m.e - 0.022) / 0.018) ** 2)); }
+    const w = sstep(0.05, 0.35, z);
+    d += f * w; back *= w;
+  }
+  const k = 1 + d / (Math.hypot(X, y, Z) || 1);
+  return out.set(X * k * SK_HEAD.rx, y * k * SK_HEAD.ry, (Z * k - back) * SK_HEAD.rz);
+}
+const skU = crWarp(-Math.PI, Math.PI, a => 1 + 1.4 * Math.exp(-((a / 0.9) ** 2))), skV = crWarp(0, Math.PI, th => 1 + 1.2 * Math.exp(-(((th - 1.85) / 0.65) ** 2)));
+const skHeadGeo = () => sculptGeo('skHead', skHeadPt, skU, skV, th => sstep(0.85, 1.0, th) * (1 - sstep(2.65, 2.8, th)), a => sstep(-1.15, -1.0, a) * (1 - sstep(1.0, 1.15, a)), [0.056, 0.058], [0.15, 0.16]);   // 火柴人常常兩隻一起出來，格子不要太密
+// 頭的貼圖（一個一個像素算）：髒髒的舊紙、褐色的水漬、摺痕；臉的邊緣一圈燒焦（褐色到黑色）；
+// 撕開的洞邊露出白白的紙纖維、周圍燻黑；紅色的直線穿過眼睛；嘴唇塗滿紅色、嘴裡是暗紅色的牙齦和黑黑的喉嚨。
+// glow 是自發光那張：只有洞裡那條紅線
+function skPaintHead(c, W, H, glow) {
+  const img = c.createImageData(W, H), D = img.data, C = [0, 0, 0];
+  const mix = (col, k) => { C[0] += (col[0] - C[0]) * k; C[1] += (col[1] - C[1]) * k; C[2] += (col[2] - C[2]) * k; };
+  for (let py = 0; py < H; py++) {
+    const th = skV.inv((py + 0.5) / H), st = Math.sin(th), y = Math.cos(th);
+    for (let px = 0; px < W; px++) {
+      const a = skU.inv((px + 0.5) / W), x = st * Math.sin(a), z = st * Math.cos(a), i = (py * W + px) * 4;
+      const q = z > 0.05 ? skEyeQ(x, y) : 9, ex = Math.abs(Math.abs(x) - SK_EYE.x), ey = y - SK_EYE.y;
+      const slit = (1 - sstep(0.014, 0.026, ex + 0.004 * Math.sin(y * 60))) * sstep(-0.29, -0.24, ey) * (1 - sstep(0.21, 0.25, ey));
+      if (glow) {
+        const k = q < 1.05 ? slit * (1 - sstep(0.9, 1.05, q)) + 0.45 * Math.exp(-((ex / 0.04) ** 2)) * (1 - sstep(0.55, 1.0, q)) : 0;
+        D[i] = 255 * clamp(k, 0, 1); D[i + 1] = 26 * k; D[i + 2] = 20 * k; D[i + 3] = 255;
+        continue;
+      }
+      const n = fbm3(x * 3, y * 3, z * 3, 4, 41), f = fbm3(x * 26, y * 26, z * 26, 2, 43), stain = fbm3(x * 1.3 + 5, y * 1.3, z * 1.3, 3, 47);
+      C[0] = 212 + (n - 0.5) * 26 + (f - 0.5) * 14; C[1] = 208 + (n - 0.5) * 24 + (f - 0.5) * 13; C[2] = 200 + (n - 0.5) * 22 + (f - 0.5) * 12;
+      mix([170, 150, 118], sstep(0.55, 0.72, stain) * 0.4);                                    // 水漬
+      if (z < 0) mix([150, 138, 116], sstep(0, -0.5, z) * 0.55);                               // 後腦勺比較舊、比較髒
+      const cr2 = skRidge(fbm3(x * 3.6, y * 3.6 - 2, z * 3.6, 2, 17));
+      mix([132, 118, 98], skCrease(x, y, z) * 0.32 + sstep(0.95, 0.995, cr2) * 0.12);          // 摺痕（灰塵卡在裡面）
+      mix([168, 150, 124], sstep(0.4, 0.75, fbm3(x * 2.2, y * 2.2 - 4, z * 2.2, 3, 49)) * 0.2);  // 舊紙有點泛黃
+      // 臉的邊緣燒焦：先是褐色、再來是黑的（正面看是一圈輪廓）
+      const zb = z - 0.03 + 0.09 * (n - 0.5) + 0.04 * (f - 0.5);
+      mix([120, 74, 38], Math.exp(-((zb / 0.3) ** 2)) * 0.7);
+      mix([20, 16, 14], Math.exp(-((zb / 0.16) ** 2)) * 0.95);
+      if (q < 1.7) {
+        mix([36, 30, 27], (1 - sstep(1.0, 1.65, q + 0.15 * (f - 0.5))) * 0.85);   // 洞的周圍燻黑（原本原子筆一圈一圈塗黑的地方）
+        mix([206, 198, 182], Math.exp(-(((q - 1.0) / 0.03) ** 2)) * 0.45 * f);   // 撕開的邊露出一點紙纖維
+        if (q < 0.98) { mix([8, 6, 6], 1); mix([46, 10, 10], (1 - sstep(0.4, 0.95, q)) * 0.6); }
+      }
+      if (slit > 0 && z > 0.3) mix([176, 16, 22], slit * (q < 1 ? 1 : 0.9));   // 紅色的直線（穿過眼睛的洞）
+      if (z > 0.05) {
+        const m = skMouth(x, y);
+        if (m.e < 0.09) {
+          if (m.e >= 0) mix([150, 18, 24], (1 - sstep(0.012, 0.045, m.e + 0.02 * (n - 0.5) + 0.015 * (f - 0.5))) * 0.92);   // 塗滿紅色的嘴唇
+          else {
+            const dp = -m.e;
+            mix([110, 20, 24], 1);
+            mix([14, 3, 4], sstep(0.008, 0.03, dp));   // 牙齦後面就是黑黑的喉嚨
+          }
+        }
+      }
+      D[i] = C[0]; D[i + 1] = C[1]; D[i + 2] = C[2]; D[i + 3] = 255;
+    }
+  }
+  c.putImageData(img, 0, 0);
+  if (glow) return;
+  // 流下來的紅色、嘴角裂到臉頰
+  const { at } = headPainter(c, W, H, skU, skV), r = seeded(913);
+  const drip = (X, Y, len, w) => at(X, Y, () => {
+    const dx = (r() - 0.5) * 3;
+    c.strokeStyle = 'rgba(150,14,20,.92)'; c.lineWidth = w; c.lineCap = 'round';
+    c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(dx, -len * 0.6, dx * 0.6, -len); c.stroke();
+    c.fillStyle = 'rgba(120,8,14,.95)'; c.beginPath(); c.ellipse(dx * 0.6, -len - w * 0.3, w * 0.8, w * 1.1, 0, 0, 7); c.fill();
+    c.strokeStyle = 'rgba(70,4,8,.5)'; c.lineWidth = w * 0.4; c.beginPath(); c.moveTo(w * 0.3, 0); c.quadraticCurveTo(dx + w * 0.3, -len * 0.6, dx * 0.6 + w * 0.3, -len); c.stroke();
+  });
+  for (const s of [-1, 1]) {
+    drip(s * SK_EYE.x + (r() - 0.5) * 0.01, SK_EYE.y - 0.21, 16 + r() * 16, 2.4);
+    drip(s * SK_EYE.x + 0.02 + r() * 0.015, SK_EYE.y - 0.19, 7 + r() * 9, 1.6);
+    at(s * SK_M.w, skMouthUp(1), () => {
+      c.lineCap = 'round';
+      for (const [col, w] of [['rgba(150,20,24,.85)', 3.4], ['rgba(70,6,8,.95)', 1.2]]) { c.strokeStyle = col; c.lineWidth = w; c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(s * 3, 10, s * 9, 22); c.lineTo(s * 9 + (r() - 0.5) * 3, 26); c.stroke(); }
+    }, 1);
+  }
+  for (const u of [-0.55, -0.12, 0.38, 0.7]) drip(u * SK_M.w, skMouthLo(u) - 0.025, 8 + r() * 16, 1.8 + r());
+}
+// 扭緊的黑紙（手腳）：u 繞一圈、v 沿著手腳（一公尺 4 張）；斜斜的紙縫一圈一圈繞上去，紙縫旁邊翹起來的邊比較亮，加上皺紋。
+// ember 是燒起來時的火光：紙縫和皺紋裡透出來
+function skPaintLimb(c, W, H, ember) {
+  const img = c.createImageData(W, H), D = img.data, T = Math.PI * 2;
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const u = (px + 0.5) / W, v = (py + 0.5) / H, cu = Math.cos(T * u), su = Math.sin(T * u), cv = Math.cos(T * v), sv = Math.sin(T * v);
+    const n = fbm3(cu * 0.8 + cv * 1.6, su * 0.8, sv * 1.6, 4, 51), m = fbm3(cu * 2.2 + cv * 4.4, su * 2.2, sv * 4.4, 3, 53);
+    const w = ((u + 4 * v + (n - 0.5) * 0.5) % 1 + 1) % 1, w2 = ((3 * u - 9 * v + (m - 0.5) * 0.4) % 1 + 1) % 1;
+    const seam = 1 - sstep(0, 0.035, Math.min(w, 1 - w)), ridge = Math.exp(-(((w - 0.07) / 0.035) ** 2)), crease = Math.exp(-(((w2 - 0.5) / 0.03) ** 2));
+    const i = (py * W + px) * 4;
+    if (ember) {
+      const k = clamp(seam * 0.9 + crease * 0.5 * sstep(0.45, 0.65, n) + sstep(0.62, 0.75, m) * 0.35, 0, 1);
+      D[i] = 255 * k; D[i + 1] = 120 * k * k; D[i + 2] = 30 * k * k * k; D[i + 3] = 255;
+    } else {
+      const L = 20 + (n - 0.5) * 16 + (m - 0.5) * 10 + ridge * 14 - seam * 13 - crease * 5 - w * 5;
+      D[i] = L * 1.03; D[i + 1] = L; D[i + 2] = L * 0.95; D[i + 3] = 255;
+    }
+  }
+  c.putImageData(img, 0, 0);
+}
+// 關節：脖子、手腳、每根手指多一個指節（m）
+const SK_J = ['neck', 'head', 'hip', 'kneeL', 'footL', 'kneeR', 'footR', 'arms', 'elbL', 'handL', 'elbR', 'handR', 'mL0', 'mL1', 'mL2', 'fL0', 'fL1', 'fL2', 'mR0', 'mR1', 'mR2', 'fR0', 'fR1', 'fR2'];
+// 每一根：[起點, 終點, 粗細, 種類（0 一般、1 指尖（尖的）、2 腳（尾端收圓）), 起點鼓多少, 終點鼓多少, 一根幾圈, 起點收口, 終點收口]
+// 收口：多兩圈收成圓頭（關節彎起來時兩根接起來的地方才不會看到切口）
+const SK_B = [
+  ['neck', 'hip', 0.024, 0, 0.25, 0.5, 13, 1, 1], ['neck', 'head', 0.019, 0, 0.3, 0, 6, 0, 0],
+  ...['L', 'R'].flatMap(s => [['hip', 'knee' + s, 0.021, 0, 0.45, 0.55, 10, 1, 1], ['knee' + s, 'foot' + s, 0.019, 2, 0.55, 0, 10, 1, 0],
+    ['arms', 'elb' + s, 0.018, 0, 0.5, 0.55, 9, 1, 1], ['elb' + s, 'hand' + s, 0.016, 0, 0.55, 0.5, 9, 1, 1],
+    ...[0, 1, 2].flatMap(i => [['hand' + s, 'm' + s + i, 0.0085, 0, 0.3, 0.5, 5, 0, 1], ['m' + s + i, 'f' + s + i, 0.0075, 1, 0.45, 0, 6, 0, 0]])]),
+];
+const SK_SEG = 6, skRings = b => b[6] + 2 * b[7] + 2 * b[8];
+function skBodyGeo() {
+  let nv = 0, idx = [];
+  for (const b of SK_B) {
+    const base = nv, n = skRings(b);
+    for (let i = 0; i < n - 1; i++) for (let j = 0; j < SK_SEG; j++) { const a = base + i * (SK_SEG + 1) + j, c = a + SK_SEG + 1; idx.push(a, a + 1, c, a + 1, c + 1, c); }
+    nv += n * (SK_SEG + 1);
+  }
+  const g = new THREE.BufferGeometry();
+  for (const [k, n] of [['position', 3], ['normal', 3], ['uv', 2]]) { const at = new THREE.BufferAttribute(new Float32Array(nv * n), n); at.setUsage(THREE.DynamicDrawUsage); g.setAttribute(k, at); }
+  g.setIndex(idx);
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 1.1, 0), 1.6);   // 每幀改頂點，不用每次重算
+  return g;
+}
+// 每一根的粗細（t 從起點 0 到終點 1）：兩頭的關節鼓起來，中間細，紙皺皺的粗細不太平均
+function skRad(b, t, bi) {
+  let r = b[2] * (0.78 + b[4] * Math.exp(-((t / 0.09) ** 2)) + b[5] * Math.exp(-(((1 - t) / 0.09) ** 2))) * (1 + 0.07 * Math.sin(t * 23 + bi * 1.7) * Math.sin(t * 7 + bi));
+  if (b[3] === 1) r *= 1 - 0.92 * t ** 1.4;
+  else if (b[3] === 2 && t > 0.82) r *= Math.sqrt(Math.max(0, 1 - ((t - 0.82) / 0.18) ** 2));
+  return r;
+}
+const _skD = new THREE.Vector3(), _skU = new THREE.Vector3(), _skW = new THREE.Vector3(), _skN = new THREE.Vector3();
+const SK_CAP = [[-1, 0, -1, 0], [-0.5, 0.87, -0.5, 0.87]];   // 收口的兩圈：[往外多少（乘那頭的粗細）, 粗細的倍數, 法線往軸的方向, 法線往外的方向]
+function skBodyUpdate(g, J) {
+  const P = g.attributes.position.array, N = g.attributes.normal.array, UV = g.attributes.uv.array;
+  let o = 0;
+  SK_B.forEach((b, bi) => {
+    const A = J[b[0]], B = J[b[1]], len = _skD.subVectors(B, A).length() || 1e-4, n = b[6], rA = skRad(b, 0, bi), rB = skRad(b, 1, bi);
+    _skD.multiplyScalar(1 / len);
+    _skU.set(0, 0, 1); if (Math.abs(_skD.z) > 0.9) _skU.set(1, 0, 0);
+    _skU.cross(_skD).normalize(); _skW.crossVectors(_skD, _skU);
+    const ring = (sAt, r, na, nr) => {   // 一圈：沿著軸在 sAt（公尺）、粗細 r、法線 = 往外 × nr + 沿著軸 × na
+      const cx = A.x + _skD.x * sAt, cy = A.y + _skD.y * sAt, cz = A.z + _skD.z * sAt;
+      for (let j = 0; j <= SK_SEG; j++) {
+        const th = j / SK_SEG * Math.PI * 2, cs = Math.cos(th), sn = Math.sin(th);
+        const rx = _skU.x * cs + _skW.x * sn, ry = _skU.y * cs + _skW.y * sn, rz = _skU.z * cs + _skW.z * sn;
+        P[o * 3] = cx + rx * r; P[o * 3 + 1] = cy + ry * r; P[o * 3 + 2] = cz + rz * r;
+        _skN.set(rx * nr + _skD.x * na, ry * nr + _skD.y * na, rz * nr + _skD.z * na).normalize();
+        N[o * 3] = _skN.x; N[o * 3 + 1] = _skN.y; N[o * 3 + 2] = _skN.z;
+        UV[o * 2] = j / SK_SEG; UV[o * 2 + 1] = sAt * 4 + bi * 0.37;
+        o++;
+      }
+    };
+    if (b[7]) for (const [k, kr, na, nr] of SK_CAP) ring(k * rA, kr * rA, na, nr);
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1), t0 = Math.max(0, t - 0.02), t1 = Math.min(1, t + 0.02), dr = (skRad(b, t1, bi) - skRad(b, t0, bi)) / ((t1 - t0) * len);
+      ring(t * len, skRad(b, t, bi), -dr, 1);
+    }
+    if (b[8]) for (let q = SK_CAP.length - 1; q >= 0; q--) { const [k, kr, na, nr] = SK_CAP[q]; ring(len - k * rB, kr * rB, -na, nr); }
+  });
+  g.attributes.position.needsUpdate = g.attributes.normal.needsUpdate = g.attributes.uv.needsUpdate = true;
+}
+// 牙：上下兩排，又尖又黃、長短不齊（中間長、往嘴角越來越小），沿著嘴的邊排、尖端往嘴裡面指；合成一個網格
+function skTeethGeo() {
+  const parts = [], v = new THREE.Vector3(), r = seeded(9131), cone = geo('skTooth', () => new THREE.ConeGeometry(1, 1, 6, 1).translate(0, 0.5, 0));
+  for (const upper of [true, false]) {
+    const n = upper ? 15 : 12;
+    for (let i = 0; i < n; i++) {
+      const u = (upper ? -0.93 : -0.86) + (upper ? 1.86 : 1.72) * (i + 0.5) / n + (r() - 0.5) * 0.03, X = u * SK_M.w, du = 0.01;
+      const Y = upper ? skMouthUp(u) : skMouthLo(u), Y2 = upper ? skMouthUp(u + du) : skMouthLo(u + du);
+      let nx = -(Y2 - Y), ny = du * SK_M.w;   // 邊的法線（往嘴裡面）
+      if ((ny > 0) === upper) { nx = -nx; ny = -ny; }
+      skHeadPt(X, Y, Math.sqrt(Math.max(0, 1 - X * X - Y * Y)), v);
+      const L = (upper ? 0.03 : 0.026) * (0.75 + r() * 0.6) * (1 - 0.45 * Math.abs(u)), w = 0.0075 + r() * 0.003;
+      parts.push([cone, mat4(v.x - nx * 0.004, v.y - ny * 0.004, v.z - 0.012, (upper ? 0.25 : -0.25) * (0.6 + r() * 0.6), 0, Math.atan2(-nx, ny) + (r() - 0.5) * 0.25, w, L, w * 0.55)]);
+    }
+  }
+  return mergeParts('skTeeth', parts);
+}
+function buildStickUpg(r, g) {
+  const T = { transparent: true };
+  r.bodyM = ownPhong('#ffffff', { map: m5Tex('skLimb', 256, 256, (c, W, H) => skPaintLimb(c, W, H, false)), emissiveMap: m5Tex('skEmber', 256, 256, (c, W, H) => skPaintLimb(c, W, H, true)), emissive: 0xffffff, emissiveIntensity: 0, specular: 0x262422, shininess: 16, shade: 0.8, ...T });
+  r.headM = ownPhong('#ffffff', { map: m5Tex('skHead', 1024, 512, (c, W, H) => skPaintHead(c, W, H, false)), emissiveMap: m5Tex('skGlow', 512, 256, (c, W, H) => skPaintHead(c, W, H, true)), emissive: 0xffffff, specular: 0x1c1a16, shininess: 8, shade: 0.75, ...T });
+  r.headM.map.wrapS = r.headM.emissiveMap.wrapS = THREE.ClampToEdgeWrapping;
+  const tooth = withDetail(ownPhong('#d4c39c', { specular: 0x4a4436, shininess: 30, shade: 0.7, ...T }), 'bone', 10, 0.7);
+  r.mats.push(r.bodyM, r.headM, tooth);
+  r.J = Object.fromEntries(SK_J.map(k => [k, new THREE.Vector3()]));
+  r.bodyG = skBodyGeo();
+  const body = new THREE.Mesh(r.bodyG, r.bodyM); body.userData.ownGeo = true; body.frustumCulled = false; g.add(body);
+  r.head = new THREE.Group(); g.add(r.head);
+  const hm = new THREE.Mesh(skHeadGeo(), r.headM); hm.position.y = SK_HEAD.y; r.head.add(hm);
+  const tm = new THREE.Mesh(skTeethGeo(), tooth); tm.position.y = SK_HEAD.y; r.head.add(tm);
+  skPose({ wob: 0 }, r, 5, 0, 0);
+}
+// 姿勢（跟原本的火柴人一樣）：兩條腿一前一後地交叉，左手垂到膝蓋、右手舉起來揮；手指每根兩節、指尖往你這邊彎
+const _skF = new THREE.Vector3();
+function skFinger(J, s, i, hand, dx, dy, dz, L, curl) {
+  const m = J['m' + s + i], f = J['f' + s + i];
+  _skF.set(dx, dy, dz).normalize();
+  m.copy(hand).addScaledVector(_skF, L * 0.5);
+  _skF.multiplyScalar(Math.cos(curl)); _skF.z += Math.sin(curl); _skF.normalize();
+  f.copy(m).addScaledVector(_skF, L * 0.5);
+}
+function skPose(e, r, d, t, dt) {
+  const J = r.J, w = e.wob * 4.2, set = (k, x, y, z) => J[k].set(x, y, z), near = clamp(1 - (d - 1.2) / 3, 0, 1);
+  r.wavePh = (r.wavePh || 0) + dt * (2.2 + near * 3.5); r.twPh = (r.twPh || e.wob) + dt * (1.9 + near * 5);
+  set('neck', 0, 1.7, 0); set('head', 0, 1.8, 0.01); set('hip', 0, 1.02, 0); set('arms', 0, 1.54, 0);
+  for (const [s, ph] of [['L', 0], ['R', Math.PI]]) {
+    const sw = Math.sin(w + ph) * 0.34, bend = Math.max(0, -Math.cos(w + ph)) * 0.55, x = s === 'L' ? -1 : 1;
+    set('knee' + s, x * 0.08, 1.02 - Math.cos(sw) * 0.5, Math.sin(sw) * 0.5);
+    set('foot' + s, x * 0.12, J['knee' + s].y - Math.cos(sw - bend) * 0.5, J['knee' + s].z + Math.sin(sw - bend) * 0.5);
+  }
+  const as = Math.sin(w) * 0.12, crl = 0.3 + near * 0.35;
+  set('elbL', -0.2, 1.18, 0.03 + as * 0.3); set('handL', -0.26, 0.74, 0.08 + as);
+  for (let i = 0; i < 3; i++) skFinger(J, 'L', i, J.handL, (i - 1) * 0.28 - 0.06, -1, 0.12 + (i - 1) * 0.12, 0.18, crl + 0.12 * Math.sin(t * 2.1 + i * 1.3));
+  const wave = 0.25 + Math.sin(r.wavePh) * 0.4;
+  set('elbR', 0.36, 1.58, 0.05);
+  set('handR', 0.36 + Math.sin(wave) * 0.36, 1.58 + Math.cos(wave) * 0.36, 0.08);
+  for (let i = 0; i < 3; i++) { const a = wave + (i - 1) * 0.35; skFinger(J, 'R', i, J.handR, Math.sin(a), Math.cos(a), 0.08, 0.17, crl * 0.8 + 0.1 * Math.sin(t * 2.6 + i)); }
+  // 手繪動畫的抖動：每 0.1 秒換一格
+  const tick = Math.floor(t * 10);
+  SK_J.forEach((k, i) => J[k].add(_skF.set(hash01(tick * 31 + i) - 0.5, hash01(tick * 17 + i * 3) - 0.5, hash01(tick * 7 + i * 5) - 0.5).multiplyScalar(0.018 + near * 0.02)));
+  skBodyUpdate(r.bodyG, J);
+  // 頭歪一邊，偶爾突然抽一下（繞著脖子轉）
+  const twitch = Math.min(1, Math.max(0, Math.sin(r.twPh) - 0.9 + near * 0.3) * 10) * (Math.sin(e.wob * 0.37) < 0 ? -1 : 1);
+  r.head.position.copy(J.head);
+  r.head.rotation.set(-0.06 + twitch * 0.08, 0, 0.32 + Math.sin(e.wob * 0.7) * 0.12 + twitch * 0.45 + (hash01(tick) - 0.5) * (0.04 + near * 0.1));
+}
+function syncStickUpg(e, r, t, p, dt) {
+  skPose(e, r, Math.hypot(e.x - p.x, e.y - p.y), t, dt);
+  // 被手電筒照到：整個縮下去，紙縫透出火光，臉被火烤得發黃發紅
+  const burn = e.burn || 0, k = burn / 1.4;
+  r.g.scale.set(1, 1 - k * 0.35, 1);
+  r.bodyM.emissiveIntensity = k * (1.1 + 0.5 * Math.sin(t * 13 + e.wob) * Math.sin(t * 7.3));
+  r.headM.color.setRGB(1 + k * 0.15, 1 - k * 0.2, 1 - k * 0.5);
+  r.headM.emissiveIntensity = 0.85 + 0.15 * Math.sin(t * 3 + e.wob);
+}
+UPG.stick = { build: buildStickUpg, sync: syncStickUpg, view: { h: 2.3, d: 4.4, cy: 1.1 } };
+
 // ---------- 第一世界到這裡 ----------
 
 
