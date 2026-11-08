@@ -56,6 +56,7 @@ const ASSETS = [
   './tex/m5-stfHead.webp', './tex/m5-stfShirt.webp', './tex/m5-stfSleeve.webp', './tex/m5-stfPants.webp', './tex/m5-stfBadge.webp',
   './tex/m5-hubBody.webp', './tex/m5-hubLeg.webp', './tex/m5-hubPipe.webp',
   './tex/m5-embBody.webp', './tex/m5-embLimb.webp', './tex/m5-embHead.webp', './tex/m5-embGlow.webp', './tex/m5-embWing.webp', './tex/m5-embWingE.webp', './tex/m5-embFlame.webp', './tex/m5-embFlameMask.webp',
+  './tex/m5-clkCloak.webp', './tex/m5-clkSkin.webp', './tex/m5-clkPail.webp', './tex/m5-clkStick.webp', './tex/m5-clkCoal.webp',   // 神秘店員
 
 ];
 
