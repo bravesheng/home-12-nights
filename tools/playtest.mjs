@@ -1668,7 +1668,7 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   check(cl.toast.includes('小明 離開了'), `客人關掉分頁，房主要看到「小明 離開了」（${cl.toast.slice(-60)}）`);
 });
 
-await scenario('net5', '跟朋友一起玩第五世界（?nettest）：客人進到房主的草原、砍倒的樹、砍樹（樹倒了掉的板子和木柴）、樹上的東西拿走、工作台做的方塊、沐浴球冒泡和洗出來的東西、閃電、記憶的光點、早上長回來的樹，兩邊都一樣', { limit: 240000 }, async ({ page, ctx, check }) => {
+await scenario('net5', '跟朋友一起玩第五世界（?nettest）：客人進到房主的草原、砍倒的樹、砍樹（樹倒了掉的板子和木柴）、樹上的東西拿走、工作台做的方塊、沐浴球冒泡和洗出來的東西、閃電、記憶的光點、早上長回來的樹，兩邊都一樣', { limit: 240000, viewport: { width: 640, height: 400 } }, async ({ page, ctx, check }) => {   // 兩個分頁都畫小一點：無頭瀏覽器的分頁共用一個軟體算繪，草原很重，畫大張兩邊都會卡到斷線
   const guest = await ctx.newPage();
   guest.on('pageerror', e => check(false, '客人的分頁 JS 錯誤：' + e.message));
   guest.on('console', m => { if (m.type() === 'error' && !m.text().startsWith('Failed to load resource')) check(false, '客人的分頁 console 錯誤：' + m.text()); });
@@ -1685,7 +1685,7 @@ await scenario('net5', '跟朋友一起玩第五世界（?nettest）：客人進
   const code = await page.evaluate(() => document.getElementById('fRoomCode').textContent);
   await page.click('#fResume');
   await guest.reload({ waitUntil: 'load' });
-  await guest.waitForSelector('#btnFriends');
+  await guest.waitForSelector('#btnFriends', { timeout: 90000 });   // 房主在畫草原時，客人重新載入、編譯材質要排隊（無頭瀏覽器的分頁共用一個軟體算繪），電腦很忙時要等比較久
   await guest.click('#btnFriends');
   await guest.fill('#fName', '小華');
   await guest.fill('#fCode', code);

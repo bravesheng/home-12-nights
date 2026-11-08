@@ -1,7 +1,7 @@
 // 在家生存 12 夜 — 離線快取
 // 第一次打開時把整個遊戲存到平板裡，之後沒有網路也能玩。
 // 每次更新遊戲都要改 VERSION，平板連上網路時就會自動下載新版本。
-const VERSION = 'home12-v33';
+const VERSION = 'home12-v35';
 const ASSETS = [
   './', './index.html', './style.css', './manifest.webmanifest', './test.html', './manifest-test.webmanifest',
   './js/version.js', './js/data.js', './js/audio.js', './js/world2.js', './js/world3.js', './js/world4.js', './js/world5.js', './js/net.js', './js/netmon.js', './js/game.js', './js/render3d.js',
@@ -25,6 +25,16 @@ const ASSETS = [
   './tex/m5-gfLeaffalse.webp', './tex/m5-gfLeaftrue.webp', './tex/m5-gfFace11.webp', './tex/m5-gfFace12.webp', './tex/m5-gfFace13.webp', './tex/m5-gfFace14.webp', './tex/m5-clHead.webp',
   './tex/m5-crSclera.webp', './tex/m5-iris26.webp', './tex/m5-iris22.webp', './tex/m5-iris30.webp', './tex/m5-lkWisp.webp', './tex/m5-dmFlesh.webp',
   './tex/m5-gzIris.webp', './tex/m5-slIn.webp', './tex/m5-gfCore.webp', './tex/m5-clSkin.webp',
+  // 照第五世界的做法重做的舊怪物：黑影
+  './tex/m5-shBody.webp', './tex/m5-shLimb.webp', './tex/m5-shHead.webp', './tex/m5-shGlow.webp', './tex/m5-shShell.webp', './tex/m5-shPuff.webp',
+  // 第一世界重做的怪物（新的檔名加在這一行下面）
+
+  // 第二世界重做的怪物（新的檔名加在這一行下面）
+
+  // 第三世界重做的怪物（新的檔名加在這一行下面）
+
+  // 第四世界重做的怪物（新的檔名加在這一行下面）
+
 ];
 
 self.addEventListener('install', e => {
