@@ -915,8 +915,8 @@ await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板�
     return { kinds: G.enemies.map(e => e.kind), hp: Math.round(G.p.hp), sched };
   });
   check(['daydream', 'gaze', 'slice', 'green', 'cradle', 'clone', 'leak'].every(k => night.kinds.includes(k)), `第五世界的 7 隻新怪物都要能在晚上出現（${night.kinds.join('、')}）`);
-  // 新怪物暫時關掉了（world5.js 的 MON5_ON）：晚上不能排到牠們
-  check(!night.sched.some(k => ['daydream', 'gaze', 'slice', 'green', 'cradle', 'clone', 'leak'].includes(k)), `新怪物關掉時晚上不能排到牠們（${night.sched.join('、')}）`);
+  // 第 10 夜照排程會來記憶洩漏源
+  check(night.sched.includes('leak'), `第 10 夜要排到記憶洩漏源（${night.sched.join('、')}）`);
   await page.evaluate(() => { G.p.hp = 100; G.p.san = 100; for (const e of G.enemies) { e.x = 40.5 + (e.x - 40.5) * 0.6; } });
   await sleep(2500);
   await shot('6-night-monsters');
