@@ -2662,6 +2662,8 @@ function buildShroom(f, g) {
 const flowerMap = new Map();
 function buildFlower(f, parent = scene) {
   const g = new THREE.Group(); g.position.set(f.x, 0, f.y); parent.add(g);
+  const upf = UPG[f.ptype || 'eye'];
+  if (upf && upf.flower) return upf.flower.build(f, g);   // 照第五世界的做法重做過的花：UPG.<ptype>.flower = { build(f, g), sync(f, r, t, p, awake) }
   if (f.ptype === 'sunflower') return buildSunflower(f, g);
   if (f.ptype === 'shroom') return buildShroom(f, g);
   const stem = lm('#4f8a4a');
@@ -2696,6 +2698,8 @@ function syncFlowers(t) {
 function syncFlower(f, r, t, p, awake) {
   {
     r.g.scale.setScalar(Math.max(0.05, f.grow));
+    const upf = UPG[f.ptype || 'eye'];
+    if (upf && upf.flower) { upf.flower.sync(f, r, t, p, awake); return; }
     const dx = p.x - f.x, dz = p.y - f.y, dist = Math.hypot(dx, dz);
     if (f.ptype === 'sunflower') {
       // 轉向最亮的光（看到你的手電筒時就盯著你）；白天垂著頭睡覺
@@ -6893,6 +6897,195 @@ function syncBlob(e, r, t, p, dt) {
   u.uBT.value = t + e.wob; u.uBA.value = eating ? 0.06 : 0.035;
 }
 UPG.blob = { build: buildBlob, sync: syncBlob, view: { h: 1.0, d: 2.4, cy: 0.45 } };
+
+// ---------- 眼球花 ----------
+// 設計師：「眼球的血絲畫真點」。一根有點彎的綠莖、兩片垂下來的真的葉子，頂上一圈肉肉的萼片像手一樣托著一顆比頭還大的眼球；
+// 眼球轉過來盯著你（在萼片裡轉）。眼白越往後越紅、濕濕的，一條一條真的血管從後面爬過來：越往前越細、彎彎曲曲地分岔，
+// 到虹膜旁邊變成很細的微血管，血管周圍的眼白淡淡地充血。虹膜是灰色的、一絲一絲放射狀的紋路、一圈花環、深色的外圈，
+// 中間淡淡一圈螺旋（照草稿），黑色的瞳孔；虹膜上面是一層會反光的角膜。動作跟原本一樣（盯著你、被照到瞇起來、尖叫時發紅、白天垂下來睡）。
+// 花不是怪物：buildFlower、syncFlower 開頭的鉤子會用 UPG.eye.flower（第二世界的花也用同一個鉤子）
+const EF = { y: 1.28, R: 0.24, iris: 0.098 };
+// 眼白（球的正面是 u = 0.25）：W × H（H = W / 2）
+function efPaintSclera(c, W, H) {
+  const img = c.createImageData(W, H), D = img.data, irisA = Math.asin(EF.iris / EF.R);
+  for (let py = 0; py < H; py++) {
+    const th = (py + 0.5) / H * Math.PI, y = Math.cos(th), st = Math.sin(th);
+    for (let px = 0; px < W; px++) {
+      const ph = (px + 0.5) / W * Math.PI * 2, x = -Math.cos(ph) * st, z = Math.sin(ph) * st, ang = Math.acos(clamp(z, -1, 1));
+      const n = fbm3(x * 2.5, y * 2.5, z * 2.5, 4, 111), k = sstep(1.1, 2.8, ang + (n - 0.5) * 0.5), i = (py * W + px) * 4;
+      let R = 244 - k * 30, G2 = 238 - k * 92, B = 228 - k * 90;
+      const flush = sstep(0.6, 0.85, fbm3(x * 4, y * 4, z * 4, 3, 113)) * (0.15 + 0.85 * k);   // 一塊一塊充血
+      R -= flush * 10; G2 -= flush * 44; B -= flush * 40;
+      const lim = Math.exp(-(((ang - irisA - 0.06) / 0.07) ** 2));   // 虹膜旁邊淡淡的灰影
+      R -= lim * 40; G2 -= lim * 40; B -= lim * 30;
+      D[i] = R; D[i + 1] = G2; D[i + 2] = B; D[i + 3] = 255;
+    }
+  }
+  c.putImageData(img, 0, 0);
+  overlayDetail(c, 'sclera', W, H, 4, 0.5);   // 照片的眼白：濕濕的表面
+  // 血管：從後面往前（往虹膜）長，越長越細、彎彎曲曲地分岔；先畫一層淡淡的充血，再畫血管（外面暗紅、中間比較亮）
+  const r = seeded(7311), segs = [], toPx = (a, b) => {
+    const st = Math.sin(a), x = st * Math.cos(b), y = st * Math.sin(b), z = Math.cos(a);
+    return [((Math.atan2(z, -x) / (Math.PI * 2)) % 1 + 1) % 1 * W, Math.acos(clamp(y, -1, 1)) / Math.PI * H];
+  };
+  const grow = (a, b, dir, w, depth) => {   // a 離正面的角度、b 繞一圈的角度、dir 往哪個方向長（在 a-b 平面上，0 是往正面）
+    let prev = toPx(a, b);
+    while (w > 0.35 && a > irisA + 0.05) {
+      const st = 0.012 + w * 0.004;
+      dir += (r() - 0.5) * 0.9 - dir * 0.08;
+      a -= Math.cos(dir) * st; b += Math.sin(dir) * st / Math.max(0.2, Math.sin(a));
+      w *= 0.985 - (a < 1 ? 0.012 : 0);
+      const q = toPx(a, b);
+      if (Math.abs(q[0] - prev[0]) < W / 4) segs.push([prev[0], prev[1], q[0], q[1], w]);
+      prev = q;
+      if (depth < 3 && r() < 0.03) grow(a, b, dir + (r() < 0.5 ? -1 : 1) * (0.6 + r() * 0.6), w * (0.55 + r() * 0.2), depth + 1);
+    }
+  };
+  const sc = W / 1024;
+  for (let i = 0; i < 16; i++) grow(1.8 + r() * 0.9, i / 16 * Math.PI * 2 + r() * 0.3, (r() - 0.5) * 0.6, (2.4 + r() * 3) * sc, 0);
+  for (let i = 0; i < 28; i++) grow(0.8 + r() * 0.55, r() * Math.PI * 2, (r() - 0.5) * 1.5, (0.7 + r() * 0.8) * sc, 2);   // 虹膜旁邊的微血管
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  for (const [col, kw] of [['rgba(214,90,96,.07)', 3.5], ['rgba(116,10,18,.85)', 1], ['rgba(198,48,56,.7)', 0.45]]) {
+    c.strokeStyle = col;
+    for (const s of segs) { c.lineWidth = s[4] * kw; c.beginPath(); c.moveTo(s[0], s[1]); c.lineTo(s[2], s[3]); c.stroke(); }
+  }
+}
+// 虹膜：灰色、一絲一絲放射狀的紋路、小小的凹洞、一圈花環、深色的外圈、淡淡一圈螺旋（照草稿），中間黑色的瞳孔
+function efPaintIris(c, W, H) {
+  const img = c.createImageData(W, H), D = img.data, C = W / 2;
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const dx = (px + 0.5 - C) / C, dy = (py + 0.5 - C) / C, rr = Math.hypot(dx, dy), a = Math.atan2(dy, dx), i = (py * W + px) * 4;
+    if (rr > 1) { D[i] = 60; D[i + 1] = 56; D[i + 2] = 54; D[i + 3] = 255; continue; }
+    const fib = vnoise3(Math.cos(a) * 26, Math.sin(a) * 26, rr * 2.5, 121), fib2 = vnoise3(Math.cos(a) * 70, Math.sin(a) * 70, rr * 5, 123);
+    let L = 104 + (fib - 0.5) * 60 + (fib2 - 0.5) * 30;
+    L += 26 * Math.exp(-(((rr - 0.5 - 0.04 * Math.sin(a * 9)) / 0.05) ** 2));   // 花環
+    L -= 40 * sstep(0.55, 0.75, fbm3(Math.cos(a) * 6, Math.sin(a) * 6, rr * 4, 3, 125)) * sstep(0.45, 0.6, rr) * (1 - sstep(0.85, 0.9, rr));   // 凹洞
+    const sp = ((a + Math.PI) / (Math.PI * 2) + rr * 2.2) % 1;   // 螺旋
+    L -= 34 * Math.exp(-(((sp - 0.5) / 0.08) ** 2)) * sstep(0.3, 0.38, rr) * (1 - sstep(0.78, 0.88, rr));
+    L *= 1 - 0.55 * sstep(0.84, 0.98, rr);   // 深色的外圈
+    const pu = 1 - sstep(0.3, 0.335, rr);
+    L = L * (1 - pu) + 3 * pu;
+    D[i] = L * 1.02; D[i + 1] = L * 0.98; D[i + 2] = L * 0.93; D[i + 3] = 255;
+  }
+  c.putImageData(img, 0, 0);
+}
+// 莖（u 沿著莖、v 繞一圈）：綠色、一條一條細細的直紋、一點一點深色的斑，根部和頂上有一點紫紅
+function efPaintStem(c, W, H) {
+  const img = c.createImageData(W, H), D = img.data, T = Math.PI * 2;
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const u = (px + 0.5) / W, v = (py + 0.5) / H, cv = Math.cos(T * v), sv = Math.sin(T * v);
+    const n = fbm3(cv * 0.6, sv * 0.6, u * 8, 3, 131), st = vnoise3(cv * 9, sv * 9, u * 2, 133), spot = sstep(0.72, 0.78, fbm3(cv * 2, sv * 2, u * 40, 2, 135));
+    const red = sstep(0.12, 0, u) + sstep(0.9, 1, u) * 0.8, i = (py * W + px) * 4, k = 0.85 + (n - 0.5) * 0.3 + (st - 0.5) * 0.25 - spot * 0.3;
+    D[i] = (74 + red * 50) * k; D[i + 1] = (118 - red * 40) * k; D[i + 2] = (62 - red * 6) * k; D[i + 3] = 255;
+  }
+  c.putImageData(img, 0, 0);
+}
+// 葉子（u 從葉柄到葉尖、v 橫的）：中間一條淺色的主脈、斜斜往外的側脈、邊緣暗一點，葉尖有一點枯黃、幾個褐色的小斑
+function efPaintLeaf(c, W, H) {
+  const img = c.createImageData(W, H), D = img.data;
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const u = (px + 0.5) / W, v = (py + 0.5) / H * 2 - 1, av = Math.abs(v), i = (py * W + px) * 4;
+    const n = fbm3(u * 5, v * 3, 0.5, 4, 141), mid = Math.exp(-((v / 0.035) ** 2)), side = Math.exp(-(((((u - av * 0.45) * 7) % 1 + 1) % 1 - 0.5) ** 2 / 0.006)) * sstep(0.05, 0.15, av);
+    const dry = sstep(0.75, 1, u + (n - 0.5) * 0.3) * 0.6, spot = sstep(0.74, 0.8, fbm3(u * 18, v * 9, 3, 2, 143));
+    let R = 60 + (n - 0.5) * 30 + mid * 50 + side * 22, G2 = 112 + (n - 0.5) * 34 + mid * 46 + side * 22, B = 52 + (n - 0.5) * 18 + mid * 24 + side * 10;
+    const edge = sstep(0.7, 1, av); R *= 1 - edge * 0.3; G2 *= 1 - edge * 0.3; B *= 1 - edge * 0.3;
+    R += (150 - R) * dry; G2 += (130 - G2) * dry; B += (60 - B) * dry;
+    R += (90 - R) * spot; G2 += (60 - G2) * spot; B += (30 - B) * spot;
+    D[i] = R; D[i + 1] = G2; D[i + 2] = B; D[i + 3] = 255;
+  }
+  c.putImageData(img, 0, 0);
+}
+// 一片葉子：沿著 +x 長，中間沿著主脈往上摺一點、越往葉尖越往下垂，邊緣微微波浪
+function efLeafGeo(key, L, w) {
+  return geo(key, () => {
+    const NL = 10, NW = 6, pos = [], uv = [], idx = [];
+    for (let i = 0; i <= NL; i++) for (let j = 0; j <= NW; j++) {
+      const t = i / NL, s = j / NW * 2 - 1, W2 = w * Math.sin(Math.PI * Math.min(1, t ** 0.7)) * (1 - 0.15 * t) + 0.004;
+      pos.push(t * L, -0.3 * L * t * t + Math.abs(s) * W2 * 0.3 + 0.006 * Math.sin(t * 14 + s * 3), s * W2);
+      uv.push(t, j / NW);
+      if (i < NL && j < NW) { const a = i * (NW + 1) + j, b = a + NW + 1; idx.push(a, b, a + 1, a + 1, b, b + 1); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals();
+    return g;
+  });
+}
+// 托著眼球的萼片：頂上一個鼓鼓的花托，六片肉肉的萼片從底下往上包住眼球的下半部，尖端往外翹
+function efCalyxGeo() {
+  return geo('efCalyx', () => {
+    const parts = [[new THREE.SphereGeometry(1, 14, 8), mat4(0, EF.y - EF.R - 0.005, 0, 0, 0, 0, 0.07, 0.05, 0.07)]];
+    for (let k = 0; k < 6; k++) {
+      const az = k / 6 * Math.PI * 2 + 0.3, NL = 9, NW = 4, pos = [], uv = [], idx = [];
+      for (let i = 0; i <= NL; i++) for (let j = 0; j <= NW; j++) {
+        const t = i / NL, s = j / NW * 2 - 1, hw = 0.62 * Math.sin(Math.PI * Math.min(1, 0.2 + t * 0.8)) ** 0.6 * (1 - 0.35 * t), p = Math.PI - 0.06 - t * (1.0 + 0.12 * (k % 2)), b = az + s * hw, rr = EF.R + 0.006 + 0.004 * (k % 2) + 0.022 * t * t * t - 0.004 * s * s;
+        pos.push(rr * Math.sin(p) * Math.cos(b), EF.y + rr * Math.cos(p), rr * Math.sin(p) * Math.sin(b));
+        uv.push(t, j / NW);
+        if (i < NL && j < NW) { const a = i * (NW + 1) + j, c2 = a + NW + 1; idx.push(a, a + 1, c2, a + 1, c2 + 1, c2); }
+      }
+      const gg = new THREE.BufferGeometry();
+      gg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); gg.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      gg.setIndex(idx); gg.computeVertexNormals();
+      parts.push([gg, new THREE.Matrix4()]);
+    }
+    const gs = parts.map(([gm, m]) => { const c = gm.toNonIndexed(); c.applyMatrix4(m); return c; });
+    let n = 0; for (const c of gs) n += c.attributes.position.count;
+    const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), uv = new Float32Array(n * 2);
+    let o = 0;
+    for (const c of gs) { pos.set(c.attributes.position.array, o * 3); nor.set(c.attributes.normal.array, o * 3); uv.set(c.attributes.uv.array, o * 2); o += c.attributes.position.count; c.dispose(); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    return g;
+  });
+}
+// 萼片：綠色、往尖端越來越紅（像充血），一條一條紅色的細脈
+function efPaintCalyx(c, W, H) {
+  const img = c.createImageData(W, H), D = img.data;
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const u = (px + 0.5) / W, v = (py + 0.5) / H * 2 - 1, n = fbm3(u * 6, v * 3, 1.5, 4, 151), vein = Math.exp(-((((v * 3 + (n - 0.5) * 0.6) % 1 + 1) % 1 - 0.5) ** 2 / 0.004)), red = sstep(0.4, 1, u) * 0.7 + vein * 0.5 * sstep(0.2, 0.6, u), i = (py * W + px) * 4;
+    D[i] = (66 + (n - 0.5) * 30) * (1 - red) + (128 + (n - 0.5) * 30) * red; D[i + 1] = (100 + (n - 0.5) * 30) * (1 - red) + (34 + (n - 0.5) * 16) * red; D[i + 2] = (50 + (n - 0.5) * 16) * (1 - red) + (40 + (n - 0.5) * 14) * red; D[i + 3] = 255;
+  }
+  c.putImageData(img, 0, 0);
+}
+function buildEyeFlower(f, g) {
+  const stemM = ownLM('#ffffff', { map: m5Tex('efStem', 512, 64, efPaintStem), shade: 0.75 });
+  const leafM = ownLM('#ffffff', { map: m5Tex('efLeaf', 256, 128, efPaintLeaf), side: THREE.DoubleSide, shade: 0.7 });
+  const calyxM = ownPhong('#ffffff', { map: m5Tex('efCalyx', 128, 128, efPaintCalyx), specular: 0x2a2a22, shininess: 30, side: THREE.DoubleSide, shade: 0.75 });
+  for (const m of [stemM, leafM, calyxM]) m.map.wrapS = THREE.ClampToEdgeWrapping;
+  g.add(new THREE.Mesh(tubeGeo('efStem', [[0, 0, 0], [0.03, 0.3, 0.01], [0.045, 0.6, 0], [0.02, 0.88, -0.01], [0, EF.y - EF.R - 0.02, 0]], [0.03, 0.026, 0.024, 0.023, 0.03], 8, 24), stemM));
+  for (const s of [-1, 1]) {
+    const lf = new THREE.Group(); lf.position.set(0.04 + s * 0.012, 0.5 + (s > 0 ? 0.06 : 0), 0); lf.rotation.set(s * 0.15, s > 0 ? 0 : Math.PI, 0.45); g.add(lf);
+    lf.add(new THREE.Mesh(efLeafGeo('efLeaf', 0.32, 0.075), leafM));
+  }
+  g.add(new THREE.Mesh(efCalyxGeo(), calyxM));
+  const eyeG = new THREE.Group(); eyeG.position.y = EF.y; eyeG.rotation.order = 'YXZ'; g.add(eyeG);
+  const eyeMat = ownPhong('#ffffff', { map: m5Tex('efSclera', 2048, 1024, efPaintSclera), emissive: 0x1a1414, specular: 0x888888, shininess: 95, shade: 0.6 });
+  const ball = new THREE.Mesh(geo('efBall', () => new THREE.SphereGeometry(EF.R, 32, 22)), eyeMat); eyeG.add(ball);
+  const irisMat = ownPhong('#ffffff', { map: m5Tex('efIris', 512, 512, efPaintIris), emissive: 0x141010, specular: 0xcccccc, shininess: 140, shade: 0.6 });
+  const iris = new THREE.Mesh(irisGeo('efIris', EF.R, EF.iris, 0), irisMat); eyeG.add(iris);
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return { g, eyeG, ball, iris, eyeMat, irisMat };
+}
+// 跟原本的眼球花一樣：晚上轉過來盯著你（眼球微微地抖）、白天垂下來睡；被手電筒照到瞇起來；尖叫時發紅
+function syncEyeFlower(f, r, t, p, awake) {
+  const dx = p.x - f.x, dz = p.y - f.y, dist = Math.hypot(dx, dz);
+  if (awake) {
+    r.eyeG.rotation.y = Math.atan2(dx, dz) + Math.sin(t * 7 + f.x) * 0.02;
+    r.eyeG.rotation.x = -Math.atan2(EYE - EF.y, Math.max(0.5, dist));
+  } else { r.eyeG.rotation.y = Math.sin(t * 0.3 + f.x); r.eyeG.rotation.x = 0.95; }
+  const squint = 1 - (f.burn || 0) / 1.5 * 0.6;
+  r.ball.scale.y = squint; r.iris.scale.y = squint;
+  const al = f.alarm > 0 ? 0.35 + 0.35 * Math.sin(t * 30) : 0;
+  r.eyeMat.emissive.setRGB(0.1 + al, 0.08, 0.08);
+  r.irisMat.emissive.setRGB(0.08 + al, 0.06, 0.06);
+}
+// 看模型（?model=eye）和預先畫貼圖（bake5）時當成怪物蓋：裡面放一朵假的花
+UPG.eye = {
+  build(r, g) { r.f = { x: 0, y: 0, ptype: 'eye', grow: 1, burn: 0, alarm: 0 }; r.fr = buildEyeFlower(r.f, g); },
+  sync(e, r, t, p) { r.f.x = e.x; r.f.y = e.y; r.g.rotation.y = 0; syncEyeFlower(r.f, r.fr, t, p, true); },
+  view: { h: 1.65 },
+  flower: { build: buildEyeFlower, sync: syncEyeFlower },
+};
 
 // ---------- 第一世界到這裡 ----------
 
