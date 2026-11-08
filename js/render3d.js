@@ -2662,6 +2662,8 @@ function buildShroom(f, g) {
 const flowerMap = new Map();
 function buildFlower(f, parent = scene) {
   const g = new THREE.Group(); g.position.set(f.x, 0, f.y); parent.add(g);
+  const upf = UPG[f.ptype || 'eye'];
+  if (upf && upf.flower) return upf.flower.build(f, g);   // 照第五世界的做法重做過的花：UPG.<ptype>.flower = { build(f, g), sync(f, r, t, p, awake) }
   if (f.ptype === 'sunflower') return buildSunflower(f, g);
   if (f.ptype === 'shroom') return buildShroom(f, g);
   const stem = lm('#4f8a4a');
@@ -2696,6 +2698,8 @@ function syncFlowers(t) {
 function syncFlower(f, r, t, p, awake) {
   {
     r.g.scale.setScalar(Math.max(0.05, f.grow));
+    const upf = UPG[f.ptype || 'eye'];
+    if (upf && upf.flower) { upf.flower.sync(f, r, t, p, awake); return; }
     const dx = p.x - f.x, dz = p.y - f.y, dist = Math.hypot(dx, dz);
     if (f.ptype === 'sunflower') {
       // 轉向最亮的光（看到你的手電筒時就盯著你）；白天垂著頭睡覺
@@ -6271,7 +6275,418 @@ UPG.shadow = { build: buildShadow, sync: syncShadow, view: { h: 1.9, d: 3.7, cy:
 
 
 // ---------- 第二世界重做的怪物（草叢人、大嘴觸角蟲、眼花女孩；向日葵眼、千眼菇） ----------
+// 第二世界共用的小工具（w2 開頭）
+// 繞某一點轉：先繞自己的 x 軸傾斜 rx、再繞 z 軸轉 rz（花瓣排一圈用）；s 是大小
+function w2M(x, y, z, rz, rx, sx = 1, sy = sx, sz = sx, ry = 0) {
+  const m = new THREE.Matrix4().makeRotationZ(rz).multiply(new THREE.Matrix4().makeRotationX(rx)).multiply(new THREE.Matrix4().makeRotationY(ry));
+  m.scale(new THREE.Vector3(sx, sy, sz)); m.setPosition(x, y, z);
+  return m;
+}
+// 一張圖裡的一塊（畫布上的像素範圍）→ 貼圖座標 [u0, v0, u1, v1]（v 往上，圖的最下面是 0）
+const w2Rect = (x0, y0, x1, y1, W, H) => [x0 / W, 1 - y1 / H, x1 / W, 1 - y0 / H];
+// 照格子做一片網格：pt(i, j, out) 給第 i 列（0～rows）、第 j 欄（0～cols）的位置，貼圖照 rect 鋪（欄 → u、列 → v）
+function w2Grid(key, cols, rows, pt, rect = [0, 0, 1, 1]) {
+  return geo(key, () => {
+    const pos = [], uv = [], idx = [], v = new THREE.Vector3();
+    for (let i = 0; i <= rows; i++) for (let j = 0; j <= cols; j++) {
+      pt(i, j, v); pos.push(v.x, v.y, v.z);
+      uv.push(rect[0] + (rect[2] - rect[0]) * j / cols, rect[1] + (rect[3] - rect[1]) * i / rows);
+      if (i < rows && j < cols) { const a = i * (cols + 1) + j, b = a + 1, c = a + cols + 1, d = c + 1; idx.push(a, b, c, b, d, c); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals();
+    return g;
+  });
+}
+// 管子（tubeGeo）的貼圖改鋪在一張圖的某一塊：沿著長度 → v、繞一圈 → u
+function w2TubeIn(key, pts, rs, seg, n, rect) {
+  return geo(key, () => {
+    const g = tubeGeo(key + '0', pts, rs, seg, n).clone(), U = g.attributes.uv;
+    for (let i = 0; i < U.count; i++) { const a = U.getX(i), b = U.getY(i); U.setXY(i, rect[0] + (rect[2] - rect[0]) * b, rect[1] + (rect[3] - rect[1]) * a); }
+    return g;
+  });
+}
+const w2Mix = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+// 逐點畫一塊：fn(s, t, out) 回傳 [r, g, b, a]（s 0～1 往右、t 0～1 往上）
+function w2PaintRect(c, x0, y0, w, h, fn) {
+  const img = c.getImageData(x0, y0, w, h), d = img.data, o = [0, 0, 0, 255];
+  for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
+    o[3] = 255; fn((px + 0.5) / w, 1 - (py + 0.5) / h, o);
+    const i = (py * w + px) * 4; d[i] = o[0]; d[i + 1] = o[1]; d[i + 2] = o[2]; d[i + 3] = o[3];
+  }
+  c.putImageData(img, x0, y0);
+}
 
+// ---------- 向日葵眼（花，ptype 'sunflower'） ----------
+// 一朵快枯掉的向日葵：有點彎、毛毛的粗莖，三片垂下來、有破洞和枯黃的大葉子；花盤鋪滿一顆顆凸起來的葵花籽，
+// 中間的籽腫成濕濕的暗紅色肉，肉裡嵌著一顆布滿血絲的大眼睛（厚厚的肉眼皮會眨、被手電筒照到會瞇起來，瞳孔看到你會放大）；
+// 血管從眼睛爬到花盤上。花瓣兩圈，有的枯掉捲起來、邊緣破破的；花盤背面是綠色的花托和尖尖的花萼。
+// 花的頭長在莖的頂端（W2SF_TOP），轉頭、低頭都是繞著那裡轉（晚上睡覺時整顆垂下來）
+const W2SF_TOP = 1.12, W2SF_HC = [0, 0.2, 0.07], W2SF_ER = 0.19, W2SF_EZ = -0.03, W2SF_IR = 0.088;   // 莖頂、花盤中心（從莖頂算）、眼球半徑、眼球中心往前多少、虹膜半徑
+const W2SF_ATLAS = [1024, 512];   // 花瓣、葉子、莖、花萼、花托共用一張圖（一個材質，整朵花只要畫幾次）
+const W2SF_R = {
+  petal: j => w2Rect(j * 128, 0, j * 128 + 128, 512, 1024, 512), leaf: w2Rect(512, 0, 768, 512, 1024, 512), stem: w2Rect(768, 0, 896, 512, 1024, 512),
+  bract: w2Rect(896, 0, 1024, 256, 1024, 512), back: w2Rect(896, 256, 1024, 512, 1024, 512),
+};
+// 花盤的斷面（從眼睛往外）：[離中心多遠, 往前多少]。眼睛周圍一圈腫起來的肉蓋住眼球的邊，外面是微微隆起的葵花籽，邊緣往後捲
+const W2SF_DISC = [[0.133, 0.096], [0.144, 0.095], [0.152, 0.1], [0.162, 0.108], [0.175, 0.111], [0.19, 0.1], [0.203, 0.078], [0.215, 0.054], [0.228, 0.038], [0.245, 0.029], [0.262, 0.02], [0.273, 0.009], [0.281, -0.006], [0.283, -0.02], [0.278, -0.036]];
+function w2sfDiscGeo() {
+  return geo('w2sfDisc', () => {
+    const N = 40, P = W2SF_DISC, R = P.length, pos = [], uv = [], idx = [];
+    for (let i = 0; i < R; i++) for (let j = 0; j <= N; j++) {
+      const a = (j % N) / N * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+      // 眼睛周圍的肉一塊一塊腫起來（不是一個完美的圓圈）
+      const lump = (fbm3(ca * 1.6, sa * 1.6, 0.3, 3, 401) - 0.5) * Math.exp(-(((P[i][0] - 0.172) / 0.025) ** 2));
+      const rr = P[i][0] + lump * 0.03, z = P[i][1] + lump * 0.05, x = rr * ca, y = rr * sa;
+      pos.push(x, y, z); uv.push(0.5 + x / 0.57, 0.5 + y / 0.57);
+      if (i < R - 1 && j < N) { const p = i * (N + 1) + j, q = p + 1, s = p + N + 1, t = s + 1; idx.push(p, s, q, q, s, t); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals(); fixSeam(g, N, R);
+    return g;
+  });
+}
+// 花托（花盤背面）：從花盤的邊往後收到脖子
+const W2SF_BACK = [[0.276, -0.03], [0.271, -0.058], [0.256, -0.094], [0.226, -0.13], [0.185, -0.16], [0.14, -0.182], [0.095, -0.2], [0.06, -0.218], [0.042, -0.235], [0.03, -0.25], [0, -0.256]];
+function w2sfBackGeo() {
+  return geo('w2sfBack', () => {
+    const N = 22, P = W2SF_BACK, R = P.length, rc = W2SF_R.back, pos = [], uv = [], idx = [];
+    for (let i = 0; i < R; i++) for (let j = 0; j <= N; j++) {
+      const a = j / N * Math.PI * 2;
+      pos.push(P[i][0] * Math.cos(a), P[i][0] * Math.sin(a), P[i][1]);
+      uv.push(rc[0] + (rc[2] - rc[0]) * j / N, rc[3] - (rc[3] - rc[1]) * i / (R - 1));
+      if (i < R - 1 && j < N) { const p = i * (N + 1) + j, q = p + 1, s = p + N + 1, t = s + 1; idx.push(p, s, q, q, s, t); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals(); fixSeam(g, N, R);
+    return g;
+  });
+}
+// 花瓣（根在原點、往 +y 長）：寬 w、長 len；cup 左右往前凹、curl 越往尖端越往前（負的往後）捲、twist 扭；v 是第幾種貼圖（0、1 好的，2 快枯了，3 枯掉）
+function w2sfPetalGeo(v, w, len, cup, curl, twist) {
+  return w2Grid(`w2sfPetal${v}`, 3, 7, (i, j, out) => {
+    const k = i / 7, s = j / 3 * 2 - 1, hw = w / 2 * (0.24 * (1 - k) + 0.76 * Math.sin(Math.PI * k ** 0.62) ** 0.75);
+    const tw = twist * k, x = s * hw, zc = cup * s * s * hw + curl * k * k * k;
+    out.set(x * Math.cos(tw), k * len, zc + x * Math.sin(tw));
+  }, W2SF_R.petal(v));
+}
+const W2SF_PETAL = [[0.105, 0.3, 0.32, -0.03, 0], [0.1, 0.29, 0.38, 0.07, 0.25], [0.085, 0.26, 0.45, -0.14, -0.3], [0.06, 0.19, 0.9, 0.09, 0.9]];
+// 花萼（花盤背面一圈尖尖的綠葉）
+const w2sfBractGeo = () => w2Grid('w2sfBract', 2, 4, (i, j, out) => {
+  const k = i / 4, s = j / 2 * 2 - 1, hw = 0.032 * (1 - k) ** 0.9 * (0.75 + 0.25 * Math.sin(Math.PI * k));
+  out.set(s * hw, k * 0.1, 0.25 * s * s * hw - 0.03 * k * k);
+}, W2SF_R.bract);
+// 葉子（葉柄的尾端在原點，往 +z 長、往下垂）：寬 w、長 len、垂多少 droop、中間的葉脈往上摺 fold
+function w2sfLeafGeo(key, w, len, droop, fold) {
+  return w2Grid(key, 8, 12, (i, j, out) => {
+    const k = i / 12, s = j / 4 - 1, hw = w / 2 * Math.sin(Math.PI * Math.min(1, k * 1.04) ** 0.72) ** 0.85;
+    out.set(s * hw, -droop * k * k + fold * Math.abs(s) * hw + Math.sin(k * 9 + s * 2) * 0.008 * Math.abs(s), k * len);
+  }, W2SF_R.leaf);
+}
+// 莖和葉子（不會動，合成一個網格）
+function w2sfStemGeo() {
+  const rs = W2SF_R.stem, parts = [[w2TubeIn('w2sfStem', [[0, -0.05, 0], [0.005, 0.08, 0], [0.025, 0.38, 0.012], [0.042, 0.66, -0.004], [0.026, 0.92, -0.012], [0, W2SF_TOP + 0.03, 0]], [0.062, 0.05, 0.046, 0.041, 0.037, 0.034], 8, 14, rs), new THREE.Matrix4()]];
+  // 三片葉子：[高度, 往哪個方向, 葉柄多長, 寬, 長, 垂多少]
+  [[0.4, -1.75, 0.09, 0.22, 0.34, 0.16], [0.6, 1.2, 0.08, 0.24, 0.36, 0.13], [0.85, -0.3, 0.07, 0.19, 0.28, 0.1]].forEach(([y, a, pl, w, len, dr], i) => {
+    const pet = w2TubeIn('w2sfPet' + i, [[0, 0, 0], [0, 0.03, pl * 0.6], [0, 0.02, pl]], [0.012, 0.009, 0.007], 5, 4, rs);
+    const m = new THREE.Matrix4().makeRotationY(a).setPosition(0.03 * Math.sin(a), y, 0.03 * Math.cos(a));
+    parts.push([pet, m]);
+    parts.push([w2sfLeafGeo('w2sfLeaf' + i, w, len, dr, 0.22), m.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0.02, pl - 0.01))]);
+  });
+  return mergeParts('w2sfStemAll', parts);
+}
+// 花的頭：脖子、花托、花萼、兩圈花瓣（不會分開動，合成一個網格）
+function w2sfHeadGeo() {
+  const [hx, hy, hz] = W2SF_HC, r = seeded(9137), parts = [];
+  parts.push([w2TubeIn('w2sfNeck', [[0, -0.04, 0], [0, 0.06, -0.035], [0, 0.15, -0.11], [0, hy, hz - 0.245]], [0.036, 0.034, 0.035, 0.04], 8, 6, W2SF_R.stem), new THREE.Matrix4()]);
+  parts.push([w2sfBackGeo(), new THREE.Matrix4().makeTranslation(hx, hy, hz)]);
+  for (const [n, rad, z, tilt] of [[14, 0.255, -0.045, -0.75], [12, 0.24, -0.05, -1.05]]) for (let i = 0; i < n; i++) {
+    const a = (i + (n === 12 ? 0.5 : 0)) / n * Math.PI * 2 + (r() - 0.5) * 0.2;
+    parts.push([w2sfBractGeo(), w2M(hx + Math.cos(a) * rad, hy + Math.sin(a) * rad, hz + z, a - Math.PI / 2, tilt + (r() - 0.5) * 0.3, 0.85 + r() * 0.35)]);
+  }
+  // 外圈 20 片（掉了兩片）、內圈 14 片；每片挑一種（好的、快枯的、枯掉的），長短、角度都不一樣
+  for (const [n, rad, z, tilt, ls] of [[20, 0.252, -0.016, -0.16, 1], [14, 0.236, 0.0, 0.14, 0.76]]) for (let i = 0; i < n; i++) {
+    if (n === 20 && (i === 6 || i === 15)) continue;
+    const q = r(), v = q < 0.3 ? 0 : q < 0.62 ? 1 : q < 0.86 ? 2 : 3, [w, len, cup, curl, tw] = W2SF_PETAL[v];
+    const a = (i + (n === 14 ? 0.5 : 0)) / n * Math.PI * 2 + (r() - 0.5) * 0.16, sc = ls * (0.88 + r() * 0.26);
+    parts.push([w2sfPetalGeo(v, w, len, cup, curl, tw), w2M(hx + Math.cos(a) * rad, hy + Math.sin(a) * rad, hz + z + (r() - 0.5) * 0.008, a - Math.PI / 2 + (r() - 0.5) * 0.18, tilt + (r() - 0.5) * 0.3 + (v === 2 ? -0.35 : 0), sc, sc, sc)]);
+  }
+  return mergeParts('w2sfHeadAll', parts);
+}
+// 眼皮：眼球外面一片厚厚的肉殼（從頭頂到 TH1），邊緣是圓圓的眼瞼緣、往裡面捲一點；左右兩邊多包一點，藏進眼睛周圍的肉裡。
+// 下眼皮用 scale.y = -1 翻過來。貼圖 u 繞左右、v 從頭頂到眼瞼緣（0.78）再到裡面（1）
+function w2sfLidGeo() {
+  return geo('w2sfLid', () => {
+    const TH1 = 1.05, Ro = 0.203, Ri = 0.193, P = [];
+    for (let i = 0; i <= 7; i++) { const th = TH1 * i / 7; P.push([Ro + 0.005 * Math.exp(-(((th - TH1 + 0.1) / 0.09) ** 2)) - 0.004 * Math.exp(-(((th - TH1 + 0.3) / 0.07) ** 2)), th]); }
+    P.push([0.206, TH1 + 0.016], [0.2, TH1 + 0.028], [0.195, TH1 + 0.022], [Ri, TH1 + 0.004], [Ri - 0.001, TH1 - 0.07], [Ri - 0.002, TH1 - 0.22]);
+    const L = [0]; for (let i = 1; i < P.length; i++) L.push(L[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], (P[i][1] - P[i - 1][1]) * 0.2));
+    const N = 16, ph0 = -0.3, ph1 = Math.PI + 0.3, pos = [], uv = [], idx = [];
+    P.forEach(([rr, th], i) => {
+      const vv = i <= 7 ? 0.78 * i / 7 : 0.78 + 0.22 * (L[i] - L[7]) / (L[P.length - 1] - L[7]);
+      for (let j = 0; j <= N; j++) {
+        const ph = ph0 + (ph1 - ph0) * j / N;
+        pos.push(-rr * Math.cos(ph) * Math.sin(th), rr * Math.cos(th), rr * Math.sin(ph) * Math.sin(th)); uv.push(j / N, vv);
+        if (i < P.length - 1 && j < N) { const a = i * (N + 1) + j, b = a + 1, c = a + N + 1, d = c + 1; idx.push(a, c, b, b, c, d); }
+      }
+    });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals();
+    return g;
+  });
+}
+// 瞳孔：貼在眼角膜上的一小片（跟 irisGeo 一樣的曲率），放大縮小用 scale
+const W2SF_PU = 0.046;
+function w2sfPupilGeo() {
+  return geo('w2sfPupil', () => {
+    const Rc = W2SF_IR * 1.8, base = Math.sqrt(Rc * Rc - W2SF_IR * W2SF_IR), edge = Math.sqrt(W2SF_ER * W2SF_ER - W2SF_IR * W2SF_IR) + 0.002;
+    return new THREE.SphereGeometry(Rc + 0.0007, 24, 2, 0, Math.PI * 2, 0, Math.asin(W2SF_PU / Rc)).rotateX(Math.PI / 2).translate(0, 0, edge - base);
+  });
+}
+// ---- 向日葵眼的貼圖 ----
+// 花瓣、葉子、莖、花萼、花托（W2SF_ATLAS）
+function w2sfPaintAtlas(c, W, H) {
+  c.fillStyle = '#3a5a26'; c.fillRect(0, 0, W, H);
+  // 花瓣：根部橘褐色、往上變黃，一條條縱向的葉脈；快枯的從尖端和邊緣變咖啡色、有爛掉的斑；邊緣破破的、有破洞
+  for (let j = 0; j < 4; j++) {
+    const wilt = [0, 0.18, 0.6, 1][j];
+    w2PaintRect(c, j * 128, 0, 128, 512, (u, t, o) => {
+      const s = u * 2 - 1, as = Math.abs(s), n = fbm3(s * 1.5 + j * 9, t * 5, 0.4, 4, 11 + j);
+      const vein = Math.pow(0.5 + 0.5 * Math.cos((s * 6.5 + (fbm3(s * 2, t * 7, j, 3, 13) - 0.5) * 1.6) * Math.PI), 5);
+      let col = t < 0.18 ? w2Mix([120, 62, 14], [214, 138, 26], t / 0.18) : t < 0.6 ? w2Mix([214, 138, 26], [242, 190, 44], (t - 0.18) / 0.42) : w2Mix([242, 190, 44], [226, 172, 52], (t - 0.6) / 0.4);
+      col = w2Mix(col, [255, 214, 90], 0.25 * (1 - as) * sstep(0.2, 0.7, t));
+      const k = 1 - 0.2 * vein - 0.14 * as * as + (n - 0.5) * 0.22;
+      const brown = clamp(sstep(0.82 - wilt * 0.55, 1.02, t * 0.75 + as * 0.35 + (n - 0.5) * 0.5) + wilt * 0.35, 0, 1);
+      col = w2Mix(col, w2Mix([112, 62, 20], [70, 38, 14], n), brown * (0.5 + 0.5 * wilt));
+      const spot = sstep(0.62, 0.72, fbm3(s * 3 + j * 4, t * 9, 1.7, 3, 21)) * (0.35 + wilt * 0.6);
+      col = w2Mix(col, [60, 30, 12], spot);
+      o[0] = col[0] * k; o[1] = col[1] * k; o[2] = col[2] * k;
+      const tat = fbm3(s * 0.8 + j * 3, t * 16, 2.1, 4, 17), hole = fbm3(s * 4 + j * 7, t * 10, 3.3, 3, 19);
+      o[3] = as < 0.96 - (0.1 + 0.3 * wilt) * tat * sstep(0.1, 0.5, t) - 0.25 * sstep(0.85, 1, t) && hole < 0.79 - wilt * 0.07 ? 255 : 0;
+    });
+  }
+  // 葉子：深綠色，中間的主脈和往斜上長的側脈比較淡；有枯黃的一塊塊、咖啡色乾掉的邊、被蟲咬的洞；邊緣一齒一齒
+  w2PaintRect(c, 512, 0, 256, 512, (u, t, o) => {
+    const s = u * 2 - 1, as = Math.abs(s), n = fbm3(s * 2, t * 4, 5.1, 5, 31);
+    const mid = Math.exp(-((s / 0.035) ** 2)), q = t * 7 - as * 3.2 + (fbm3(s * 3, t * 3, 1, 3, 33) - 0.5) * 0.6, lat = Math.pow(0.5 + 0.5 * Math.cos(q * Math.PI * 2), 14) * sstep(0.04, 0.12, as);
+    const fine = Math.pow(fbm3(s * 22, t * 30, 2.2, 3, 35), 3);
+    let col = w2Mix([44, 74, 30], [66, 102, 40], n);
+    col = w2Mix(col, [150, 150, 66], sstep(0.62, 0.78, fbm3(s * 1.4 + 3, t * 2.2, 0.5, 4, 37)) * 0.75);
+    col = w2Mix(col, [120, 140, 70], Math.max(mid, lat * 0.7));
+    col = w2Mix(col, [92, 70, 34], sstep(0.72, 0.98, as + (n - 0.5) * 0.4 + 0.15 * t));
+    const k = 0.85 + 0.3 * fine - 0.12 * lat;
+    o[0] = col[0] * k; o[1] = col[1] * k; o[2] = col[2] * k;
+    const tooth = 0.05 * Math.abs(Math.sin(t * 38)) + 0.06 * fbm3(s, t * 12, 4.4, 3, 39);
+    o[3] = as < 0.985 - tooth && fbm3(s * 5, t * 8, 6.6, 3, 41) < 0.76 ? 255 : 0;
+  });
+  // 莖：一條條縱向的稜、一根根白色的粗毛、底部偏褐色；上半段有兩條暗紅色的血管往下爬
+  w2PaintRect(c, 768, 0, 128, 512, (u, t, o) => {
+    const a = u * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a), n = fbm3(ca, t * 6, sa, 5, 51);
+    const ridge = 0.5 + 0.5 * Math.cos(a * 7 + (fbm3(ca, t * 3, sa, 2, 53) - 0.5) * 3);
+    const hair = sstep(0.8, 0.86, fbm3(ca * 9, t * 70, sa * 9, 2, 55));
+    let col = w2Mix([56, 92, 36], [84, 124, 50], n);
+    col = w2Mix(col, [96, 84, 46], sstep(0.25, 0.0, t) * 0.8);
+    let vein = 0;
+    for (const a0 of [0.9, 3.6]) { const d = Math.abs(angD(a, a0 + (fbm3(0.3, t * 4, a0, 3, 57) - 0.5) * 1.2)); vein = Math.max(vein, Math.exp(-((d / 0.05) ** 2)) * sstep(0.45, 0.85, t)); }
+    col = w2Mix(col, [96, 18, 20], vein * 0.8);
+    col = w2Mix(col, [205, 214, 180], hair * 0.6);
+    const k = 0.8 + 0.3 * ridge;
+    o[0] = col[0] * k; o[1] = col[1] * k; o[2] = col[2] * k;
+  });
+  // 花萼：尖尖的綠葉，有毛、尖端乾掉
+  w2PaintRect(c, 896, 0, 128, 256, (u, t, o) => {
+    const s = u * 2 - 1, n = fbm3(s * 3, t * 6, 7.7, 4, 61), mid = Math.exp(-((s / 0.08) ** 2));
+    let col = w2Mix([46, 78, 30], [76, 112, 44], n);
+    col = w2Mix(col, [104, 120, 60], mid * 0.5);
+    col = w2Mix(col, [96, 74, 36], sstep(0.6, 0.95, t + (n - 0.5) * 0.3));
+    o[0] = col[0]; o[1] = col[1]; o[2] = col[2];
+    o[3] = Math.abs(s) < 0.97 - 0.15 * fbm3(s, t * 14, 8.8, 3, 63) ? 255 : 0;
+  });
+  // 花托：綠色、毛毛的，一點一點的細鱗
+  w2PaintRect(c, 896, 256, 128, 256, (u, t, o) => {
+    const a = u * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a), n = fbm3(ca * 2, t * 4, sa * 2, 5, 71), sc = fbm3(ca * 12, t * 24, sa * 12, 2, 73);
+    const col = w2Mix([44, 74, 30], [80, 114, 46], n), k = 0.78 + 0.35 * sc;
+    o[0] = col[0] * k; o[1] = col[1] * k; o[2] = col[2] * k;
+  });
+}
+// 花盤上的葵花籽（顏色和凹凸那兩張貼圖用同一份）：照黃金角一顆一顆往外排，越外面越大；
+// 靠近眼睛的籽腫成暗紅色的肉疙瘩，最外圈是小小的管狀花（黃褐色、沾著花粉）
+let w2sfSeedList = null;
+const W2SF_C0 = 0.0066;   // 葵花籽照黃金角排：第 i 顆離中心 W2SF_C0 × √i
+function w2sfSeeds() {
+  if (w2sfSeedList) return w2sfSeedList;
+  const r = seeded(7421), out = [], c0 = W2SF_C0;
+  for (let i = 760; i < 2000; i++) {
+    const rho = c0 * Math.sqrt(i), a = i * 2.39996323;
+    if (rho > 0.284) break;
+    out.push({ rho, a, flesh: sstep(0.222, 0.198, rho + (r() - 0.5) * 0.012), floret: sstep(0.256, 0.266, rho), j: r(), k: r(), m: r() });
+  }
+  return (w2sfSeedList = out);
+}
+// 一顆葵花籽的輪廓：外面圓、往中間（-x）尖
+function w2sfSeedPath(c, lr, wr) { c.beginPath(); c.moveTo(-lr, 0); c.bezierCurveTo(-lr * 0.4, -wr * 1.1, lr, -wr * 1.05, lr, 0); c.bezierCurveTo(lr, wr * 1.05, -lr * 0.4, wr * 1.1, -lr, 0); }
+function w2sfPaintDisc(c, W, H, height) {
+  const S = W / 0.57, cx = W / 2, cy = H / 2;
+  // 底：籽和籽之間很深的縫；中間是暗紅色、濕濕的肉（一塊一塊、有細細的皺）
+  w2PaintRect(c, 0, 0, W, H, (u, t, o) => {
+    const x = (u - 0.5) * 0.57, y = (t - 0.5) * 0.57, rho = Math.hypot(x, y), a = Math.atan2(y, x), n = fbm3(x * 30, y * 30, 0.5, 5, 81), fl = sstep(0.226, 0.2, rho);
+    // 肉往眼睛皺起來：一道一道往中間收的皺褶（靠近眼睛最密最深），中間夾著暗紅色的縫
+    const warp = (fbm3(Math.cos(a) * 3, Math.sin(a) * 3, rho * 20, 4, 83) - 0.5) * 5, fold = 0.5 + 0.5 * Math.cos(a * 34 + warp * 3 + rho * 40), fw = sstep(0.205, 0.15, rho) * sstep(0.35, 0.65, fbm3(x * 9, y * 9, 3.3, 3, 85));
+    const crease = Math.pow(1 - fold, 5) * fw;
+    if (height) { const L = 40 + fl * (110 + 70 * n) - crease * 90 + fold * fw * 25; o[0] = o[1] = o[2] = clamp(L, 0, 255); return; }
+    const base = w2Mix([26, 15, 8], [40, 24, 12], n);
+    let flesh = w2Mix([96, 28, 32], [150, 58, 54], n * n * 1.3);
+    flesh = w2Mix(flesh, [178, 86, 80], sstep(0.17, 0.14, rho) * 0.7 * (0.6 + 0.4 * fold));   // 靠近眼睛濕濕的粉紅色
+    flesh = w2Mix(flesh, [60, 14, 18], crease * 0.55);
+    const col = w2Mix(base, flesh, fl);
+    o[0] = col[0]; o[1] = col[1]; o[2] = col[2];
+  });
+  c.save(); c.translate(cx, cy); c.scale(1, -1);
+  for (const sd of w2sfSeeds()) {
+    if (sd.flesh > 0.5 && sd.m < 0.5) continue;
+    const x = Math.cos(sd.a) * sd.rho * S, y = Math.sin(sd.a) * sd.rho * S, sp = Math.sqrt(Math.PI) * W2SF_C0 * S * (0.85 + sd.rho * 0.9);
+    c.save(); c.translate(x, y); c.rotate(sd.a);
+    const lr = sp * (sd.floret ? 0.34 : 0.62) * (1 + sd.flesh * (sd.j - 0.3) * 0.5), wr = sp * (sd.floret ? 0.34 : 0.33) * (1 + sd.flesh * (sd.k - 0.2) * 0.7);
+    if (height) {
+      const g = c.createRadialGradient(0, 0, 0, 0, 0, 1), hi = sd.flesh > 0.5 ? 0.45 : 1; g.addColorStop(0, `rgba(${215 + sd.j * 40 | 0},0,0,${hi})`); g.addColorStop(0.7, `rgba(120,0,0,${hi})`); g.addColorStop(1, 'rgba(60,0,0,0)');
+      c.scale(lr, wr); c.fillStyle = g; if (sd.floret) { c.beginPath(); c.arc(0, 0, 1, 0, 7); } else w2sfSeedPath(c, 1, 1); c.fill();
+    } else if (sd.floret) {
+      // 管狀花：黃褐色的小管子，中間一個深色的孔，旁邊沾著花粉
+      c.fillStyle = `rgb(${130 + sd.j * 50 | 0},${92 + sd.j * 40 | 0},${26 + sd.k * 20 | 0})`; c.beginPath(); c.ellipse(0, 0, lr, wr, 0, 0, 7); c.fill();
+      c.fillStyle = 'rgba(52,30,8,.55)'; c.beginPath(); c.arc(0, 0, wr * 0.3, 0, 7); c.fill();
+      if (sd.m < 0.5) { c.fillStyle = 'rgba(250,214,90,.85)'; c.beginPath(); c.arc(wr * 0.5, -wr * 0.4, wr * 0.28, 0, 7); c.fill(); }
+    } else if (sd.flesh > 0.5) {
+      // 肉裡的籽：腫成軟軟的、濕濕的肉疙瘩（沒有邊）
+      const g = c.createRadialGradient(-lr * 0.25, -wr * 0.25, 0, 0, 0, lr * 1.2); g.addColorStop(0, `rgba(${170 + sd.j * 40 | 0},${70 + sd.k * 30 | 0},${62 + sd.k * 20 | 0},.85)`); g.addColorStop(0.6, 'rgba(110,34,36,.5)'); g.addColorStop(1, 'rgba(80,20,24,0)');
+      c.fillStyle = g; c.beginPath(); c.ellipse(0, 0, lr * 1.2, wr * 1.3, 0, 0, 7); c.fill();
+    } else {
+      // 葵花籽：黑色、有灰白色的直紋，亮面在上；靠近肉的比較紅
+      const f = sd.flesh, dark = w2Mix([22 + sd.j * 22, 16 + sd.j * 14, 10 + sd.j * 8], [96 + sd.j * 40, 30, 28], f), light = w2Mix([150, 140, 120], [190, 96, 90], f);
+      c.fillStyle = `rgb(${dark.map(v => v | 0).join(',')})`; w2sfSeedPath(c, lr, wr); c.fill();
+      if (f < 0.7) { c.strokeStyle = `rgba(${light.map(v => v | 0).join(',')},${(0.55 - f * 0.7) * (0.6 + sd.k * 0.4)})`; c.lineWidth = wr * 0.22; for (const o of [-0.45, 0, 0.45]) { c.beginPath(); c.moveTo(-lr * 0.8, o * wr); c.lineTo(lr * 0.8, o * wr * 0.6); c.stroke(); } }
+      const g = c.createRadialGradient(-lr * 0.2, -wr * 0.3, 0, 0, 0, Math.max(lr, wr)); g.addColorStop(0, `rgba(255,${f > 0.5 ? 200 : 235},${f > 0.5 ? 190 : 200},${0.18 + f * 0.2})`); g.addColorStop(1, 'rgba(255,255,255,0)');
+      c.fillStyle = g; w2sfSeedPath(c, lr, wr); c.fill();
+    }
+    c.restore();
+  }
+  c.restore();
+  if (height) return;
+  // 眼睛周圍腫起來的肉：越靠近眼睛越紅、越濕；血管從眼睛爬到花盤上
+  drawVeins(c, cx, cy, 0.165 * S, 0.262 * S, 22, 4243, 1.6, 0);
+  overlayDetail(c, 'slug', W, H, 3, 0.35);
+}
+// 眼皮：暗紅褐色、一道一道跟眼瞼緣平行的皺紋，眼瞼緣是濕濕的粉紅色、一排黑色的短毛，裡面是紅紅的肉
+function w2sfPaintLid(c, W, H) {
+  w2PaintRect(c, 0, 0, W, H, (u, v, o) => {
+    v = 1 - v;
+    const n = fbm3(u * 6, v * 4, 0.7, 5, 91), wr = Math.pow(0.5 + 0.5 * Math.cos((v * 22 + (fbm3(u * 5, v * 3, 1.3, 4, 93) - 0.5) * 6) * Math.PI), 10) * sstep(0.3, 0.6, v) * (1 - sstep(0.7, 0.77, v)) * sstep(0.35, 0.6, fbm3(u * 9, v * 5, 4.1, 3, 99));
+    let col = w2Mix([104, 34, 34], [150, 64, 58], n);
+    col = w2Mix(col, [180, 92, 86], sstep(0.72, 0.79, v));
+    col = w2Mix(col, [128, 36, 40], sstep(0.82, 0.9, v));
+    const lash = v > 0.77 && v < 0.8 && fbm3(u * 90, 0.5, 0.5, 2, 95) > 0.55 ? 1 : 0;
+    col = w2Mix(col, [20, 10, 8], lash * 0.85);
+    const k = 1 - 0.3 * wr + (fbm3(u * 40, v * 30, 2, 2, 97) - 0.5) * 0.18 - 0.12 * Math.exp(-(((v - 0.55) / 0.05) ** 2));
+    o[0] = col[0] * k; o[1] = col[1] * k; o[2] = col[2] * k;
+  });
+}
+// 眼白：前面偏黃白、越往後越紅，一塊一塊充血；滿滿的血絲從四周爬向虹膜，後面是粗粗的血管
+function w2sfPaintSclera(c, W, H) {
+  const cx = W / 4, cy = H / 2, sc = W / 512;
+  w2PaintRect(c, 0, 0, W, H, (u, t, o) => {
+    const lon = (u - 0.25) * Math.PI * 2, lat = (t - 0.5) * Math.PI, x = Math.cos(lat) * Math.sin(lon), y = Math.sin(lat), z = Math.cos(lat) * Math.cos(lon);
+    const th = Math.acos(clamp(z, -1, 1)), k = clamp((th - 0.3) / 1.4, 0, 1), n = fbm3(x * 3, y * 3, z * 3, 4, 101), blot = sstep(0.5, 0.75, fbm3(x * 4, y * 4, z * 4, 3, 103));
+    let col = w2Mix([246, 240, 226], [214, 132, 118], sstep(0.25, 1, k) * 0.85 + (n - 0.5) * 0.12);
+    col = w2Mix(col, [206, 102, 98], blot * (0.08 + 0.45 * k));
+    col = w2Mix(col, [190, 170, 120], sstep(0.2, 0.5, th) * (1 - sstep(0.5, 0.9, th)) * 0.12);
+    o[0] = col[0]; o[1] = col[1]; o[2] = col[2];
+  });
+  overlayDetail(c, 'sclera', W, H, 2, 0.7);
+  drawVeins(c, cx, cy, 30 * sc, 130 * sc, 44, 2469, sc, W);
+  drawVeins(c, cx, cy, 44 * sc, 110 * sc, 18, 3579, sc * 0.7, W);
+  drawVeins(c, cx + W / 2, cy, 10 * sc, 140 * sc, 14, 1358, 1.7 * sc, W);
+}
+// 虹膜：灰色、一絲一絲的放射紋和深色的小凹洞，內圈一圈褐色的領圈、外圈很深；瞳孔另外做（會放大縮小）
+function w2sfPaintIris(c, W, H) {
+  w2PaintRect(c, 0, 0, W, H, (u, t, o) => {
+    const x = u * 2 - 1, y = t * 2 - 1, rr = Math.hypot(x, y), a = Math.atan2(y, x), ca = Math.cos(a), sa = Math.sin(a);
+    const wob = (fbm3(ca * 3, sa * 3, rr * 2, 3, 115) - 0.5) * 0.25;
+    const fib = fbm3(ca * 26 + wob * 4, sa * 26, rr * 2.5, 3, 111), fib2 = Math.pow(fbm3(ca * 60, sa * 60, rr * 1.5, 2, 117), 2);
+    const crypt = sstep(0.64, 0.7, fbm3(ca * 14, sa * 14, rr * 9, 3, 113)) * sstep(0.4, 0.55, rr) * (1 - sstep(0.72, 0.82, rr));
+    let col = w2Mix([70, 76, 72], [158, 160, 148], fib * 0.8 + fib2 * 0.4);
+    col = w2Mix(col, [132, 96, 46], sstep(0.62, 0.34, rr + wob * 0.4) * 0.85);   // 瞳孔周圍一圈褐黃色
+    col = w2Mix(col, [176, 150, 96], Math.exp(-(((rr - 0.44 - wob * 0.3) / 0.035) ** 2)) * 0.5);   // 領圈
+    col = w2Mix(col, [40, 38, 34], crypt * 0.55);
+    col = w2Mix(col, [20, 20, 22], sstep(0.8, 0.97, rr));
+    col = w2Mix(col, [8, 6, 6], sstep(0.22, 0.17, rr));
+    o[0] = col[0]; o[1] = col[1]; o[2] = col[2];
+  });
+}
+function w2sfMats() {
+  const atlas = m5Tex('w2sfAtlas', ...W2SF_ATLAS, w2sfPaintAtlas), disc = m5Tex('w2sfDisc', 1024, 1024, (c, W, H) => w2sfPaintDisc(c, W, H, false)), discH = m5Tex('w2sfDiscH', 512, 512, (c, W, H) => w2sfPaintDisc(c, W, H, true));
+  discH.colorSpace = THREE.NoColorSpace;
+  for (const t of [atlas, disc, discH]) t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  const lidT = m5Tex('w2sfLid', 256, 256, w2sfPaintLid);
+  lidT.wrapS = THREE.ClampToEdgeWrapping;
+  return {
+    plant: ownLM('#ffffff', { map: atlas, alphaTest: 0.5, side: THREE.DoubleSide, shade: 0.75 }),
+    disc: ownPhong('#ffffff', { map: disc, bumpMap: discH, bumpScale: 3, specular: 0x5a3a34, shininess: 40, shade: 0.8 }),
+    lid: withDetail(ownPhong('#ffffff', { map: lidT, specular: 0x4a3030, shininess: 30, shade: 0.85 }), 'skin', 9, 0.8),
+    ball: wetEyeMat(m5Tex('w2sfEye', 1024, 512, w2sfPaintSclera), 0x1a1414, 0x555555),
+    iris: wetEyeMat(m5Tex('w2sfIris', 256, 256, w2sfPaintIris), 0x141010, 0x777777),
+    pupil: ownPhong('#060404', { specular: 0x777777, shininess: 80, shade: 0.4 }),
+  };
+}
+function buildSunflower2(f, g) {
+  const m = w2sfMats(), [hx, hy, hz] = W2SF_HC;
+  const stem = new THREE.Mesh(w2sfStemGeo(), m.plant); g.add(stem);
+  const head = new THREE.Group(); head.position.y = W2SF_TOP; head.rotation.order = 'YXZ'; g.add(head);
+  head.add(new THREE.Mesh(w2sfHeadGeo(), m.plant));
+  const face = new THREE.Group(); face.position.set(hx, hy, hz); head.add(face);
+  face.add(new THREE.Mesh(w2sfDiscGeo(), m.disc));
+  // 眼球、虹膜、瞳孔在同一組（會微微抽動、看你）；眼皮另外轉
+  const eye = new THREE.Group(); eye.position.z = W2SF_EZ; eye.rotation.order = 'YXZ'; face.add(eye);
+  eye.add(new THREE.Mesh(geo('w2sfBall', () => new THREE.SphereGeometry(W2SF_ER, 26, 16)), m.ball));
+  eye.add(new THREE.Mesh(irisGeo('w2sfIris', W2SF_ER, W2SF_IR, 0), m.iris));
+  const pupil = new THREE.Mesh(w2sfPupilGeo(), m.pupil); eye.add(pupil);
+  const lids = [];
+  for (const s of [1, -1]) { const l = new THREE.Mesh(w2sfLidGeo(), m.lid); l.position.z = W2SF_EZ; l.scale.y = s; face.add(l); lids.push(l); }
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return { g, head, eye, pupil, lids, eyeMat: m.ball, dil: 1 };
+}
+function syncSunflower2(f, r, t, p, awake) {
+  const dx = p.x - f.x, dz = p.y - f.y, dist = Math.hypot(dx, dz), lock = f.lock >= SUN_LOCK, dt = clamp(t - (r.lastT ?? t), 0, 0.1);
+  r.lastT = t;
+  // 轉向最亮的光（看到你的手電筒時就盯著你）；白天整顆垂下來睡覺
+  const yaw = Math.PI / 2 - f.face;
+  let dy = yaw - (r.yaw === undefined ? yaw : r.yaw);
+  while (dy > Math.PI) dy -= Math.PI * 2;
+  while (dy < -Math.PI) dy += Math.PI * 2;
+  r.yaw = (r.yaw === undefined ? yaw : r.yaw) + dy * 0.08;
+  const hd = W2SF_TOP + W2SF_HC[1];
+  if (awake) { r.head.rotation.y = r.yaw; r.head.rotation.x = lock ? -Math.atan2(EYE - hd, Math.max(0.5, dist)) : -0.1; r.head.rotation.z = Math.sin(t * 0.7 + f.x) * 0.03; }
+  else { r.head.rotation.y = Math.sin(t * 0.3 + f.x); r.head.rotation.x = 0.9; r.head.rotation.z = 0; }
+  const glare = lock ? 0.25 + 0.2 * Math.sin(t * 12) : 0;
+  r.eyeMat.emissive.setRGB(0.1 + glare, 0.08, 0.08);
+  // 眼睛自己會抽動（一下一下跳到別的地方再停住）；瞳孔：盯著你時放大、被手電筒燒到縮小
+  const sac = Math.floor(t * 1.7 + f.x * 3), j = awake ? (lock ? 0.04 : 0.12) : 0;
+  r.eye.rotation.set((hash01(sac * 1.3 + f.y) - 0.5) * j, (hash01(sac * 2.7 + f.x) - 0.5) * j * 1.6, 0);
+  const want = !awake ? 0.55 : (f.burn || 0) > 0.05 ? 0.42 : lock ? 0.86 : 0.66;
+  r.dil += (want - r.dil) * Math.min(1, dt * 4);
+  r.pupil.scale.set(r.dil, r.dil, 1);
+  // 眼皮：被手電筒燒到瞇起來、盯著你時睜大、偶爾眨一下；白天閉著睡覺
+  const blink = Math.sin(t * 0.9 + f.x * 2.7) > 0.975 ? 1 : 0;
+  const k = !awake ? 0.85 : Math.max(Math.min(1, f.burn || 0) * 0.55, blink) - (lock ? 0.12 : 0);
+  r.lids[0].rotation.x = k >= 0 ? 0.52 * k : 1.9 * k; r.lids[1].rotation.x = -(k >= 0 ? -0.1 + 0.62 * k : -0.1 + 1.05 * k);   // 平常上眼皮蓋住一點點虹膜、下眼皮貼著眼白
+}
+// 花的鉤子（buildFlower、syncFlower 會先用 UPG.<ptype>.flower）；build、sync 給 bake5 和 ?model=sunflower 用：做一朵假的花放在怪物的位置
+const w2FakeFlower = (ptype, r, g, fl) => { r.fl = { x: 0, y: 0, ptype, grow: 1, face: Math.PI / 2, lock: 1, burn: 0, alarm: 0, shut: 0, spore: false }; r.flr = fl.build(r.fl, g); };
+const w2FakeSync = fl => (e, r, t, p) => { r.g.rotation.y = 0; r.g.position.y = floorH(e.x, e.y); r.fl.x = e.x; r.fl.y = e.y; r.fl.face = Math.atan2(p.y - e.y, p.x - e.x); fl.sync(r.fl, r.flr, t, p, true); };
+const W2SF_FLOWER = { build: buildSunflower2, sync: syncSunflower2 };
+UPG.sunflower = { flower: W2SF_FLOWER, build: (r, g) => w2FakeFlower('sunflower', r, g, W2SF_FLOWER), sync: w2FakeSync(W2SF_FLOWER), view: { h: 1.75 } };   // 鏡頭跟圖鑑的 BOOK_VIEW.sunflower 一樣
 // ---------- 第二世界到這裡 ----------
 
 
