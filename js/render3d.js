@@ -6307,6 +6307,8 @@ function w2TubeIn(key, pts, rs, seg, n, rect) {
     return g;
   });
 }
+// 一個網格的貼圖座標整個縮進一張圖的某一塊（rect = [u0, v0, u1, v1]）
+const w2UvIn = (key, make, rect) => geo(key, () => { const g = make(), U = g.attributes.uv; for (let i = 0; i < U.count; i++) U.setXY(i, rect[0] + (rect[2] - rect[0]) * U.getX(i), rect[1] + (rect[3] - rect[1]) * U.getY(i)); return g; });
 const w2Mix = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
 // 逐點畫一塊：fn(s, t, out) 回傳 [r, g, b, a]（s 0～1 往右、t 0～1 往上）
 function w2PaintRect(c, x0, y0, w, h, fn) {
@@ -7222,6 +7224,229 @@ function syncGrass2(e, r, t, p, dt) {
   r.g.position.y = floorH(e.x, e.y);
 }
 UPG.grass = { build: buildGrass2, sync: syncGrass2, view: { h: 1.95, cy: 0.98 } };
+
+// ---------- 大嘴觸角蟲（snail） ----------
+// 一大團粉紅色、濕濕黏黏的肉（像巨大的蛞蝓）：前面胖、後面拖成尖尖的尾巴，底下是扁平的腹足；
+// 皮上一圈一圈的皺紋和大大小小的疙瘩，暗紫紅色的斑和隱約的血管，表面一層黏液亮亮的（被手電筒照到會反光）。
+// 前面一張圓圓的大嘴：厚厚的肉唇、深深的喉嚨，裡外兩圈像針一樣往裡彎的尖牙，口水一條條垂下來；
+// 嘴邊兩顆嵌在肉裡的大眼睛，頭頂四根一節一節的觸角（尖端是會轉來轉去的眼睛），腹足邊上一排長著圓頭的小芽
+const W2SN_L = 0.66, W2SN_Z0 = -0.05;   // 身體的半長、中心往前多少
+// 沿著身體（s：-1 尾巴 → 1 前面）的寬、上面多高、下面多低、中心多高
+const w2snW = s => 0.47 * (1 - 0.62 * sstep(0.1, -1.0, s)) * (1 + 0.1 * Math.exp(-(((s - 0.45) / 0.3) ** 2)));
+const w2snHt = s => 0.3 + 0.16 * sstep(-0.4, 0.55, s) - 0.08 * sstep(0.1, -1, s) + 0.07 * Math.exp(-(((s - 0.45) / 0.25) ** 2));
+const w2snC = s => 0.15 + 0.16 * sstep(-0.3, 0.9, s) - 0.05 * sstep(-0.3, -1, s);
+// 單位球上的點 → 身體（y 是長軸：+1 是前面的嘴、-1 是尾巴尖；x 左右、z 上下）
+function w2snBodyPt(x, y, z, out) {
+  // 前面比較鈍（不是尖的）：斷面照 (1 - s²)^0.25 縮，不是球的 √(1 - s²)；腹足一直貼著地
+  const s = y, c = w2snC(s), w = w2snW(s), ht = w2snHt(s), hb = c - 0.012, bl = s > 0 ? Math.pow(Math.max(1e-4, 1 - s * s), -0.17) : 1;
+  x *= bl; z *= bl;
+  let X = x * w, Y = z >= 0 ? z * ht : -hb * Math.pow(Math.min(1, -z), 0.35);
+  // 一圈一圈的皺紋、背上的疙瘩
+  const n = fbm3(x * 3, y * 4, z * 3, 3, 701), ring = Math.sin(s * 34 + (n - 0.5) * 4) * 0.012 * sstep(-0.1, 0.4, z + 0.2) * (1 - sstep(0.75, 0.95, s));
+  const tub = sstep(0.6, 0.75, fbm3(x * 9, y * 9, z * 9, 2, 703)) * 0.018 * sstep(0, 0.4, z);
+  const k = 1 + (ring + tub + (n - 0.5) * 0.03) / Math.max(0.2, Math.hypot(X, Y));
+  X *= k; Y = Y >= 0 ? Y * k : Y;
+  // 前面的嘴：圓圓的開口往裡凹
+  const mo = sstep(0.9, 0.97, s);
+  let Z = W2SN_Z0 + s * W2SN_L - mo * 0.07;
+  return out.set(X, c + Y, Z);
+}
+const W2SN_U = crWarp(-Math.PI, Math.PI, a => 1 + 0.8 * Math.exp(-((a / 1.3) ** 2))), W2SN_V = crWarp(0, Math.PI, th => 1 + 0.5 * Math.exp(-(((th - 0.7) / 0.5) ** 2)));
+const w2snBodyGeo = () => sculptGeo('w2snBody', w2snBodyPt, W2SN_U, W2SN_V, th => sstep(0.25, 0.5, th) * (1 - sstep(2.4, 2.8, th)), a => 1 - sstep(2.2, 2.6, Math.abs(a)), [0.068, 0.078], [0.13, 0.14]);
+// 身體上一點（s 沿著身體、a 繞一圈：0 是背、±π/2 是兩側）的位置和朝外的方向
+function w2snAt(s, a, out, nrm) {
+  const th = Math.acos(clamp(s, -1, 1)), st = Math.sin(th), d = 0.01;
+  const f = (t2, a2, o) => w2snBodyPt(Math.sin(t2) * Math.sin(a2), Math.cos(t2), Math.sin(t2) * Math.cos(a2), o);
+  f(th, a, out);
+  if (nrm) { const p1 = f(th + d, a, new THREE.Vector3()), p2 = f(th, a + d, new THREE.Vector3()); nrm.crossVectors(p2.sub(out), p1.sub(out)).normalize(); if (nrm.dot(new THREE.Vector3(Math.sin(a), Math.cos(a), 0)) < 0) nrm.negate(); }
+  return out;
+}
+// 嘴：圓圓的、往外翻的厚肉唇（一圈管子）、深深的喉嚨（往裡收的杯子），兩圈往裡彎的尖牙
+const W2SN_MOUTH = { y: 0.34, z: 0.5, rx: 0.2, ry: 0.15 };
+function w2snLipGeo() {
+  return geo('w2snLip', () => {
+    const N = 28, M = 8, pos = [], uv = [], idx = [];
+    for (let i = 0; i <= N; i++) {
+      const a = i / N * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a), th = 0.03 + 0.012 * Math.sin(a * 5 + 1) + 0.008 * Math.sin(a * 9);
+      for (let j = 0; j <= M; j++) {
+        const b = j / M * Math.PI * 2, rr = 1 + Math.cos(b) * th / 0.18;
+        pos.push(ca * W2SN_MOUTH.rx * rr, sa * W2SN_MOUTH.ry * rr, Math.sin(b) * th * 1.2 + 0.01);
+        uv.push(i / N, j / M);
+        if (i < N && j < M) { const p = i * (M + 1) + j, q = p + 1, r2 = p + M + 1, t2 = r2 + 1; idx.push(p, r2, q, q, r2, t2); }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals();
+    return g;
+  });
+}
+const w2snThroatGeo = () => geo('w2snThroat', () => {
+  const g = new THREE.SphereGeometry(1, 18, 8, 0, Math.PI * 2, 0, Math.PI / 2).rotateX(-Math.PI / 2);   // 開口朝 +z
+  g.scale(W2SN_MOUTH.rx * 0.98, W2SN_MOUTH.ry * 0.98, 0.26);
+  return g;
+});
+function w2snTeethGeo() {
+  const parts = [], r = seeded(7101), cone = geo('w2snFang', () => new THREE.ConeGeometry(0.5, 1, 6, 1).translate(0, 0.5, 0));
+  for (const [n, k, z, len, tilt] of [[26, 0.97, -0.005, 0.07, 1.0], [20, 0.72, -0.05, 0.05, 0.75], [14, 0.48, -0.1, 0.035, 0.55]]) for (let i = 0; i < n; i++) {
+    const a = (i + (n === 20 ? 0.5 : 0)) / n * Math.PI * 2, x = Math.cos(a) * W2SN_MOUTH.rx * k, y = Math.sin(a) * W2SN_MOUTH.ry * k, L = len * (0.7 + r() * 0.6), w = L * (0.2 + r() * 0.06);
+    // 牙根在嘴唇裡面一圈，尖端往嘴巴中間、往裡彎
+    const dir = new THREE.Vector3(-Math.cos(a) * Math.sin(tilt), -Math.sin(a) * Math.sin(tilt), -Math.cos(tilt) * 0.6 + 0.2).normalize();
+    parts.push([cone, new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromUnitVectors(UP, dir), new THREE.Vector3(w, L, w))]);
+  }
+  return mergeParts('w2snTeeth', parts);
+}
+// 觸角：一頭粗一頭細、一節一節的，微微彎；尖端一顆眼睛（另外放，會轉）
+const W2SN_STALK = [[-0.7, 0.52, 0.85, -0.5], [-0.24, 0.6, 1.0, -0.15], [0.24, 0.6, 1.0, 0.15], [0.7, 0.52, 0.85, 0.5]];   // [繞一圈的角度（0 是背）, 身體上哪裡 s, 多長, 往左右倒]
+const w2snStalkGeo = () => w2TubeIn('w2snStalk', [[0, -0.03, 0], [0, 0.1, 0.02], [0, 0.22, 0.06], [0, 0.32, 0.11], [0, 0.4, 0.17]], [0.058, 0.044, 0.034, 0.028, 0.03], 9, 12, W2SN_SKIN_R);
+const W2SN_SKIN_R = [0.42, 0.3, 0.58, 0.62];   // 觸角、眼眶用身體貼圖背上的這一塊（不然紋路會被拉長）
+// 腹足邊上的小芽：細細的莖、圓圓的頭（合成一個網格）
+function w2snSproutGeo() {
+  const parts = [], r = seeded(7151), v = new THREE.Vector3();
+  for (let i = 0; i < 12; i++) {
+    const side = i % 2 ? 1 : -1, s = -0.7 + Math.floor(i / 2) / 5 * 1.4, rr = w2snW(s) * 1.02;
+    v.set(side * rr, 0.02, W2SN_Z0 + s * W2SN_L);
+    const h = 0.08 + r() * 0.07, lean = side * (0.03 + r() * 0.04);
+    parts.push([tubeGeo('w2snSprout' + i, [[0, 0, 0], [lean * 0.5, h * 0.55, 0.01], [lean, h, 0]], [0.012, 0.009, 0.008], 4, 4), new THREE.Matrix4().makeTranslation(v.x, v.y, v.z)]);
+    parts.push([geo('w2snBud', () => new THREE.SphereGeometry(1, 7, 5)), mat4(v.x + lean, v.y + h + 0.014, v.z, 0, 0, 0, 0.026 + r() * 0.012)]);
+  }
+  return mergeParts('w2snSprouts', parts);
+}
+// ---- 大嘴觸角蟲的貼圖 ----
+// 蛞蝓皮上的網狀溝紋：3D 的細胞雜訊（每格一個亂數點），最近和第二近的點差不多遠的地方就是兩顆疙瘩之間的溝
+function w2Furrow(x, y, z) {
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+  let d1 = 9, d2 = 9;
+  for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) {
+    const cx = xi + i, cy = yi + j, cz = zi + k, px = cx + nHash3(cx, cy, cz, 1), py = cy + nHash3(cx, cy, cz, 2), pz = cz + nHash3(cx, cy, cz, 3);
+    const d = (px - x) ** 2 + (py - y) ** 2 + (pz - z) ** 2;
+    if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+  }
+  return sstep(0.22, 0.0, Math.sqrt(d2) - Math.sqrt(d1));
+}
+// 身體（u 繞一圈、接縫在腹足底下；v 從嘴到尾巴）：背上淡粉紅、兩側深、腹足偏黃灰；一圈圈的皺紋、暗紫紅色的斑、疙瘩、隱約的血管
+function w2snPaintBody(c, W, H, mode) {
+  w2PaintRect(c, 0, 0, W, H, (u, t, o) => {
+    const a = W2SN_U.inv(u), th = W2SN_V.inv(1 - t), s = Math.cos(th), st = Math.sin(th), x = st * Math.sin(a), z = st * Math.cos(a);
+    const n = fbm3(x * 3, s * 4, z * 3, 5, 711), ring = 0.5 + 0.5 * Math.sin(s * 34 + (fbm3(x * 3, s * 4, z * 3, 3, 701) - 0.5) * 4);
+    const tub = sstep(0.6, 0.75, fbm3(x * 9, s * 9, z * 9, 2, 703)) * sstep(0, 0.4, z), spot = sstep(0.58, 0.72, fbm3(x * 4 + 3, s * 5, z * 4, 4, 713));
+    const vein = sstep(0.025, 0.0, Math.abs(fbm3(x * 6, s * 8, z * 6, 4, 715) - 0.5)) * sstep(-0.3, 0.3, z);
+    const fine = fbm3(x * 30, s * 30, z * 30, 3, 717), sole = sstep(-0.86, -0.97, z / Math.max(0.02, st)) * (1 - sstep(0.5, 0.72, s));
+    const fur = w2Furrow(x * 7, s * 9, z * 7) * (1 - sole);   // 疙瘩之間的溝（1 是溝底）
+    if (mode === 'h') { o[0] = o[1] = o[2] = clamp(150 + ring * 30 * (1 - sole) + tub * 60 + (fine - 0.5) * 40 - vein * 20 - fur * 110, 0, 255); return; }
+    if (mode === 's') {   // 反光：大部分濕濕亮亮的，溝裡和斑比較暗、腹足最亮（黏液）
+      const L = 120 + 80 * fbm3(x * 5, s * 6, z * 5, 3, 719) - fur * 60 - spot * 40 + sole * 60; o[0] = o[1] = o[2] = clamp(L, 0, 255); return;
+    }
+    let col = w2Mix([212, 118, 128], [240, 164, 164], sstep(-0.2, 0.8, z) + (n - 0.5) * 0.4);
+    col = w2Mix(col, [176, 84, 100], sstep(0.2, -0.3, z) * 0.6);
+    col = w2Mix(col, [196, 160, 140], sole * 0.85);
+    col = w2Mix(col, [128, 44, 58], fur * 0.55);
+    col = w2Mix(col, [158, 70, 102], spot * 0.55);
+    col = w2Mix(col, [120, 60, 110], vein * 0.4);
+    col = w2Mix(col, [255, 214, 220], tub * 0.45);
+    const k = (0.86 + 0.14 * ring) * (0.9 + 0.2 * fine);
+    o[0] = col[0] * k; o[1] = col[1] * k; o[2] = col[2] * k;
+  });
+}
+// 嘴唇（u 繞嘴一圈、v 繞管子一圈）：深紅、濕濕的，裡面那面更暗
+function w2snPaintLip(c, W, H) {
+  w2PaintRect(c, 0, 0, W, H, (u, t, o) => {
+    const a = u * Math.PI * 2, b = t * Math.PI * 2, n = fbm3(Math.cos(a) * 3, Math.sin(a) * 3, b, 4, 721), wr = Math.pow(0.5 + 0.5 * Math.cos(a * 40 + n * 4), 6);
+    let col = w2Mix([160, 46, 66], [214, 96, 110], n);
+    col = w2Mix(col, [90, 16, 30], sstep(0.2, -0.6, Math.cos(b)) * 0.6);
+    const k = 1 - wr * 0.25;
+    o[0] = col[0] * k; o[1] = col[1] * k; o[2] = col[2] * k;
+  });
+}
+// 喉嚨：越裡面越暗，一圈圈的肉褶
+function w2snPaintThroat(c, W, H) {
+  w2PaintRect(c, 0, 0, W, H, (u, t, o) => {
+    const a = u * Math.PI * 2, n = fbm3(Math.cos(a) * 3, Math.sin(a) * 3, t * 3, 4, 731), fold = Math.pow(0.5 + 0.5 * Math.cos(t * 40 + n * 3), 4);
+    const col = w2Mix(w2Mix([120, 24, 36], [30, 2, 6], 1 - t), [170, 60, 70], fold * 0.25 * t);
+    o[0] = col[0]; o[1] = col[1]; o[2] = col[2];
+  });
+}
+// 眼睛（球面貼圖，正面 u = 0.25）：泛黃的眼白、紅紅的血絲，褐色的虹膜
+function w2snPaintEye(c, W, H) {
+  const cx = W / 4, cy = H / 2, sc = W / 512;
+  w2PaintRect(c, 0, 0, W, H, (u, t, o) => {
+    const lon = (u - 0.25) * Math.PI * 2, lat = (t - 0.5) * Math.PI, x = Math.cos(lat) * Math.sin(lon), y = Math.sin(lat), z = Math.cos(lat) * Math.cos(lon);
+    const th = Math.acos(clamp(z, -1, 1)), n = fbm3(x * 4, y * 4, z * 4, 4, 741), rr = th / 0.46, ang = Math.atan2(y, x);
+    let col = w2Mix([236, 222, 190], [206, 140, 120], sstep(0.5, 1.4, th) * 0.8 + (n - 0.5) * 0.3);
+    if (rr < 1.05) {
+      const fib = fbm3(Math.cos(ang) * 20, Math.sin(ang) * 20, rr * 3, 3, 743);
+      let ic = w2Mix([70, 40, 16], [150, 96, 40], fib);
+      ic = w2Mix(ic, [190, 140, 60], Math.exp(-(((rr - 0.45) / 0.08) ** 2)) * 0.6);
+      ic = w2Mix(ic, [26, 14, 8], sstep(0.8, 1.0, rr));
+      ic = w2Mix(ic, [6, 4, 4], sstep(0.36, 0.3, rr));
+      col = w2Mix(col, ic, sstep(1.05, 0.97, rr));
+    }
+    o[0] = col[0]; o[1] = col[1]; o[2] = col[2];
+  });
+  overlayDetail(c, 'sclera', W, H, 2, 0.6);
+  drawVeins(c, cx, cy, 34 * sc, 120 * sc, 22, 7457, sc * 0.8, W);
+}
+function buildSnail2(r, g) {
+  const T = { transparent: true };
+  const body = m5Tex('w2snBody', 1024, 512, (c, W, H) => w2snPaintBody(c, W, H, 'c')), bodyH = m5Tex('w2snBodyH', 512, 256, (c, W, H) => w2snPaintBody(c, W, H, 'h')), bodyS = m5Tex('w2snBodyS', 512, 256, (c, W, H) => w2snPaintBody(c, W, H, 's'));
+  for (const t of [bodyH, bodyS]) t.colorSpace = THREE.NoColorSpace;
+  for (const t of [body, bodyH, bodyS]) t.wrapT = THREE.ClampToEdgeWrapping;
+  const skin = ownPhong('#ffffff', { map: body, bumpMap: bodyH, bumpScale: 3, specularMap: bodyS, specular: 0x8a6670, shininess: 55, shade: 0.8, ...T });
+  const lip = ownPhong('#ffffff', { map: m5Tex('w2snLip', 256, 64, w2snPaintLip), specular: 0x906068, shininess: 60, shade: 0.8, ...T });
+  const throat = ownLM('#ffffff', { map: m5Tex('w2snThroat', 128, 128, w2snPaintThroat), side: THREE.BackSide, ...T });
+  const tooth = withDetail(ownPhong('#ece2cc', { specular: 0x807060, shininess: 50, shade: 0.7, ...T }), 'bone', 14, 0.7);
+  const eye = wetEyeMat(m5Tex('w2snEye', 512, 256, w2snPaintEye), 0x1a1010, 0x777777, T);
+  const sprout = withDetail(ownLM('#d8d4b0', { shade: 0.8, ...T }), 'moss', 8, 0.6);
+  const drool = ownPhong('#c8d0b0', { transparent: true, opacity: 0.35, specular: 0xffffff, shininess: 100, depthWrite: false });
+  r.mats.push(skin, lip, throat, tooth, eye, sprout, drool);
+  r.body = new THREE.Group(); g.add(r.body);
+  r.body.add(new THREE.Mesh(w2snBodyGeo(), skin));
+  r.body.add(new THREE.Mesh(w2snSproutGeo(), sprout));
+  // 嘴（整組上下縮放就是嚼）
+  r.mouth = new THREE.Group(); r.mouth.position.set(0, W2SN_MOUTH.y, W2SN_MOUTH.z); r.body.add(r.mouth);
+  r.mouth.add(new THREE.Mesh(w2snLipGeo(), lip), new THREE.Mesh(w2snThroatGeo(), throat), new THREE.Mesh(w2snTeethGeo(), tooth));
+  const dp = [];
+  for (const [x, len] of [[-0.1, 0.17], [0.05, 0.26], [0.13, 0.11], [-0.03, 0.08]]) dp.push([tubeGeo('w2snDrool' + x, [[x, -W2SN_MOUTH.ry * 0.9, 0.02], [x + 0.008, -W2SN_MOUTH.ry - len * 0.5, 0.028], [x + 0.004, -W2SN_MOUTH.ry - len, 0.02]], [0.006, 0.0025, 0.008], 5, 6), new THREE.Matrix4()]);
+  r.mouth.add(new THREE.Mesh(mergeParts('w2snDrool', dp), drool));
+  // 嘴邊兩顆嵌在肉裡的大眼睛（周圍一圈腫起來的肉）
+  r.bigEyes = [];
+  const P = new THREE.Vector3(), Nn = new THREE.Vector3();
+  for (const s of [-1, 1]) {
+    w2snAt(0.8, s * 1.0, P, Nn);
+    const sock = new THREE.Group(); sock.position.copy(P).addScaledVector(Nn, -0.02); sock.quaternion.setFromUnitVectors(Z_AXIS, Nn.add(new THREE.Vector3(0, 0, 0.9)).normalize()); r.body.add(sock);
+    const lid = new THREE.Mesh(w2UvIn('w2snSock', () => new THREE.TorusGeometry(0.078, 0.032, 8, 18), W2SN_SKIN_R), skin); lid.scale.set(1.05, 0.9, 1); sock.add(lid);
+    const ball = new THREE.Mesh(geo('w2snEyeBall', () => new THREE.SphereGeometry(0.074, 16, 12)), eye); ball.position.z = -0.012; ball.rotation.order = 'YXZ'; sock.add(ball);
+    r.bigEyes.push(ball);
+  }
+  // 頭頂四根觸角（整組縮放就是縮回去），每根尖端一顆會轉的眼睛
+  r.stalks = new THREE.Group(); r.body.add(r.stalks);
+  r.stalkList = [];
+  W2SN_STALK.forEach(([sa, sS, len, tilt], i) => {
+    w2snAt(sS, sa, P, Nn);
+    const sg = new THREE.Group(); sg.position.copy(P).addScaledVector(Nn, -0.015); sg.rotation.set(0.15, 0, -tilt * 0.6); sg.scale.setScalar(len); r.stalks.add(sg);
+    sg.add(new THREE.Mesh(mergeParts('w2snStalkAll', [[w2snStalkGeo(), new THREE.Matrix4()], [w2UvIn('w2snKnob', () => new THREE.SphereGeometry(0.042, 10, 7), W2SN_SKIN_R), new THREE.Matrix4().makeTranslation(0, 0.41, 0.17)]]), skin));
+    const ball = new THREE.Mesh(geo('w2snStalkEye', () => new THREE.SphereGeometry(0.048, 12, 9)), eye); ball.position.set(0, 0.42, 0.195); ball.rotation.order = 'YXZ'; sg.add(ball);
+    r.stalkList.push({ sg, ball, ph: i * 1.7, tilt, len });
+  });
+}
+function syncSnail2(e, r, t, p, dt) {
+  // 一伸一縮地爬（身體前後拉長、上下扁）；手電筒照到時觸角縮起來；咬完在嚼
+  const crawl = e.retract > 0 || e.chew > 0 ? 0 : Math.sin(e.wob * 5) * 0.06;
+  r.body.scale.set(1 - crawl * 0.5, 1 + crawl * 0.3, 1 + crawl);
+  const st = e.retract > 0 ? 0.25 : 1;
+  r.stalkK = (r.stalkK ?? 1) + (st - (r.stalkK ?? 1)) * Math.min(1, dt * 12);
+  r.mouth.scale.y = e.chew > 0 ? 0.55 + Math.abs(Math.sin(t * 14)) * 0.6 : 0.92 + 0.08 * Math.sin(t * 2);
+  // 每根觸角自己慢慢搖，尖端的眼睛轉來轉去（四面八方都看得到）；嘴邊的大眼睛盯著你
+  for (const s of r.stalkList) {
+    s.sg.scale.y = s.len * r.stalkK;
+    s.sg.rotation.x = 0.15 + Math.sin(t * 0.9 + s.ph) * 0.18;
+    s.sg.rotation.z = -s.tilt * 0.6 + Math.sin(t * 0.7 + s.ph * 1.3) * 0.15;
+    s.ball.rotation.set(Math.sin(t * 0.8 + s.ph) * 0.5, Math.sin(t * 0.6 + s.ph * 2) * 0.9, 0);
+  }
+  for (const b of r.bigEyes) { _v.set(p.x, EYE, p.y); b.parent.worldToLocal(_v); b.rotation.y = clamp(Math.atan2(_v.x, _v.z), -0.6, 0.6); b.rotation.x = clamp(Math.atan2(-_v.y, Math.hypot(_v.x, _v.z)), -0.5, 0.5); }
+  r.g.position.y = floorH(e.x, e.y);
+}
+UPG.snail = { build: buildSnail2, sync: syncSnail2, view: { h: 1.45, d: 2.9, cy: 0.6 } };   // 鏡頭跟 BOOK_VIEW.snail 一樣
 
 // ---------- 第二世界到這裡 ----------
 
