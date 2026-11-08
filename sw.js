@@ -35,6 +35,7 @@ const ASSETS = [
   './tex/m5-wmHead.webp', './tex/m5-wmIris.webp', './tex/m5-wmDress.webp',
   './tex/m5-cwHead.webp', './tex/m5-cwIris.webp', './tex/m5-cwStripe.webp', './tex/m5-cwHat.webp', './tex/m5-cwBalloon.webp',
   './tex/m5-kwHead.webp', './tex/m5-kwGown.webp',
+  './tex/m5-mmHead.webp', './tex/m5-mmBody.webp',
 
   // 第二世界重做的怪物（新的檔名加在這一行下面）
 

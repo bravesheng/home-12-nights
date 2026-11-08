@@ -7797,6 +7797,231 @@ function syncCrawlerUpg(e, r, t, p, dt) {
 }
 UPG.crawler = { build: buildCrawlerUpg, sync: syncCrawlerUpg, view: { h: 1.0, d: 2.8, cy: 0.4 } };
 
+// ---------- 鳥腳女 ----------
+// 設計師：「頭髮會動」。一個光溜溜、蒼白鬆垮的蛋形身體（皮膚斑斑點點、底下青色的血管、底部一圈一圈下垂的肉摺），
+// 兩隻細細的短手垂著；底下是一雙反折的鳥腳：大腿是人的皮膚，膝蓋以下是一節一節長著鱗片的黃褐色鳥腳，三根往前、一根往後的腳趾，黑色的爪子。
+// 臉白得發灰，一雙凸出來的大眼睛（布滿血絲、小小的黑眼珠）戴著黑色的方框眼鏡（鏡片被手電筒照到會反光），
+// 一根長長尖尖的肉鼻子凸出來，嘴是一道裂到兩頰的 V 字（暗紅色的嘴唇、中間一條黑縫）。直直的長黑髮中分，兩邊垂到胸前、後面垂到背上。
+// 動作跟原本一樣（一跳一跳、跳之前先蹲、東張西望、被照到眼鏡時甩頭）；頭髮跳起來時往上飄、落地時甩一下，轉頭時髮尾慢半拍
+const MM_HEAD = { y: 1.64, z: 0.01, rx: 0.112, ry: 0.135, rz: 0.115 };
+const MM_EYE = { x: 0.36, y: 0.12, R: 0.027 }, MM_LID = { w: 1.0, hu: 0.86, hl: 0.8, lift: 0 };   // 凸出來、瞪得圓圓的
+const MM_FACE = [   // [X, Y, 寬, 高, 凸起多少, 左右對稱]
+  [0.33, 0.33, 0.25, 0.06, 0.03, true], [0.36, 0.12, 0.2, 0.15, -0.03, true], [0.55, -0.12, 0.14, 0.09, 0.04, true],
+  [0.5, -0.4, 0.14, 0.14, -0.05, true], [0, -0.86, 0.17, 0.08, 0.04, false], [0, -0.02, 0.07, 0.09, 0.05, false],
+];
+// V 字的嘴：從兩邊的臉頰往下到下巴尖（e：離那條線多遠）
+const mmMouthY = u => -0.04 - 0.64 * Math.max(0, 1 - Math.abs(u)) ** 1.15;
+function mmMouthE(x, y) {
+  const u = x / 0.58;
+  if (Math.abs(u) > 1.05) return 1;
+  const du = 0.01, s = (mmMouthY(u + du) - mmMouthY(u - du)) / (2 * du * 0.58);
+  return Math.abs(y - mmMouthY(u)) / Math.sqrt(1 + s * s) + sstep(0.95, 1.05, Math.abs(u)) * 0.1;
+}
+let mmEyeAt = null;
+function mmEyes() {
+  if (mmEyeAt) return mmEyeAt;
+  mmEyeAt = [-1, 1].map(s => {
+    const X = s * MM_EYE.x, Y = MM_EYE.y, S0 = mmHeadPt(X, Y, Math.sqrt(1 - X * X - Y * Y), new THREE.Vector3(), true);
+    const F = new THREE.Vector3(s * 0.15, 0, 1).normalize();
+    return { s, F, C: S0.addScaledVector(F, -0.6 * MM_EYE.R) };   // 凸出來
+  });
+  return mmEyeAt;
+}
+function mmHeadPt(x, y, z, out, noEye) {
+  let X = x, Y = y, Z = z;
+  if (y < 0) { const t = -y; X *= 1 - 0.2 * t * t; Y *= 1 + 0.08 * t; }
+  if (Z > 0) Z *= 0.86 + 0.14 * Math.min(1, Math.abs(x) * 1.6); else Z *= 1.06;
+  let d = 0, back = 0;
+  if (z > 0.05) {
+    for (const f of MM_FACE) for (const s of f[5] ? [-1, 1] : [1]) { const u = (x - s * f[0]) / f[2], v = (y - f[1]) / f[3]; if (u * u + v * v < 16) d += f[4] * Math.exp(-u * u - v * v); }
+    const e = mmMouthE(x, y);
+    if (e < 0.08) { back += 0.08 * (1 - sstep(0.004, 0.012, e)); d += 0.03 * Math.exp(-(((e - 0.022) / 0.016) ** 2)); }   // 一道深深的縫，兩邊的嘴唇腫起來
+    const w = sstep(0.05, 0.4, z);
+    d *= w; back *= w;
+  }
+  const k = 1 + d / (Math.hypot(X, Y, Z) || 1);
+  out.set(X * k * MM_HEAD.rx, Y * k * MM_HEAD.ry, (Z * k - back) * MM_HEAD.rz);
+  if (noEye || z < 0.3) return out;
+  for (const E of mmEyes()) {
+    const dx = (x - E.s * MM_EYE.x) * E.s * MM_HEAD.rx * 0.95, dy = (y - MM_EYE.y) * MM_HEAD.ry;
+    if (dx * dx + dy * dy < (MM_EYE.R * 2.4) ** 2) crSnapLid(out, E.C, E.F, dx, dy, MM_EYE.R, MM_LID);
+  }
+  return out;
+}
+const mmU = crWarp(-Math.PI, Math.PI, a => 1 + 1.3 * Math.exp(-((a / 0.85) ** 2))), mmV = crWarp(0, Math.PI, th => 1 + 1.2 * Math.exp(-(((th - 1.8) / 0.6) ** 2)));
+const mmHeadGeo = () => sculptGeo('mmHead', mmHeadPt, mmU, mmV, th => sstep(1.05, 1.2, th) * (1 - sstep(2.7, 2.85, th)), a => sstep(-1.1, -0.95, a) * (1 - sstep(0.95, 1.1, a)), [0.055, 0.06], [0.17, 0.18]);
+// 臉：白得發灰的皮膚、一點一點的斑、眼睛周圍暗暗的；V 字嘴的嘴唇暗紅色、中間一條黑縫；頭頂和後面是頭髮的顏色
+function mmPaintHead(c, W, H) {
+  const img = c.createImageData(W, H), D = img.data, C = [0, 0, 0];
+  const mix = (col, k) => { C[0] += (col[0] - C[0]) * k; C[1] += (col[1] - C[1]) * k; C[2] += (col[2] - C[2]) * k; };
+  for (let py = 0; py < H; py++) {
+    const th = mmV.inv((py + 0.5) / H), st = Math.sin(th), y = Math.cos(th);
+    for (let px = 0; px < W; px++) {
+      const a = mmU.inv((px + 0.5) / W), x = st * Math.sin(a), z = st * Math.cos(a), i = (py * W + px) * 4;
+      const n = fbm3(x * 4, y * 4, z * 4, 4, 231), f = fbm3(x * 30, y * 30, z * 30, 2, 233);
+      C[0] = 214 + (n - 0.5) * 20 + (f - 0.5) * 10; C[1] = 204 + (n - 0.5) * 20 + (f - 0.5) * 10; C[2] = 192 + (n - 0.5) * 18 + (f - 0.5) * 10;
+      mix([170, 146, 130], sstep(0.62, 0.8, fbm3(x * 9, y * 9, z * 9, 2, 235)) * 0.35);   // 斑
+      if (z > 0.05) {
+        for (const s of [-1, 1]) {
+          const dx = (x - s * MM_EYE.x) * s * MM_HEAD.rx * 0.95, dy = (y - MM_EYE.y) * MM_HEAD.ry, e = crLidE(dx, dy, MM_EYE.R, MM_LID).e;
+          if (e < 0.03) { mix([140, 110, 108], (1 - sstep(0.004, 0.03, e)) * 0.55); mix([150, 80, 78], (1 - sstep(0.001, 0.005, e)) * 0.7); if (e < 0) mix([50, 14, 14], 1); }
+        }
+        const e = mmMouthE(x, y);
+        if (e < 0.06) { mix([150, 22, 30], 1 - sstep(0.03, 0.045, e + 0.008 * (n - 0.5))); mix([50, 4, 8], 1 - sstep(0.006, 0.012, e)); }
+      }
+      mix([16, 15, 18], z < 0.1 ? 1 : Math.max(sstep(0.5, 0.58, y + 0.05 * (f - 0.5)), sstep(0.72, 0.86, Math.abs(x))));
+      D[i] = C[0]; D[i + 1] = C[1]; D[i + 2] = C[2]; D[i + 3] = 255;
+    }
+  }
+  c.putImageData(img, 0, 0);
+}
+// 身體：蛋形、往下垂，肚臍、底部一圈一圈的肉摺
+const MM_BODY = { y: 1.02, rx: 0.27, ry: 0.31, rz: 0.24 };
+function mmBodyPt(x, y, z, out) {
+  const sag = y < 0 ? 1 + 0.08 * Math.sin(-y * Math.PI) : 1 - 0.1 * y * y;
+  let d = 0.015 * (fbm3(x * 2, y * 2, z * 2, 3, 241) - 0.5);
+  if (y < -0.3) d += 0.012 * Math.sin(y * 40) * sstep(-0.3, -0.6, y);   // 肉摺
+  if (z > 0) d += -0.03 * Math.exp(-((x / 0.04) ** 2) - (((y + 0.2) / 0.04) ** 2));   // 肚臍
+  const k = 1 + d;
+  return out.set(x * k * sag * MM_BODY.rx, y * k * MM_BODY.ry, z * k * sag * MM_BODY.rz);
+}
+const mmBU = a => (a + Math.PI) / (Math.PI * 2), mmBV = th => th / Math.PI;
+const mmBodyGeo = () => sculptGeo('mmBody', mmBodyPt, mmBU, mmBV, () => 0, () => 0, [0.1, 0.1], [0.12, 0.13]);
+// 身體的皮：蒼白、斑斑點點、底下青色的血管、幾顆深色的痣，底部比較暗（肉摺裡）
+function mmPaintBody(c, W, H) {
+  const img = c.createImageData(W, H), D = img.data;
+  for (let py = 0; py < H; py++) {
+    const th = (py + 0.5) / H * Math.PI, st = Math.sin(th), y = Math.cos(th);
+    for (let px = 0; px < W; px++) {
+      const a = (px + 0.5) / W * Math.PI * 2 - Math.PI, x = st * Math.sin(a), z = st * Math.cos(a), i = (py * W + px) * 4;
+      const n = fbm3(x * 3, y * 3, z * 3, 4, 243), f = fbm3(x * 24, y * 24, z * 24, 2, 245), vein = sstep(0.9, 0.97, skRidge(fbm3(x * 2.5 + 3, y * 2.5, z * 2.5, 3, 247))), mole = sstep(0.8, 0.84, fbm3(x * 14, y * 14, z * 14, 2, 249));
+      let R = 222 + (n - 0.5) * 24 + (f - 0.5) * 10, G2 = 208 + (n - 0.5) * 22 + (f - 0.5) * 10, B = 194 + (n - 0.5) * 20 + (f - 0.5) * 10;
+      R += (150 - R) * vein * 0.3; G2 += (160 - G2) * vein * 0.3; B += (180 - B) * vein * 0.3;
+      R += (90 - R) * mole; G2 += (64 - G2) * mole; B += (52 - B) * mole;
+      const fold = y < -0.3 ? (0.5 - 0.5 * Math.cos(y * 40)) * sstep(-0.3, -0.6, y) * 0.25 : 0;
+      R *= 1 - fold; G2 *= 1 - fold; B *= 1 - fold;
+      D[i] = R; D[i + 1] = G2; D[i + 2] = B; D[i + 3] = 255;
+    }
+  }
+  c.putImageData(img, 0, 0);
+}
+// 人的部分（脖子、大腿、兩隻短手）和鳥腳（膝蓋以下、腳趾）、爪子各合成一個網格
+function mmLimbGeos() {
+  const skin = [[tubeGeo('mmNeck', [[0, 1.26, 0], [0, 1.4, 0.005], [0, 1.54, 0.0]], [0.05, 0.045, 0.048], 10, 6), new THREE.Matrix4()]], leg = [], claw = [];
+  for (const s of [-1, 1]) {
+    skin.push([tubeGeo('mmThigh' + s, [[s * 0.1, 0.84, 0], [s * 0.115, 0.7, 0.06], [s * 0.12, 0.56, 0.1]], [0.06, 0.05, 0.04], 10, 8), new THREE.Matrix4()]);
+    skin.push([tubeGeo('mmArm' + s, [[s * 0.23, 1.22, 0], [s * 0.27, 1.06, 0.03], [s * 0.3, 0.88, 0.05]], [0.032, 0.025, 0.02], 8, 10), new THREE.Matrix4()]);
+    for (let i = 0; i < 4; i++) skin.push([tubeGeo('mmFingerA' + i, [[0, 0, 0], [0, -0.03, 0.006], [0, -0.055, 0.016]], [0.007, 0.006, 0.004], 5, 4), mat4(s * 0.3 + (i - 1.5) * 0.008, 0.87, 0.05 + (i - 1.5) * 0.004, 0, 0, s * 0.1)]);
+    leg.push([tubeGeo('mmShin' + s, [[s * 0.12, 0.56, 0.1], [s * 0.12, 0.43, 0.0], [s * 0.12, 0.3, -0.1], [s * 0.12, 0.15, -0.05], [s * 0.12, 0.035, 0]], [0.032, 0.026, 0.028, 0.022, 0.022], 8, 16), new THREE.Matrix4()]);
+    for (const [a, L] of [[-0.5, 0.15], [0, 0.17], [0.5, 0.15], [Math.PI, 0.09]]) {
+      const dx = Math.sin(a), dz = Math.cos(a);
+      leg.push([tubeGeo('mmToe' + a, [[0, 0, 0], [dx * L * 0.5, 0.01, dz * L * 0.5], [dx * L, -0.012, dz * L]], [0.013, 0.01, 0.007], 6, 6), mat4(s * 0.12, 0.03, 0, 0, 0, 0)]);
+      claw.push([geo('mmClaw', () => new THREE.ConeGeometry(0.007, 0.035, 6).rotateX(Math.PI / 2).translate(0, 0, 0.015)), mat4(s * 0.12 + dx * L, 0.016, dz * L, 0.3, a, 0)]);
+    }
+  }
+  return [mergeParts('mmSkinParts', skin), mergeParts('mmBirdLegs', leg), mergeParts('mmClaws', claw)];
+}
+// 黑框方眼鏡（兩個圓角方框、鼻樑、往後的鏡腳）和鏡片
+function mmFrameGeo() {
+  return geo('mmFrames', () => {
+    const parts = [], v = new THREE.Vector3(), W = 0.03, H2 = 0.022;
+    for (const E of mmEyes()) {
+      const c0 = E.C.clone().addScaledVector(E.F, MM_EYE.R + 0.012), pts = [];
+      for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2, cx = Math.cos(a), cy = Math.sin(a), sx = Math.sign(cx) * Math.abs(cx) ** 0.35, sy = Math.sign(cy) * Math.abs(cy) ** 0.35; pts.push(new THREE.Vector3(c0.x + sx * W, c0.y + sy * H2, c0.z - 0.006 * Math.abs(sx))); }
+      parts.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), 32, 0.0036, 5, true));
+      const tmp = new THREE.Vector3(c0.x + E.s * (W + 0.002), c0.y + 0.008, c0.z - 0.006);
+      parts.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([tmp, new THREE.Vector3(E.s * MM_HEAD.rx * 1.0, c0.y + 0.008, 0.01), new THREE.Vector3(E.s * MM_HEAD.rx * 0.98, c0.y, -0.06)]), 8, 0.0028, 4));
+    }
+    const [L, R] = mmEyes().map(E => E.C.clone().addScaledVector(E.F, MM_EYE.R + 0.012));
+    parts.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(L.x + W * 0.9, L.y + 0.006, L.z - 0.004), new THREE.Vector3(0, L.y + 0.014, L.z + 0.004), new THREE.Vector3(R.x - W * 0.9, R.y + 0.006, R.z - 0.004)]), 8, 0.0032, 4));
+    let n = 0; const gs = parts.map(g => g.toNonIndexed()); for (const g of gs) n += g.attributes.position.count;
+    const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3); let o = 0;
+    for (const g of gs) { pos.set(g.attributes.position.array, o * 3); nor.set(g.attributes.normal.array, o * 3); o += g.attributes.position.count; g.dispose(); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    return g;
+  });
+}
+function mmLensGeo() {
+  return geo('mmLens', () => {
+    const pos = [], idx = [], W = 0.029, H2 = 0.021;
+    for (const E of mmEyes()) {
+      const c0 = E.C.clone().addScaledVector(E.F, MM_EYE.R + 0.012), base = pos.length / 3;
+      pos.push(c0.x, c0.y, c0.z + 0.002);
+      for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2, cx = Math.cos(a), cy = Math.sin(a); pos.push(c0.x + Math.sign(cx) * Math.abs(cx) ** 0.35 * W, c0.y + Math.sign(cy) * Math.abs(cy) ** 0.35 * H2, c0.z - 0.005 * Math.abs(cx)); idx.push(base, base + 1 + i, base + 1 + (i + 1) % 16); }
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+    return g;
+  });
+}
+// 頭髮：中分，兩邊垂到胸前（從臉的兩邊），後面一整片垂到背上（頭的座標）
+function mmHair() {
+  const r = seeded(7777), S = [], v = new THREE.Vector3();
+  const surf = (ang, lat, k) => { mmHeadPt(Math.sin(ang) * Math.cos(lat), Math.sin(lat), Math.cos(ang) * Math.cos(lat), v, true); return [v.x * k, v.y * k, v.z * k]; };
+  for (const s of [-1, 1]) for (let k = 0; k < 9; k++) {   // 頭頂：從中分的地方往兩邊蓋住頭皮（髮片的寬是前後方向）
+    const j = r(), lat = 1.25 - k * 0.07, zf = -0.55 + k * 0.16;
+    S.push({ a: surf(s * 0.03 + zf * 0.0, 1.45, 0.99).map((q, i) => i === 2 ? q + zf * 0.06 : q), b: surf(s * 0.7 + zf * 0.2, lat * 0.75, 1.07), c: surf(s * (1.2 - zf * 0.1), 0.35, 1.1), w: 0.05, f: Math.PI / 2, ph: s * 2 + k * 0.5, tp: 0.1 });
+  }
+  for (const s of [-1, 1]) for (let k = 0; k < 9; k++) {   // 沿著臉的兩邊直直地垂到胸前
+    const j = r(), ang = s * (0.72 + k * 0.1), b = surf(ang, 0.5, 1.13), c2 = surf(ang * 1.04, 0.05, 1.16 + k * 0.004);
+    S.push({ a: surf(ang * 0.9, 0.95, 1.0), b, c: c2, d: [c2[0] * 1.06 + s * j * 0.02, -0.5 - j * 0.1, c2[2] * 0.9], w: 0.045, f: ang, ph: s * 2 + k * 0.6, tp: 0.4 });
+  }
+  for (let k = 0; k < 18; k++) {   // 後面
+    const j = r(), ang = Math.PI + (k / 17 - 0.5) * 2.4, b = surf(ang, 0.75, 1.16), c2 = surf(ang, -0.1, 1.2);
+    S.push({ a: surf(ang * 0.2, 1.35, 0.98), b, c: c2, d: [c2[0] * 1.1 + (j - 0.5) * 0.04, -0.62 - j * 0.12, c2[2] * 1.1 - 0.03], w: 0.06, f: ang, ph: k * 0.7, tp: 0.45 });
+  }
+  return S;
+}
+function buildMomoUpg(r, g) {
+  const T = { transparent: true };
+  const skin = withDetail(ownPhong('#d8cfc4', { specular: 0x1e1c1a, shininess: 14, shade: 0.75, ...T }), 'skin', 5, 1.4);
+  const body = withDetail(ownPhong('#ffffff', { map: m5Tex('mmBody', 1024, 512, mmPaintBody), specular: 0x1e1c1a, shininess: 14, shade: 0.75, ...T }), 'skin', 4, 1.1);
+  const leg = withDetail(ownPhong('#b8a37e', { specular: 0x2a2418, shininess: 20, shade: 0.75, ...T }), 'birdleg', 14, 1.4), claw = withDetail(ownPhong('#2a2422', { specular: 0x555050, shininess: 50, shade: 0.6, ...T }), 'bone', 10, 0.7);
+  const head = withDetail(ownLM('#ffffff', { map: m5Tex('mmHead', 2048, 1024, mmPaintHead), shade: 0.75, ...T }), 'skin', 5, 0.7);
+  head.map.wrapS = THREE.ClampToEdgeWrapping;
+  const eye = { ball: wetEyeMat(m5Tex('efSclera', 2048, 1024, efPaintSclera), 0x140e0e, 0xaaaaaa, T), iris: wetEyeMat(m5Tex('cwIris', 128, 128, cwPaintIris), 0x020202, 0xcccccc, T), irisK: 0.3 };
+  const frame = ownPhong('#121114', { specular: 0x666670, shininess: 70, shade: 0.6, ...T }), lens = ownPhong('#c8d4e0', { specular: 0xffffff, shininess: 140, transparent: true, opacity: 0.16, depthWrite: false, shade: 0.3 });
+  const hair = withDetail(hairMat(strandTex, 0.55), 'hair', 3, 0.9);
+  r.hairU = hair.userData.hair; r.lensM = lens;
+  r.mats.push(skin, body, leg, claw, head, eye.ball, eye.iris, frame, hair);
+  const bm = new THREE.Mesh(mmBodyGeo(), body); bm.position.y = MM_BODY.y; g.add(bm);
+  const [sk, lg, cl] = mmLimbGeos();
+  g.add(new THREE.Mesh(sk, skin)); g.add(new THREE.Mesh(lg, leg)); g.add(new THREE.Mesh(cl, claw));
+  r.head = new THREE.Group(); r.head.position.set(0, MM_HEAD.y, MM_HEAD.z); g.add(r.head);
+  r.head.add(new THREE.Mesh(mmHeadGeo(), head));
+  r.crEyes = [];
+  for (const E of mmEyes()) {
+    const ey = w1Eye(r.head, MM_EYE.R, eye);
+    ey.sock.position.copy(E.C); ey.sock.quaternion.setFromUnitVectors(Z_AXIS, E.F);
+    ey.jig = 0.03; ey.lim = 0.55;
+    r.crEyes.push(ey);
+  }
+  // 長長尖尖的肉鼻子（從兩眼中間往前伸、尖端微微往下勾）
+  const v = new THREE.Vector3(); mmHeadPt(0, -0.06, 0.998, v, true);
+  r.head.add(new THREE.Mesh(tubeGeo('mmNose', [[v.x, v.y + 0.01, v.z - 0.02], [v.x, v.y - 0.002, v.z + 0.05], [v.x, v.y - 0.012, v.z + 0.12], [v.x, v.y - 0.026, v.z + 0.19]], [0.026, 0.017, 0.009, 0.002], 8, 12), skin));
+  r.head.add(new THREE.Mesh(mmFrameGeo(), frame));
+  const ln = new THREE.Mesh(mmLensGeo(), lens); ln.renderOrder = 2; r.head.add(ln);
+  r.head.add(new THREE.Mesh(hairGeo('mmHair', mmHair(), 8), hair));
+}
+function syncMomoUpg(e, r, t, p, dt) {
+  // 跟原本一樣：跳起來、跳之前先蹲；東張西望；被手電筒照到眼鏡時甩頭
+  r.g.position.y = floorH(e.x, e.y) + (e.air || 0) * 0.45;
+  const crouch = e.hopping > 0 ? 1 - e.air : (e.hopT < 0.15 && e.stun <= 0 && e.cd <= 0 ? 1 : 0);
+  r.g.scale.set(1, 1 - 0.12 * crouch, 1);
+  r.head.rotation.z = e.stun > 0 ? Math.sin(t * 30) * 0.12 : 0;
+  const look = e.state !== 'hunt' && e.stun <= 0 ? Math.sin(t * 1.7) * 0.9 : 0;
+  r.g.rotation.y += look;
+  // 頭髮：跳起來時往上飄、落地時甩一下；轉頭時髮尾慢半拍；甩頭時跟著甩
+  const hu = r.hairU, turn = dt > 0 ? (look - (r.look ?? look)) / dt : 0;
+  r.look = look;
+  hu.uHT.value = t;
+  hu.uHAmp.value = 0.016 + (e.hopping > 0 ? 0.025 : 0);
+  hu.uHLift.value = spring(r, 'hl', (e.air || 0) * 0.18, dt, 90, 7);
+  hu.uHDrag.value.set(spring(r, 'hx', clamp(-turn * 0.06, -0.1, 0.1) + (e.stun > 0 ? Math.sin(t * 30) * 0.04 : 0), dt), spring(r, 'hz', e.hopping > 0 ? -0.05 : 0, dt));
+  r.lensM.opacity = 0.16 * enemyAlpha(e);
+  crLook(r, t, dt, p);
+}
+UPG.momo = { build: buildMomoUpg, sync: syncMomoUpg, view: { h: 2.1, d: 4.2, cy: 1.05 } };
+
 // 看模型（?model=eye）和預先畫貼圖（bake5）時當成怪物蓋：裡面放一朵假的花
 UPG.eye = {
   build(r, g) { r.f = { x: 0, y: 0, ptype: 'eye', grow: 1, burn: 0, alarm: 0 }; r.fr = buildEyeFlower(r.f, g); },
