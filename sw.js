@@ -37,6 +37,7 @@ const ASSETS = [
   './tex/m5-shkCarton.webp', './tex/m5-shkSclera.webp', './tex/m5-shkIris.webp', './tex/m5-shkLid.webp',
   './tex/m5-mimHead.webp', './tex/m5-mimHeadS.webp', './tex/m5-mimBody.webp', './tex/m5-mimBodyS.webp', './tex/m5-mimLimb.webp', './tex/m5-mimIris.webp',
   './tex/m5-stfHead.webp', './tex/m5-stfShirt.webp', './tex/m5-stfSleeve.webp', './tex/m5-stfPants.webp', './tex/m5-stfBadge.webp',
+  './tex/m5-hubBody.webp', './tex/m5-hubLeg.webp', './tex/m5-hubPipe.webp',
 
 ];
 

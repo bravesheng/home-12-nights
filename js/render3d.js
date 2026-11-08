@@ -7178,6 +7178,140 @@ function stfSync(e, r, t, p, dt) {
 }
 UPG.staff = { build: stfBuild, sync: stfSync, view: { h: 2.2, d: 4.3, cy: 1.1 } };
 
+// ---------- Hubert ----------
+// 照設計圖（IMG_7429：大圓球身體、上面一顆小圓頭、粗圓柱的腳、一隻手抓著一根圓柱、底下紅光）和設計師說的
+// 「Hubert 是蜘蛛不是假人，他是胖的，請跟我畫的樣子，而且他是黑色的」：一隻黑色的胖蜘蛛。
+// 大大圓圓的肚子、上面一顆小圓頭（前面八顆濕亮的暗紅色眼睛、底下兩根粗粗的螯牙），八隻粗圓柱的腳（關節鼓起來、一根一根的刺），
+// 黑亮的甲殼上長滿細細的短毛；一隻前腳抓著一根生鏽的鐵管，肚子底下透著紅光
+// 黑色的甲殼：一點點紅褐色的底色、細細的短毛（順著往下的方向）、一圈一圈淡淡的分節、亮的地方是油亮的光澤
+function hubChitin(x, y, z, along, seed) {
+  const n = fbm3(x * 3, y * 3, z * 3, 4, seed) - 0.5, hair = fbm3(x * 140, y * 22 + along * 20, z * 140, 3, seed + 3) - 0.5, fine = fbm3(x * 400, y * 400, z * 400, 2, seed + 5) - 0.5;
+  const L = 24 + n * 14 + hair * 22 + fine * 8;
+  return [L * 1.08 + 2, L * 0.98, L * 0.96];
+}
+function hubPaintBody(c, W, H) {
+  const img = c.createImageData(W, H);
+  for (let py = 0; py < H; py++) {
+    const th = (py + 0.5) / H * Math.PI, st = Math.sin(th), y = Math.cos(th);
+    for (let px = 0; px < W; px++) {
+      const a = (px + 0.5) / W * Math.PI * 2, x = st * Math.cos(a), z = st * Math.sin(a);
+      const col = hubChitin(x, y, z, th, 61), seg = Math.max(0, Math.sin(th * 9 + fbm3(x * 2, y * 2, z * 2, 2, 63) * 2)) ** 6 * 0.25;
+      const mot = sstep(0.55, 0.75, fbm3(x * 5, y * 5, z * 5, 3, 65)) * 6;
+      w4uPx(img.data, (py * W + px) * 4, col[0] * (1 - seg) + mot, col[1] * (1 - seg) + mot * 0.8, col[2] * (1 - seg) + mot * 0.7);
+    }
+  }
+  c.putImageData(img, 0, 0);
+}
+// 腳（管子：x 沿著腳、y 繞一圈）：關節的地方一圈紅褐色、毛比較少；毛順著腳往下長
+function hubPaintLeg(c, W, H) {
+  const img = c.createImageData(W, H);
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const along = (px + 0.5) / W, a = (py + 0.5) / H * Math.PI * 2;
+    const col = hubChitin(Math.cos(a) * 0.3, along * 3, Math.sin(a) * 0.3, along * 6, 67);
+    let j = 0;
+    for (const at of [0.16, 0.44, 0.7]) j = Math.max(j, Math.exp(-(((along - at) / 0.018) ** 2)));
+    w4uPx(img.data, (py * W + px) * 4, col[0] + j * 12, col[1] + j * 6, col[2] + j * 4);
+  }
+  c.putImageData(img, 0, 0);
+}
+// 生鏽的鐵管：灰色的鐵、一塊一塊橘褐色的鏽、坑坑洞洞（x 繞一圈、y 沿著管子）
+function hubPaintPipe(c, W, H) {
+  const img = c.createImageData(W, H);
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const a = (px + 0.5) / W * Math.PI * 2, L = (py + 0.5) / H * 1.0, x = Math.cos(a) * 0.06, z = Math.sin(a) * 0.06;
+    const n = fbm3(x * 30, L * 30, z * 30, 4, 71), rust = sstep(0.56, 0.72, n + (fbm3(x * 8, L * 8, z * 8, 3, 73) - 0.5) * 0.4) * 0.85, pit = sstep(0.78, 0.86, fbm3(x * 160, L * 160, z * 160, 2, 75));
+    const s = 78 + (fbm3(x * 90, L * 4, z * 90, 2, 77) - 0.5) * 26;
+    let r = s, g = s * 1.02, b = s * 1.06;
+    const rr = 128 + (n - 0.5) * 70, rg = 62 + (n - 0.5) * 36, rb = 26 + (n - 0.5) * 16;
+    r += (rr - r) * rust; g += (rg - g) * rust; b += (rb - b) * rust;
+    r *= 1 - pit * 0.5; g *= 1 - pit * 0.5; b *= 1 - pit * 0.5;
+    w4uPx(img.data, (py * W + px) * 4, r, g, b);
+  }
+  c.putImageData(img, 0, 0);
+}
+// 一隻腳（照舊的位置：從肚子的腰上往外伸、膝蓋拱起來、腳尖踩在地上）：粗粗的管子，關節鼓起來，一根一根往外的刺，腳尖的爪子
+const HUB_LEG = [[[0, 0.02, -0.1], [0, 0.2, 0.22], [0, 0.34, 0.44], [0, 0.26, 0.6], [0, -0.3, 0.7], [0, -0.7, 0.76], [0, -0.93, 0.82]], [0.115, 0.105, 0.112, 0.098, 0.08, 0.066, 0.042]];
+function hubLegGeo() {
+  const rr = seeded(6203), parts = [[tubeGeo('hubLegT', HUB_LEG[0], HUB_LEG[1], 9, 16), new THREE.Matrix4()]], sp = geo('hubSpine', () => new THREE.ConeGeometry(1, 1, 4, 1)), jt = geo('hubJoint', () => new THREE.SphereGeometry(1, 9, 6));
+  parts.push([jt, mat4(0, 0.32, 0.5, 0, 0, 0, 0.112, 0.105, 0.112)], [jt, mat4(0, -0.42, 0.715, 0, 0, 0, 0.082, 0.07, 0.082)]);   // 膝蓋、下面那個關節
+  for (let i = 0; i < 7; i++) {   // 刺：長在腳的外側和上面，斜斜地往腳尖
+    const t = 0.15 + i * 0.12, P = HUB_LEG[0], k = t * (P.length - 1), q = Math.min(P.length - 2, k | 0), f = k - q, p = P[q].map((v, j) => v + (P[q + 1][j] - v) * f), R = HUB_LEG[1][q] + (HUB_LEG[1][q + 1] - HUB_LEG[1][q]) * f;
+    const side = (rr() - 0.5) * 1.6;
+    parts.push([sp, mat4(Math.sin(side) * R, p[1] + Math.cos(side) * R * 0.6, p[2] + Math.cos(side) * R * 0.5, -0.6 + (rr() - 0.5) * 0.4, 0, side, 0.012, 0.07 + rr() * 0.04, 0.012)]);
+  }
+  parts.push([geo('hubClaw', () => new THREE.ConeGeometry(1, 1, 5, 1)), mat4(0, -0.96, 0.86, 0.5, 0, 0, 0.03, 0.09, 0.03)]);
+  return mergeParts('hubLeg', parts);
+}
+// 頭：小圓頭，前面長眼睛的地方鼓起來、底下兩根粗粗的螯牙（彎彎的、尖尖的牙），合成一個網格
+function hubHeadGeo() {
+  const parts = [[geo('hubHeadS', () => { const g = new THREE.SphereGeometry(1, 22, 16), P = g.attributes.position, v = new THREE.Vector3(); for (let i = 0; i < P.count; i++) { v.fromBufferAttribute(P, i); const k = 1 + 0.08 * Math.exp(-((v.z - 0.9) ** 2 + (v.y - 0.25) ** 2) / 0.08); P.setXYZ(i, v.x * 0.24 * k, v.y * 0.22 * k, v.z * 0.25 * k); } g.computeVertexNormals(); return g; }), new THREE.Matrix4()]];
+  for (const s of [-1, 1]) {
+    parts.push([tubeGeo('hubChel' + s, [[s * 0.05, -0.08, 0.15], [s * 0.056, -0.14, 0.2], [s * 0.05, -0.2, 0.2], [s * 0.04, -0.24, 0.18]], [0.052, 0.05, 0.043, 0.036], 8, 7), new THREE.Matrix4()]);
+    parts.push([tubeGeo('hubFang' + s, [[s * 0.04, -0.235, 0.19], [s * 0.028, -0.285, 0.19], [s * 0.006, -0.31, 0.16], [-s * 0.008, -0.3, 0.125]], [0.022, 0.016, 0.009, 0.0015], 6, 7), new THREE.Matrix4()]);
+  }
+  return mergeParts('hubHead', parts);
+}
+// 八顆眼睛：前面兩顆大的、旁邊兩顆、上面兩排小的（濕亮的暗紅色）
+const HUB_EYES = [[-0.055, 0.04, 0.034], [0.055, 0.04, 0.034], [-0.125, 0.07, 0.022], [0.125, 0.07, 0.022], [-0.04, 0.115, 0.02], [0.04, 0.115, 0.02], [-0.16, 0.02, 0.016], [0.16, 0.02, 0.016]];
+function hubEyesGeo() {
+  const sp = geo('hubEye', () => new THREE.SphereGeometry(1, 8, 6)), v = new THREE.Vector3();
+  return mergeParts('hubEyes', HUB_EYES.map(([x, y, r]) => { v.set(x / 0.24, y / 0.22, 0).setZ(Math.sqrt(Math.max(0, 1 - (x / 0.24) ** 2 - (y / 0.22) ** 2))); return [sp, mat4(x, y, v.z * 0.25 * 1.06 - r * 0.35, 0, 0, 0, r, r, r * 0.8)]; }));
+}
+// 抓著鐵管的前腳（設計圖右邊那隻手）：粗粗的、往前伸，末端兩根彎爪扣住鐵管
+function hubArmGeo() {
+  const parts = [[tubeGeo('hubArmT', [[0, 0, 0], [0.12, 0.07, 0.05], [0.24, 0.06, 0.11], [0.3, 0.02, 0.14]], [0.088, 0.082, 0.076, 0.07], 9, 10), new THREE.Matrix4()], [geo('hubJoint', () => null), mat4(0.13, 0.07, 0.055, 0, 0, 0, 0.09)]];
+  const hook = geo('hubHook', () => new THREE.TorusGeometry(0.068, 0.018, 5, 10, Math.PI * 1.3));
+  parts.push([hook, mat4(0.3, 0.05, 0.14, Math.PI / 2, 0, 0.3)], [hook, mat4(0.3, -0.03, 0.14, Math.PI / 2, 0, -0.5)]);
+  return mergeParts('hubArm', parts);
+}
+function hubBuild(r, g) {
+  const T = { transparent: true };
+  const shell = ownPhong('#ffffff', { map: m5Tex('hubBody', 1024, 512, hubPaintBody), specular: 0x6a6670, shininess: 48, shade: 0.85, ...T });
+  const legM = ownPhong('#ffffff', { map: m5Tex('hubLeg', 256, 256, hubPaintLeg), specular: 0x5a5660, shininess: 40, shade: 0.8, ...T });
+  const eye = ownPhong('#3a0608', { specular: 0xff9090, shininess: 120, emissive: 0x2a0000, shade: 0.4, ...T });
+  const pipeM = withDetail(ownPhong('#ffffff', { map: m5Tex('hubPipe', 256, 256, hubPaintPipe), specular: 0x555555, shininess: 30, shade: 0.8, ...T }), 'steel', 4, 0.6);
+  r.mats.push(shell, legM, eye, pipeM);
+  r.body = new THREE.Group(); g.add(r.body);
+  // 胖胖的大肚子：上面圓、下面微微收，中間一圈比較寬
+  const belly = new THREE.Mesh(geo('hubBelly', () => { const gg = new THREE.SphereGeometry(1, 40, 28), P = gg.attributes.position, v = new THREE.Vector3(); for (let i = 0; i < P.count; i++) { v.fromBufferAttribute(P, i); const k = 1 + 0.03 * Math.sin(v.y * 9) * (1 - v.y * v.y), sq = v.y < 0 ? 1 - 0.1 * v.y * v.y : 1; P.setXYZ(i, v.x * 0.56 * k * sq, v.y * 0.53, v.z * 0.59 * k * sq); } gg.computeVertexNormals(); return gg; }), shell);
+  belly.position.set(0, 1.0, -0.05); r.body.add(belly);
+  // 脖子（細細的腰柄）和頭
+  r.body.add(new THREE.Mesh(tubeGeo('hubNeck', [[0, 1.48, 0.04], [0, 1.58, 0.06], [0, 1.66, 0.08]], [0.1, 0.075, 0.09], 10, 4), legM));
+  r.head = new THREE.Group(); r.head.position.set(0, 1.78, 0.08); r.body.add(r.head);
+  r.head.add(new THREE.Mesh(hubHeadGeo(), shell), new THREE.Mesh(hubEyesGeo(), eye));
+  // 八隻腳：左右各四隻，從前面排到後面
+  r.legs = [];
+  for (let i = 0; i < 8; i++) {
+    const side = i < 4 ? -1 : 1, k = i % 4, a = side * (0.42 + k * 0.76);
+    const lg = new THREE.Group(); lg.position.set(Math.sin(a) * 0.45, 0.95, Math.cos(a) * 0.45); lg.rotation.y = a; r.body.add(lg);
+    lg.add(new THREE.Mesh(hubLegGeo(), legM));
+    r.legs.push(lg);
+  }
+  // 抓著鐵管的前腳
+  r.armR = new THREE.Group(); r.armR.position.set(0.4, 1.25, 0.32); r.body.add(r.armR);
+  r.armR.add(new THREE.Mesh(hubArmGeo(), legM));
+  r.pipe = new THREE.Group(); r.pipe.position.set(0.3, 0.05, 0.14); r.armR.add(r.pipe);
+  r.pipe.add(new THREE.Mesh(mergeParts('hubPipeG', [[geo('hubPipeC', () => new THREE.CylinderGeometry(0.056, 0.056, 1, 14, 1)), mat4(0, -0.05, 0)], [geo('hubFlange', () => new THREE.CylinderGeometry(0.072, 0.072, 0.05, 14, 1)), mat4(0, 0.44, 0)], [geo('hubFlange', () => null), mat4(0, -0.53, 0, 0, 0, 0, 1, 0.8, 1)]]), pipeM));
+  r.pipe.rotation.x = 0.1;
+  r.glow = ownSprite(glowTex, 0xff2418); r.glow.position.y = 0.05; r.glow.scale.set(2.4, 0.9, 1); g.add(r.glow);
+}
+function hubSync(e, r, t, p, dt) {
+  // 黑色的胖蜘蛛：八隻腳輪流踩，肚子一上一下；看到你時舉起抓著鐵管的前腳往地上砸
+  if (e.home && !(e.raise > 0)) r.g.rotation.y = faceRot(e.face || 0);
+  const mv = moveSpeed4(e, r, dt);
+  r.wph = (r.wph || 0) + dt * (1.5 + mv * 5);
+  r.body.position.y = 0.02 + Math.sin(r.wph * 2) * 0.03 + Math.sin(t * 1.6 + (e.x || 0)) * 0.015;
+  r.g.position.y = floorH(e.x, e.y);
+  r.legs.forEach((lg, i) => { const ph = r.wph + (i % 2 ? Math.PI : 0) + (i < 4 ? 0 : Math.PI / 2); lg.rotation.x = Math.sin(ph) * 0.12 * Math.min(1, 0.2 + mv); lg.position.y = 0.95 + Math.max(0, Math.sin(ph)) * 0.05 * Math.min(1, mv); });
+  const raise = e.raise > 0 ? clamp((1 - e.raise) * 2, 0, 1) : 0, slam = e.cd > 4.1 ? 1 : 0, swing = e.swing > 0 ? e.swing / 0.35 : 0;
+  r.armR.rotation.x = raise > 0 ? -1.9 * raise : swing > 0 ? -1.6 * swing + 0.2 : slam ? 0.55 : Math.sin(t * 0.8) * 0.05;
+  r.pipe.rotation.x = raise > 0 ? 0.1 + 0.6 * raise : 0.1;
+  r.head.rotation.y = Math.sin(t * 0.6) * 0.3;
+  r.head.rotation.x = Math.sin(t * 0.9) * 0.06;
+  r.glow.material.opacity = (0.55 + 0.3 * Math.sin(t * 3.1) + (raise > 0 ? 0.3 : 0)) * enemyAlpha(e);
+}
+UPG.hubert = { build: hubBuild, sync: hubSync, view: { h: 2.1, d: 4.6, cy: 1.0 } };
+
 // ---------- 第四世界到這裡 ----------
 
 
