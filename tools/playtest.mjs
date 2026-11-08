@@ -784,7 +784,7 @@ await scenario('book', '怪物圖鑑（沒見過的只有問號；見過的卡�
   }
 });
 
-await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板的草原、白天 6 分鐘晚上 5 分鐘、砍樹（掉板子和木柴、樹樁、2 天後長回來）、樹上和花上長的東西、釣魚、沐浴球丟進水裡洗出東西、工作台的合成書做方塊放在地上、12 天的天氣（下雨、雷暴雨打雷、霧）、7 隻新怪物晚上出來（不會出錯）（貼圖是預先做好的圖檔）、圖鑑的第五世界、存檔讀檔砍倒的樹', {}, async ({ page, shot, check }) => {
+await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板的草原、白天 6 分鐘晚上 5 分鐘、砍樹（掉板子和木柴、樹樁、2 天後長回來）、撿木板放下當牆和門、樹上和花上長的東西、釣魚、沐浴球丟進水裡洗出東西、工作台的合成書做方塊放在地上、12 天的天氣（下雨、雷暴雨打雷、霧）、7 隻新怪物晚上出來（不會出錯）（貼圖是預先做好的圖檔）、圖鑑的第五世界、存檔讀檔砍倒的樹', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=5&kit=1', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
   await sleep(2000);
@@ -811,6 +811,30 @@ await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板�
   check(chop.planks === 2 && chop.wood === 1, `樹倒了要掉 2 片板子和木柴（板子 ${chop.planks}、木柴 ${chop.wood}）`);
   await sleep(800);
   await shot('2-chopped');
+  // 撿起樹掉的木板放下來當牆、再放一扇門：第五世界沒有蓋賣場，畫板子要的貼圖要自己準備（以前放下木板就當機）
+  const wall = await page.evaluate(() => {
+    const out = { t0: G.time };
+    window.__pt5 = { home: G.home, tip: G.ev.wallTip, x: G.p.x, y: G.p.y };
+    Object.assign(G.p, { x: 40.5, y: 52.5, face: 0, pitch: 0 });
+    for (const door of [false, true]) {
+      G.hand = null;
+      if (door) holdThing({ k: 'plank', tier: 2, door: true }); else takeLoose4(G.loose4[G.loose4.length - 1]);
+      Object.assign(G.bld, { dist: 1.0, rx: 0, ry: 0, rz: 0 });
+      if (door) G.p.y = 56.5;
+      const g = ghost4(); place4();
+      out[door ? 'door' : 'wood'] = { ok: g && g.ok, why: g && g.why, placed: !G.hand };
+    }
+    out.n = G.b4.list.length;
+    return out;
+  });
+  await sleep(1500);
+  const wall2 = await page.evaluate(t0 => ({ ran: G.time > t0 }), wall.t0);
+  check(wall.wood.placed && wall.door.placed && wall.n === 2 && wall2.ran, `第五世界撿起木板放下當牆、放門，遊戲要繼續跑（${JSON.stringify({ ...wall, ...wall2 })}）`);
+  await page.evaluate(() => { Object.assign(G.p, { x: 37.5, y: 54.5, face: 0, pitch: 0 }); });
+  await sleep(1000);
+  await shot('2b-wall');
+  // 拆掉，家和第一片板子的提示也還原（後面的檢查照沒蓋過房子算）
+  await page.evaluate(() => { for (const w of [...G.b4.list]) removeWall(w); const s = window.__pt5; G.home = s.home; G.ev.wallTip = s.tip; Object.assign(G.p, { x: s.x, y: s.y }); b4Changed(); });
   // 樹上長的東西：看著它按 E 摘下來
   const fruit = await page.evaluate(() => {
     const pk = G.pickups.filter(p => p.s && FURN_BY_ID[p.s].type === 'tree5' && !FURN_BY_ID[p.s].cut)[0];
@@ -1704,9 +1728,13 @@ await scenario('net5', '跟朋友一起玩第五世界（?nettest）：客人進
   // 沐浴球：房主丟進水裡，客人看到冒泡、洗出來的東西也看得到
   const bath = await page.evaluate(() => {
     for (const k of W5MAP.water) { const [x, y] = k.split(',').map(Number); if (walkable(x + 0.5, y + 1.5)) { Object.assign(G.p, { x: x + 0.5, y: y + 1.5, face: -Math.PI / 2 }); break; } }
-    G.inv.bathbomb = 1; G.selId = 'bathbomb'; useSelected();
-    const n0 = G.pickups.length; updateBath5(2.1);
-    return G.pickups.slice(n0).map(p => p.uid);
+    const out = [];
+    for (let i = 0; i < 5 && !out.length; i++) {   // 洗出來的全是硬幣（直接進錢包，不會掉在岸邊）就再丟一顆
+      G.inv.bathbomb = 1; G.selId = 'bathbomb'; useSelected();
+      const n0 = G.pickups.length; updateBath5(2.1);
+      out.push(...G.pickups.slice(n0).map(p => p.uid));
+    }
+    return out;
   });
   await guest.waitForFunction(u => u.every(x => G.pickups.some(p => p.uid === x)), bath, { timeout: 15000 }).catch(() => {});
   const g3 = await guest.evaluate(u => ({ items: u.filter(x => G.pickups.some(p => p.uid === x)).length }), bath);
