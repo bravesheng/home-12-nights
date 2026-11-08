@@ -6656,7 +6656,8 @@ function buildSunflower2(f, g) {
   const pupil = new THREE.Mesh(w2sfPupilGeo(), m.pupil); eye.add(pupil);
   const lids = [];
   for (const s of [1, -1]) { const l = new THREE.Mesh(w2sfLidGeo(), m.lid); l.position.z = W2SF_EZ; l.scale.y = s; face.add(l); lids.push(l); }
-  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  // 手電筒的影子只算花瓣、莖和花盤（眼球、眼皮、瞳孔的影子藏在眼窩裡看不到）
+  g.traverse(o => { if (o.isMesh) { o.castShadow = o.material === m.plant || o.material === m.disc; o.receiveShadow = true; } });
   return { g, head, eye, pupil, lids, eyeMat: m.ball, dil: 1 };
 }
 function syncSunflower2(f, r, t, p, awake) {
@@ -6977,7 +6978,8 @@ function buildShroom2(f, g) {
   capG.add(new THREE.Mesh(w2muTearGeo(), m.tear));
   const drops = new THREE.InstancedMesh(geo('w2muDrop', () => new THREE.SphereGeometry(1, 6, 4)), m.drop, N); g.add(drops);
   g.add(new THREE.Mesh(w2muPuddleGeo(), m.pud));
-  g.traverse(o => { if (o.isMesh) { o.castShadow = o.material !== m.tear && o.material !== m.drop && o.material !== m.pud; o.receiveShadow = true; } });
+  // 手電筒的影子只算菇傘和菇柄（眼球、眼皮、眼淚的影子藏在眼窩裡看不到，算了只是變慢）
+  g.traverse(o => { if (o.isMesh) { o.castShadow = o.material === m.cap || o.material === m.stem; o.receiveShadow = true; } });
   return { g, capMat: m.cap, eyes, balls, lidU, lidL, drops, tearMat: m.tear, open: new Float32Array(N).fill(1) };
 }
 const _w2q = new THREE.Quaternion(), _w2q2 = new THREE.Quaternion(), _w2e = new THREE.Euler(), _w2v = new THREE.Vector3();

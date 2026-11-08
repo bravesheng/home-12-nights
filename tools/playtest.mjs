@@ -536,6 +536,10 @@ await scenario('monsters2', '第二世界怪物模型（草叢人、大嘴觸角
   await sleep(1500);
   check((await state(page)).flash === true, '按 F 要打開手電筒');
   await shot('2-flashlight');
+  // 照第五世界的做法重做的 5 隻（向日葵眼、千眼菇是花，從 buildFlower 的鉤子接上）：貼圖都要從圖檔載入（tex/m5-w2*.webp）
+  await page.waitForFunction(() => Object.entries(Renderer.m5()).filter(([k]) => k.startsWith('w2')).every(([, v]) => v !== 'wait'), null, { timeout: 30000 }).catch(() => {});
+  const w2 = await page.evaluate(() => Object.entries(Renderer.m5()).filter(([k]) => k.startsWith('w2')));
+  check(['w2sf', 'w2mu', 'w2gr', 'w2sn', 'w2gl'].every(p => w2.some(([k]) => k.startsWith(p))) && w2.every(([, v]) => v === 'file'), `第二世界重做的怪物貼圖都要從圖檔載入（${w2.filter(([, v]) => v !== 'file').map(([k, v]) => k + ' ' + v).join('、') || w2.length + ' 張'}）`);
 });
 
 await scenario('monsters3', '第三世界怪物模型（克羅諾斯・蕈裂、熔岩暴君、墮落戰神、檮杌・九瞳排成一排，旁邊站著大白燈的大白；手電筒開關各拍一張）', {}, async ({ page, shot, check }) => {
