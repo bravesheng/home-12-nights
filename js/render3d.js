@@ -7589,6 +7589,214 @@ function syncBalloonUpg(e, r, t, p, dt) {
 }
 UPG.balloon = { build: buildBalloonUpg, sync: syncBalloonUpg, view: { h: 2.25, d: 3.6, cy: 1.35 } };
 
+// ---------- 爬行女 ----------
+// 設計師：「頭髮會動」「臉的光不要這麼假」。趴在地上的女人：髒髒的、濕濕貼在身上的白睡衣（下襬破破爛爛的），
+// 灰藍色、瘦得見骨的手腳，兩隻長手往前撐、手指抓著地；兩條腿彎著拖在後面。頭往後仰、臉朝著斜上方的你，
+// 又濕又長的黑髮從頭頂垂到地上蓋住臉，只從髮縫露出一隻充血的眼睛和半張嘴（暗紅色的嘴唇），幾根細細的頭髮飄過臉上。
+// 臉是雕出來的、被燈光照到才有明暗（不會自己發光）；眼睛是濕濕的真眼球，被燈或手電筒照到才會反光。
+// 頭髮一束一束各自晃：爬的時候跟著身體甩、髮尾拖在後面，停下來頭抽動時一起抖。
+// 動作跟原本一樣（從電視爬出來、兩手輪流往前爬、停下來頭會抽動）
+const KW_TILT = CRAWL_TILT, KW_HP = CRAWL_HEAD;   // 頭往後仰多少、頭的位置（跟原本一樣）
+const KW_HEAD = { rx: 0.1, ry: 0.125, rz: 0.11 };
+const KW_EYE = { x: 0.33, y: 0.1, R: 0.021 }, KW_LID = { w: 1.0, hu: 0.72, hl: 0.58, lift: 0.02 };
+const KW_FACE = [   // [X, Y, 寬, 高, 凸起多少, 左右對稱]
+  [0.32, 0.29, 0.26, 0.06, 0.035, true], [0.33, 0.1, 0.2, 0.14, -0.06, true], [0.55, -0.12, 0.13, 0.08, 0.05, true],
+  [0.5, -0.4, 0.14, 0.15, -0.07, true], [0, 0.0, 0.045, 0.13, 0.05, false], [0, -0.15, 0.06, 0.05, 0.09, false],
+  [0.05, -0.19, 0.03, 0.03, 0.025, true], [0, -0.86, 0.17, 0.08, 0.04, false],
+];
+const KW_M = { x: 0.04, y: -0.44, w: 0.24, h: 0.065 };   // 微微張開的嘴（有一點歪）
+const kwMouthE = (x, y) => (Math.hypot((x - KW_M.x) / KW_M.w, (y - KW_M.y - 0.04 * (x - KW_M.x)) / KW_M.h) - 1) * KW_M.h;
+let kwEyeAt = null;
+function kwEyes() {
+  if (kwEyeAt) return kwEyeAt;
+  kwEyeAt = [-1, 1].map(s => {
+    const X = s * KW_EYE.x, Y = KW_EYE.y, S0 = kwHeadPt(X, Y, Math.sqrt(1 - X * X - Y * Y), new THREE.Vector3(), true);
+    const F = new THREE.Vector3(s * 0.12, 0, 1).normalize();
+    return { s, F, C: S0.addScaledVector(F, -0.85 * KW_EYE.R) };
+  });
+  return kwEyeAt;
+}
+function kwHeadPt(x, y, z, out, noEye) {
+  let X = x, Y = y, Z = z;
+  if (y < 0) { const t = -y; X *= 1 - 0.25 * t * t; }
+  if (Z > 0) Z *= 0.88 + 0.12 * Math.min(1, Math.abs(x) * 1.6); else Z *= 1.08;
+  let d = 0, back = 0;
+  if (z > 0.05) {
+    for (const f of KW_FACE) for (const s of f[5] ? [-1, 1] : [1]) { const u = (x - s * f[0]) / f[2], v = (y - f[1]) / f[3]; if (u * u + v * v < 16) d += f[4] * Math.exp(-u * u - v * v); }
+    const e = kwMouthE(x, y);
+    if (e < 0.08) { back += 0.2 * sstep(0.003, -0.02, e); d += 0.022 * Math.exp(-(((e - 0.015) / 0.014) ** 2)); }
+    const w = sstep(0.05, 0.4, z);
+    d *= w; back *= w;
+  }
+  const k = 1 + d / (Math.hypot(X, Y, Z) || 1);
+  out.set(X * k * KW_HEAD.rx, Y * k * KW_HEAD.ry, (Z * k - back) * KW_HEAD.rz);
+  if (noEye || z < 0.3) return out;
+  for (const E of kwEyes()) {
+    const dx = (x - E.s * KW_EYE.x) * E.s * KW_HEAD.rx * 0.95, dy = (y - KW_EYE.y) * KW_HEAD.ry;
+    if (dx * dx + dy * dy < (KW_EYE.R * 2.4) ** 2) crSnapLid(out, E.C, E.F, dx, dy, KW_EYE.R, KW_LID);
+  }
+  return out;
+}
+const kwU = crWarp(-Math.PI, Math.PI, a => 1 + 1.3 * Math.exp(-((a / 0.8) ** 2))), kwV = crWarp(0, Math.PI, th => 1 + 1.2 * Math.exp(-(((th - 1.75) / 0.6) ** 2)));
+const kwHeadGeo = () => sculptGeo('kwHead', kwHeadPt, kwU, kwV, th => sstep(1.15, 1.3, th) * (1 - sstep(2.6, 2.75, th)), a => sstep(-0.85, -0.7, a) * (1 - sstep(0.7, 0.85, a)), [0.05, 0.055], [0.17, 0.18]);
+// 臉：灰藍色的死人皮膚、一塊一塊的瘀青和青色的血管、深深發黑的眼窩，暗紅色的嘴唇（像乾掉的血）、嘴裡黑黑的；
+// 頭頂、兩邊和後腦勺是頭髮的顏色（髮束中間的縫才不會露出皮膚）
+function kwPaintHead(c, W, H) {
+  const img = c.createImageData(W, H), D = img.data, C = [0, 0, 0];
+  const mix = (col, k) => { C[0] += (col[0] - C[0]) * k; C[1] += (col[1] - C[1]) * k; C[2] += (col[2] - C[2]) * k; };
+  for (let py = 0; py < H; py++) {
+    const th = kwV.inv((py + 0.5) / H), st = Math.sin(th), y = Math.cos(th);
+    for (let px = 0; px < W; px++) {
+      const a = kwU.inv((px + 0.5) / W), x = st * Math.sin(a), z = st * Math.cos(a), i = (py * W + px) * 4;
+      const n = fbm3(x * 4, y * 4, z * 4, 4, 211), f = fbm3(x * 30, y * 30, z * 30, 2, 213);
+      C[0] = 128 + (n - 0.5) * 22 + (f - 0.5) * 10; C[1] = 140 + (n - 0.5) * 20 + (f - 0.5) * 10; C[2] = 150 + (n - 0.5) * 18 + (f - 0.5) * 10;
+      mix([90, 84, 108], sstep(0.62, 0.8, fbm3(x * 2.5, y * 2.5, z * 2.5, 3, 215)) * 0.45);   // 瘀青
+      mix([70, 96, 118], sstep(0.9, 0.97, skRidge(fbm3(x * 3 + 2, y * 3, z * 3, 3, 217))) * 0.4);   // 青色的血管
+      if (z > 0.05) {
+        for (const s of [-1, 1]) {
+          const dx = (x - s * KW_EYE.x) * s * KW_HEAD.rx * 0.95, dy = (y - KW_EYE.y) * KW_HEAD.ry, e = crLidE(dx, dy, KW_EYE.R, KW_LID).e;
+          if (e > 0.04) continue;
+          mix([44, 40, 52], (1 - sstep(0.004, 0.035, e + 0.01 * (n - 0.5))) * 0.75);   // 發黑的眼窩
+          mix([110, 50, 56], (1 - sstep(0.001, 0.005, e)) * 0.8);
+          if (e < 0) mix([40, 10, 12], 1);
+        }
+        const e = kwMouthE(x, y);
+        if (e < 0.04) { if (e >= 0) mix([84, 20, 26], (1 - sstep(0.008, 0.03, e + 0.01 * (n - 0.5))) * 0.9); else mix([12, 3, 4], 1); }
+      }
+      mix([16, 15, 18], z < 0.1 ? 1 : Math.max(sstep(0.48, 0.56, y + 0.05 * (f - 0.5)), sstep(0.76, 0.9, Math.abs(x))));
+      D[i] = C[0]; D[i + 1] = C[1]; D[i + 2] = C[2]; D[i + 3] = 255;
+    }
+  }
+  c.putImageData(img, 0, 0);
+}
+// 睡衣（loft 的 u 繞一圈、v 從下襬往上到領口）：髒髒的白布，一塊一塊泥巴和水漬，濕的地方比較暗，下襬破破爛爛的（透明度）、沾了泥
+function kwPaintGown(c, W, H) {
+  const img = c.createImageData(W, H), D = img.data, T = Math.PI * 2;
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const u = (px + 0.5) / W, v = (py + 0.5) / H, cu = Math.cos(T * u), su = Math.sin(T * u);
+    const n = fbm3(cu * 1.5, su * 1.5, v * 4, 4, 221), m = fbm3(cu * 4, su * 4, v * 10, 3, 223), st = vnoise3(cu * 50, su * 50, v * 8, 225), i = (py * W + px) * 4;
+    let L = 200 + (n - 0.5) * 30 + (st - 0.5) * 10;
+    const wet = sstep(0.55, 0.75, m) * 0.35, mud = sstep(0.6, 0.8, n) * 0.4 + (1 - sstep(0.05, 0.3, v)) * 0.35 * sstep(0.4, 0.6, m);
+    const R = L * (1 - wet) * (1 - mud * 0.5), G2 = L * (1 - wet) * (1 - mud * 0.55), B = L * (1 - wet * 0.9) * (1 - mud * 0.65);
+    const rag = sstep(0.025 + 0.05 * fbm3(cu * 6, su * 6, 2, 3, 227), 0.06, v);
+    D[i] = R; D[i + 1] = G2 * 0.99; D[i + 2] = B * 0.95; D[i + 3] = rag * 255;
+  }
+  c.putImageData(img, 0, 0);
+}
+const KW_GOWN = [   // 直的時候的樣子（再整個往前趴）：從大腿的下襬往上到領口；f 是肚子那邊（趴著時朝下）
+  { y: -0.14, w: 0.18, f: 0.09, b: 0.12 }, { y: -0.03, w: 0.165, f: 0.095, b: 0.12 }, { y: 0.06, w: 0.155, f: 0.09, b: 0.115 },
+  { y: 0.24, w: 0.13, f: 0.075, b: 0.095, wv: 0.004 }, { y: 0.42, w: 0.15, f: 0.09, b: 0.1, wv: 0.003 }, { y: 0.58, w: 0.175, f: 0.08, b: 0.095 },
+  { y: 0.68, w: 0.12, f: 0.055, b: 0.065 }, { y: 0.74, w: 0.05, f: 0.045, b: 0.045 },
+];
+const KW_HIP = new THREE.Vector3(0, 0.3, -0.45), KW_SH = { x: 0.17, y: 0.42, z: 0.26 };
+// 一隻手臂（從肩膀開始）：上臂往外、手肘拱起來，前臂撐到地上，手掌貼地、五根長長的手指抓著地
+function kwArmGeo(s) {
+  const W = [s * 0.08, -0.4, 0.46], parts = [[tubeGeo('kwArm' + s, [[0, 0, 0], [s * 0.08, -0.05, 0.13], [s * 0.14, -0.12, 0.26], [s * 0.12, -0.27, 0.37], W], [0.036, 0.03, 0.03, 0.024, 0.02], 8, 16), new THREE.Matrix4()]];
+  parts.push([geo('kwPalm', () => new THREE.SphereGeometry(1, 10, 8)), mat4(W[0], W[1] - 0.006, W[2] + 0.045, 0, 0, 0, 0.034, 0.013, 0.05)]);
+  for (let i = 0; i < 5; i++) {
+    const th = i === 4, a = th ? -s * 0.9 : (i - 1.5) * 0.22 * s, L = th ? 0.06 : [0.11, 0.13, 0.125, 0.1][i];
+    const f = tubeGeo('kwFinger' + i, [[0, 0, 0], [0, 0.02, L * 0.4], [0, 0.012, L * 0.75], [0, -0.008, L]], [0.0075, 0.0065, 0.0055, 0.0035], 6, 8);
+    parts.push([f, mat4(W[0] + (th ? -s * 0.025 : (i - 1.5) * 0.016), W[1] - 0.004, W[2] + (th ? 0.03 : 0.085), 0, a, 0)]);
+  }
+  return mergeParts('kwArmAll' + s, parts);
+}
+// 兩條腿（彎著拖在後面、小腿翹起來）和脖子合成一個網格
+function kwLegsGeo() {
+  const parts = [[tubeGeo('kwNeck', [[0, 0.44, 0.27], [0, 0.47, 0.36], [0, 0.5, 0.44]], [0.04, 0.038, 0.04], 10, 6), new THREE.Matrix4()]];
+  for (const s of [-1, 1]) {
+    parts.push([tubeGeo('kwLeg' + s, [[s * 0.09, 0.3, -0.36], [s * 0.13, 0.15, -0.52], [s * 0.15, 0.05, -0.64], [s * 0.15, 0.05, -0.78], [s * 0.14, 0.06, -0.92]], [0.05, 0.042, 0.035, 0.03, 0.025], 8, 18), new THREE.Matrix4()]);   // 小腿拖在地上
+    parts.push([geo('kwFoot', () => new THREE.SphereGeometry(1, 10, 8)), mat4(s * 0.14, 0.045, -0.98, 0.3, 0, 0, 0.03, 0.03, 0.08)]);
+  }
+  return mergeParts('kwLegs', parts);
+}
+// 頭髮（先用身體的座標排：從頭頂往前翻過額頭，直直地垂到地上；再換成仰著的頭的座標）
+function kwHair() {
+  const c = Math.cos(KW_TILT), sn = Math.sin(KW_TILT), S = [], r = seeded(2222);
+  const H = ([x, y, z]) => { const dy = y - KW_HP[1], dz = z - KW_HP[2]; return [x, dy * c - dz * sn, dy * sn + dz * c]; };   // 身體 → 頭（頭往後仰 KW_TILT）
+  const add = (a, b, e, d, w, f, ph, tp = 0.3) => S.push({ a: H(a), b: H(b), c: H(e), d: H(d), w, f, ph, tp });
+  const fz = KW_HP[2] + 0.115;   // 臉前面
+  // 臉前面的髮簾：一束疊一束，中間偏右留一條縫（看得到右眼和半張嘴），兩邊往後彎
+  for (let x = -0.13; x <= 0.141; x += 0.011) {
+    if (x > 0.0 && x < 0.088) continue;   // 髮縫：露出右眼和半張嘴
+    const j = r(), back = (x / 0.14) ** 2 * 0.06;
+    add([x * 0.6, 0.645, KW_HP[2] + 0.02], [x * 0.95, 0.68, fz + 0.07 - back], [x * 1.08, 0.42, fz + 0.065 - back], [x * 1.18 + (j - 0.5) * 0.03, 0.02 + j * 0.04, fz + 0.06 - back + j * 0.04], 0.03 + j * 0.012, 0, x * 9 + j);
+  }
+  for (let i = 0; i < 5; i++) {   // 幾根細細的頭髮飄過臉上（髮縫裡）
+    const x = 0.012 + r() * 0.065, j = r();
+    add([x * 0.6, 0.645, KW_HP[2] + 0.02], [x, 0.67, fz + 0.05], [x + (j - 0.5) * 0.03, 0.42, fz + 0.05], [x + (j - 0.5) * 0.05, 0.05, fz + 0.07], 0.007, 0, i * 2.3 + 1, 0.2);
+  }
+  for (const s of [-1, 1]) for (let k = 0; k < 6; k++) {   // 臉的兩邊垂到地上
+    const j = r(), ang = s * (1.0 + k * 0.17);
+    add([Math.sin(ang) * 0.06, 0.64, KW_HP[2] + Math.cos(ang) * 0.06], [Math.sin(ang) * 0.15, 0.6, KW_HP[2] + Math.cos(ang) * 0.13], [Math.sin(ang) * 0.16, 0.32, KW_HP[2] + Math.cos(ang) * 0.14], [Math.sin(ang) * (0.18 + j * 0.04), 0.02, KW_HP[2] + Math.cos(ang) * 0.14], 0.05, ang, s * 2 + k);
+  }
+  for (let x = -0.12; x < 0.13; x += 0.03) {   // 從頭頂往後披在肩膀和背上
+    const j = r();
+    add([x * 0.7, 0.64, KW_HP[2] - 0.02], [x * 1.1, 0.6, KW_HP[2] - 0.14], [x * 1.3, 0.53, 0.2], [x * 1.45 + (j - 0.5) * 0.04, 0.49, 0.02 - j * 0.12], 0.05, Math.PI, x * 5 + 3, 0.4);
+  }
+  return S;
+}
+function buildCrawlerUpg(r, g) {
+  const T = { transparent: true };
+  const skin = withDetail(ownPhong('#8796a2', { specular: 0x26303a, shininess: 18, shade: 0.75, ...T }), 'skin', 5, 1.3);
+  const gown = withDetail(ownLM('#ffffff', { map: m5Tex('kwGown', 512, 512, kwPaintGown), alphaTest: 0.5, side: THREE.DoubleSide, shade: 0.8, ...T }), 'rag', 4, 0.9);
+  gown.map.wrapT = THREE.ClampToEdgeWrapping;
+  const head = withDetail(ownLM('#ffffff', { map: m5Tex('kwHead', 2048, 1024, kwPaintHead), shade: 0.8, ...T }), 'skin', 5, 0.8);
+  head.map.wrapS = THREE.ClampToEdgeWrapping;
+  const eye = { ball: wetEyeMat(m5Tex('efSclera', 2048, 1024, efPaintSclera), 0x060404, 0xaaaaaa, T), iris: wetEyeMat(m5Tex('cwIris', 128, 128, cwPaintIris), 0x020202, 0xcccccc, T), irisK: 0.42 };
+  for (const m of [eye.ball, eye.iris]) m.shininess = 110;
+  const hair = withDetail(hairMat(strandTex, 0.55), 'hair', 3, 0.9), hair2 = withDetail(hairMat(strandTex, 0.55), 'hair', 3, 0.9);
+  r.hairU = [hair.userData.hair, hair2.userData.hair];
+  r.mats.push(skin, gown, head, eye.ball, eye.iris, hair, hair2);
+  r.body = new THREE.Group(); g.add(r.body);
+  const torso = new THREE.Group(); torso.position.copy(KW_HIP); torso.rotation.x = Math.PI / 2 - Math.atan2(KW_SH.y - KW_HIP.y, KW_SH.z - KW_HIP.z); r.body.add(torso);
+  torso.add(new THREE.Mesh(loftGeo('kwGown', KW_GOWN, { seg: 22, sub: 2, uv: [0, 1, 0, 1] }), gown));
+  r.body.add(new THREE.Mesh(kwLegsGeo(), skin));
+  r.arms = [];
+  for (const s of [-1, 1]) {
+    const sh = new THREE.Group(); sh.position.set(s * KW_SH.x, KW_SH.y, KW_SH.z); r.body.add(sh);
+    sh.add(new THREE.Mesh(kwArmGeo(s), skin));
+    r.arms.push(sh);
+  }
+  r.head = new THREE.Group(); r.head.position.set(...KW_HP); r.head.rotation.x = -KW_TILT; r.body.add(r.head);
+  r.head.add(new THREE.Mesh(kwHeadGeo(), head));
+  r.crEyes = [];
+  for (const E of kwEyes()) {
+    const ey = w1Eye(r.head, KW_EYE.R, eye);
+    ey.sock.position.copy(E.C); ey.sock.quaternion.setFromUnitVectors(Z_AXIS, E.F);
+    ey.jig = 0.01; ey.lim = 0.45;
+    r.crEyes.push(ey);
+  }
+  // 臉前面和兩邊的頭髮一個網格、後面披在背上的一個網格（甩的方式不一樣）
+  const hs = kwHair(), isBack = q => q.d[2] < -0.2, back = hs.filter(isBack);
+  r.head.add(new THREE.Mesh(hairGeo('kwHairF', hs.filter(q => !isBack(q)), 12), hair));
+  r.head.add(new THREE.Mesh(hairGeo('kwHairB', back, 8), hair2));
+}
+function syncCrawlerUpg(e, r, t, p, dt) {
+  if (e.emerge > 0) {
+    // 從電視螢幕裡爬出來（跟原本一樣）
+    const k = 1 - e.emerge / 2.2;
+    r.g.position.set(TV_FLOOR.x, 0.62 * (1 - k), 15.7 + (TV_FLOOR.y - 15.7) * k);
+    r.g.rotation.set(0.9 * (1 - k), 0, 0);
+  } else {
+    r.g.rotation.x = 0;
+    const moving = e.pauseT <= 0, ph = e.wob * 8;
+    r.arms[0].rotation.x = moving ? Math.sin(ph) * 0.35 : 0;
+    r.arms[1].rotation.x = moving ? -Math.sin(ph) * 0.35 : 0;
+    r.body.rotation.z = moving ? Math.sin(ph) * 0.05 : 0;
+    r.head.rotation.z = moving ? Math.sin(ph) * 0.04 : Math.sin(t * 25) * 0.15;   // 停下來時頭會抽動
+  }
+  // 頭髮：爬的時候跟著身體左右甩、髮尾拖在後面，每束各自晃；停下來時頭抽動，頭髮跟著抖；從電視爬出來時往前垂
+  const crawl = !(e.emerge > 0) && e.pauseT <= 0, [hu, hb] = r.hairU, ph = e.wob * 8;
+  hu.uHT.value = hb.uHT.value = t;
+  hu.uHAmp.value += ((crawl ? 0.06 : 0.025) - hu.uHAmp.value) * Math.min(1, dt * 4);
+  hb.uHAmp.value = hu.uHAmp.value * 0.6;
+  const shake = crawl ? 0 : Math.sin(t * 25) * 0.025;
+  hu.uHDrag.value.set(spring(r, 'hx', (crawl ? Math.sin(ph - 0.8) * 0.06 : 0) + shake, dt, 90, 6), spring(r, 'hz', crawl ? -0.06 : e.emerge > 0 ? 0.08 : 0, dt, 60, 6));
+  hb.uHDrag.value.set(spring(r, 'bx', crawl ? Math.sin(ph - 1.2) * 0.05 : 0, dt, 90, 6), spring(r, 'bz', crawl ? 0.05 : 0, dt, 60, 6));
+  crLook(r, t, dt, p);
+}
+UPG.crawler = { build: buildCrawlerUpg, sync: syncCrawlerUpg, view: { h: 1.0, d: 2.8, cy: 0.4 } };
+
 // 看模型（?model=eye）和預先畫貼圖（bake5）時當成怪物蓋：裡面放一朵假的花
 UPG.eye = {
   build(r, g) { r.f = { x: 0, y: 0, ptype: 'eye', grow: 1, burn: 0, alarm: 0 }; r.fr = buildEyeFlower(r.f, g); },
