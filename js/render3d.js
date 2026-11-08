@@ -6687,6 +6687,336 @@ const w2FakeFlower = (ptype, r, g, fl) => { r.fl = { x: 0, y: 0, ptype, grow: 1,
 const w2FakeSync = fl => (e, r, t, p) => { r.g.rotation.y = 0; r.g.position.y = floorH(e.x, e.y); r.fl.x = e.x; r.fl.y = e.y; r.fl.face = Math.atan2(p.y - e.y, p.x - e.x); fl.sync(r.fl, r.flr, t, p, true); };
 const W2SF_FLOWER = { build: buildSunflower2, sync: syncSunflower2 };
 UPG.sunflower = { flower: W2SF_FLOWER, build: (r, g) => w2FakeFlower('sunflower', r, g, W2SF_FLOWER), sync: w2FakeSync(W2SF_FLOWER), view: { h: 1.75 } };   // 鏡頭跟圖鑑的 BOOK_VIEW.sunflower 一樣
+// ---------- 千眼菇（花，ptype 'shroom'） ----------
+// 一朵比人還高的毒蘑菇：暗紅色、濕濕亮亮的菇傘（中間深、邊緣淡，一塊塊白色的疣、一絲絲往下的纖維），邊緣往內捲、看得到厚厚的菌肉；
+// 菇傘上長著十幾顆大大小小的人眼，每顆眼睛周圍腫起一圈紅紅的肉、有上下眼皮（被手電筒照到全部閉起來），一直轉過來盯著你；
+// 每顆眼睛都在哭：眼淚沿著菇傘一路流到邊緣（濕濕的淚痕），一滴一滴掉到地上積成小水窪。
+// 底下是一片片的菌褶、垂下來的菌環，奶油色的粗菇柄有一圈圈蛇皮般的鱗紋，底部腫成一個球、包在破破的菌托裡
+const W2MU_A = 0.72, W2MU_B = 0.52, W2MU_Y = 1.08, W2MU_TR = 1.68, W2MU_T1 = 1.95;   // 菇傘的半徑、高度、底部（跟舊的一樣大）；外面到哪個角度、捲進去到哪個角度（從頂上算）
+// 菇傘的形狀：th 從頂上往下的角度、a 繞一圈的角度 → [離中心多遠, 高度]（從菇傘底部算）
+function w2muCapRH(th, a) {
+  const n = fbm3(Math.cos(a) * 1.3, th * 1.2, Math.sin(a) * 1.3, 3, 501) - 0.5, wav = Math.sin(a * 7 + 1.3) * 0.5 + Math.sin(a * 11 + 0.4) * 0.3;
+  if (th <= W2MU_TR) {
+    const k = 1 + n * 0.07 + wav * 0.03 * sstep(1.1, W2MU_TR, th);
+    return [W2MU_A * Math.sin(th) * k, W2MU_B * Math.cos(th) * (1 + n * 0.05) - 0.03 * sstep(1.3, W2MU_TR, th)];
+  }
+  const [r0, h0] = w2muCapRH(W2MU_TR, a);
+  if (th <= W2MU_T1) { const q = (th - W2MU_TR) / (W2MU_T1 - W2MU_TR), c = Math.PI * q; return [r0 - 0.06 * (1 - Math.cos(c)) / 2 + 0.012 * Math.sin(c), h0 - 0.055 * Math.sin(c / 2)]; }
+  const q = (th - W2MU_T1) / (Math.PI - W2MU_T1), r1 = r0 - 0.06, h1 = h0 - 0.055;
+  return [r1 * (1 - q), h1 + 0.16 * Math.pow(q, 0.8) + 0.02 * Math.sin(a * 60) * (1 - q) * q * 4];
+}
+const w2muCapPt = (x, y, z, out) => { const th = Math.acos(clamp(y, -1, 1)), a = Math.atan2(x, z), [rr, h] = w2muCapRH(th, a); return out.set(Math.sin(a) * rr, h, Math.cos(a) * rr); };
+const W2MU_U = crWarp(-Math.PI, Math.PI, () => 1), W2MU_V = crWarp(0, Math.PI, th => th < W2MU_T1 ? 1.3 : 0.6);
+const w2muCapGeo = () => sculptGeo('w2muCap', w2muCapPt, W2MU_U, W2MU_V, th => th < W2MU_T1 + 0.1 ? 1 : 0, () => 1, [0.085, 0.12], [0.16, 0.12]);
+// 眼睛的位置（菇傘上，不會疊在一起）、大小、那裡的朝向（z 往外、y 往菇傘頂）、眼淚流下去的路線
+let w2muEyeList = null;
+function w2muEyes() {
+  if (w2muEyeList) return w2muEyeList;
+  const r = seeded(6151), out = [], v = new THREE.Vector3(), v1 = new THREE.Vector3(), v2 = new THREE.Vector3();
+  const at = (th, a, o) => { const [rr, h] = w2muCapRH(th, a); return o.set(Math.sin(a) * rr, h, Math.cos(a) * rr); };
+  for (let tries = 0; out.length < 15 && tries < 600; tries++) {
+    const th = 0.3 + r() * 1.18, a = r() * Math.PI * 2 - Math.PI, s = 0.62 + r() * 0.7, R = 0.078 * s;
+    const p = at(th, a, new THREE.Vector3());
+    if (out.some(e => e.p.distanceTo(p) < (e.R + R) * 1.9)) continue;
+    at(th - 0.01, a, v1); at(th + 0.01, a, v2); const up = v1.clone().sub(v2).normalize();
+    at(th, a + 0.01, v1); at(th, a - 0.01, v2); const side = v1.clone().sub(v2).normalize();
+    const n = new THREE.Vector3().crossVectors(side, up).normalize();
+    if (n.dot(v.copy(p).setY(p.y + 0.3)) < 0) n.negate();
+    up.crossVectors(n, side).normalize();
+    // 眼淚：從下眼皮往下，沿著菇傘一路流到邊緣，彎彎曲曲的
+    const path = [], th0 = th + R / W2MU_A * 1.1;
+    let aa = a;
+    for (let t2 = th0; ; t2 += 0.06) {
+      const tt = Math.min(t2, W2MU_T1 - 0.05);
+      aa += (fbm3(tt * 3, a * 2, s, 2, 503) - 0.5) * 0.05;
+      const q = at(tt, aa, new THREE.Vector3());
+      at(tt - 0.01, aa, v1); at(tt + 0.01, aa, v2); const tg = v1.sub(v2);
+      at(tt, aa + 0.01, v); const sd = v.sub(q);
+      q.addScaledVector(new THREE.Vector3().crossVectors(sd, tg).normalize(), 0.004);
+      path.push(q);
+      if (tt >= W2MU_T1 - 0.05) break;
+    }
+    out.push({ th, a, s, R, p, n, up, x: new THREE.Vector3().crossVectors(up, n), path, ph: r() * 6, blink: r() * 6 });
+  }
+  return (w2muEyeList = out);
+}
+// 眼睛周圍腫起來的一圈肉：每顆眼睛一小片圓形的網格，貼著菇傘、往外鼓起來，裡面藏到眼球底下、外圈沉進菇傘裡；
+// 貼圖座標照菇傘的算（同一張貼圖），跟菇傘合成一個網格，看不出接縫
+function w2muCapAllGeo() {
+  const parts = [[w2muCapGeo(), new THREE.Matrix4()]];
+  w2muEyes().forEach((e, k) => parts.push([geo('w2muSock' + k, () => {
+    const NS = 10, RG = [0.84, 0.95, 1.1, 1.3, 1.6, 1.95, 2.35], HS = [-0.14, 0.2, 0.46, 0.55, 0.3, 0.06, -0.05], pos = [], uv = [], idx = [], P = new THREE.Vector3();
+    RG.forEach((rr, i) => {
+      const h = HS[i] * (1 + 0.25 * (hash01(k * 7.1 + i) - 0.5));
+      for (let j = 0; j <= NS; j++) {
+        const ph = j / NS * Math.PI * 2;
+        P.copy(e.p).addScaledVector(e.x, Math.cos(ph) * rr * e.R * 1.08).addScaledVector(e.up, Math.sin(ph) * rr * e.R * 0.94);
+        const a = Math.atan2(P.x, P.z), th = Math.atan2(Math.hypot(P.x, P.z) / W2MU_A, P.y / W2MU_B), [cr, ch] = w2muCapRH(th, a);
+        P.set(Math.sin(a) * cr, ch, Math.cos(a) * cr).addScaledVector(e.n, h * e.R);
+        pos.push(P.x, P.y, P.z); uv.push(W2MU_U(a), 1 - W2MU_V(th));
+        if (i < RG.length - 1 && j < NS) { const p = i * (NS + 1) + j, q = p + 1, s2 = p + NS + 1, t2 = s2 + 1; idx.push(p, q, s2, q, t2, s2); }
+      }
+    });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals();
+    return g;
+  }), new THREE.Matrix4()]));
+  return mergeParts('w2muCapAll', parts);
+}
+// 眼皮（半徑 1：放到每顆眼睛時乘上眼球的大小）：上眼皮從頂上到眼瞼緣；下眼皮是上下翻過來的另一份（三角形的方向也翻過來）
+function w2muLidGeo(lower) {
+  return geo('w2muLid' + (lower ? 'L' : 'U'), () => {
+    const TH1 = 1.12, P = [[1.11, 0], [1.11, 0.55], [1.12, TH1 - 0.1], [1.11, TH1 + 0.02], [1.06, TH1 + 0.06], [1.02, TH1 + 0.01]];
+    const N = 8, ph0 = -0.35, ph1 = Math.PI + 0.35, pos = [], uv = [], idx = [];
+    P.forEach(([rr, th], i) => {
+      for (let j = 0; j <= N; j++) {
+        const ph = ph0 + (ph1 - ph0) * j / N, y = rr * Math.cos(th) * (lower ? -1 : 1);
+        pos.push(-rr * Math.cos(ph) * Math.sin(th), y, rr * Math.sin(ph) * Math.sin(th)); uv.push(j / N, [0, 0.4, 0.74, 0.8, 0.9, 1][i]);
+        if (i < P.length - 1 && j < N) { const a = i * (N + 1) + j, b = a + 1, c = a + N + 1, d = c + 1; if (lower) idx.push(a, b, c, b, d, c); else idx.push(a, c, b, b, c, d); }
+      }
+    });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals();
+    return g;
+  });
+}
+// 所有的淚痕合成一個網格：細細的、亮亮的水，越往下越粗，流到邊緣鼓成一顆垂著的水珠
+function w2muTearGeo() {
+  return mergeParts('w2muTears', w2muEyes().map((e, i) => {
+    const pts = e.path.map(q => [q.x, q.y, q.z]), n = pts.length, rs = pts.map((_, k) => (0.0034 + 0.0032 * k / n) * (0.8 + e.s * 0.3));
+    rs[n - 1] = 0.009;
+    return [tubeGeo('w2muTear' + i, pts, rs, 3, Math.max(4, n)), new THREE.Matrix4()];
+  }));
+}
+// 菇柄：底部腫成一個球（包在菌托裡），往上變細，接到菇傘底下時又張開；菌環從菇柄上垂下來
+const W2MU_STEM = [
+  { y: -0.02, w: 0.2 }, { y: 0.04, w: 0.29 }, { y: 0.12, w: 0.31 }, { y: 0.22, w: 0.27 }, { y: 0.34, w: 0.21 }, { y: 0.5, w: 0.185 },
+  { y: 0.7, w: 0.172 }, { y: 0.9, w: 0.168 }, { y: 1.02, w: 0.18 }, { y: 1.1, w: 0.23 }, { y: 1.16, w: 0.3 },
+];
+const W2MU_ATLAS = [512, 1024];   // 菇柄（上半）、菌環、菌托（下半）共用一張圖
+const W2MU_R = { stem: w2Rect(0, 0, 512, 640, 512, 1024), ring: w2Rect(0, 640, 512, 832, 512, 1024), volva: w2Rect(0, 832, 512, 1024, 512, 1024) };
+function w2muStemGeo() {
+  const r0 = W2MU_R.stem, ring = W2MU_R.ring, vol = W2MU_R.volva;
+  const st = loftGeo('w2muStem', W2MU_STEM.map(q => ({ ...q, d: q.w })), { seg: 16, sub: 2, uv: [r0[0], r0[2], 1 - r0[1], 1 - r0[3]] });
+  // 菌環：一圈從菇柄上往下垂、往外翻的薄膜，邊緣破破的、有摺
+  const skirt = w2Grid('w2muRing', 22, 4, (i, j, out) => {
+    const k = i / 4, a = j / 22 * Math.PI * 2, rr = 0.172 + 0.075 * Math.pow(k, 0.8) + 0.012 * Math.sin(a * 9) * k, y = 0.9 - 0.15 * k - 0.02 * Math.sin(a * 5 + 1) * k;
+    out.set(Math.sin(a) * rr, y, Math.cos(a) * rr);
+  }, [ring[0], ring[3], ring[2], ring[1]]);
+  // 菌托：包著菇柄底部的破杯子
+  const cup = w2Grid('w2muVolva', 20, 3, (i, j, out) => {
+    const k = i / 3, a = j / 20 * Math.PI * 2, rr = 0.33 + 0.03 * k + 0.02 * Math.sin(a * 6) * k, y = -0.02 + 0.2 * k;
+    out.set(Math.sin(a) * rr, y, Math.cos(a) * rr);
+  }, [vol[0], vol[3], vol[2], vol[1]]);
+  return mergeParts('w2muStemAll', [[st, new THREE.Matrix4()], [skirt, new THREE.Matrix4()], [cup, new THREE.Matrix4()]]);
+}
+// 地上的小水窪（眼淚掉下去的地方）
+function w2muPuddleGeo() {
+  return mergeParts('w2muPuddles', w2muEyes().map((e, i) => {
+    const q = e.path[e.path.length - 1], s = 0.05 + e.s * 0.04;
+    return [geo('w2muPud', () => new THREE.CircleGeometry(1, 12).rotateX(-Math.PI / 2)), new THREE.Matrix4().compose(new THREE.Vector3(q.x * 1.02, 0.006 + i * 0.0003, q.z * 1.02), _qI, new THREE.Vector3(s * (1 + hash01(i) * 0.6), 1, s))];
+  }));
+}
+// ---- 千眼菇的貼圖 ----
+// 菇傘（sculptGeo 的貼圖：u 繞一圈、v 從頂上到菇柄）：暗紅色、中間深邊緣淡，一絲絲往下的纖維、一塊塊白色的疣；
+// 眼睛周圍充血、紅紅的血絲；淚痕的地方濕濕暗暗的；捲進去的邊緣是粉白色的菌肉；底下是一片片奶油粉色的菌褶
+let w2muWartList = null;
+function w2muWarts() {
+  if (w2muWartList) return w2muWartList;
+  const r = seeded(6271), out = [], eyes = w2muEyes();
+  for (let i = 0; i < 120 && out.length < 52; i++) {
+    const th = 0.12 + r() * 1.5, a = r() * Math.PI * 2 - Math.PI, d = new THREE.Vector3(Math.sin(th) * Math.sin(a), Math.cos(th), Math.sin(th) * Math.cos(a));
+    if (eyes.some(e => d.angleTo(new THREE.Vector3(Math.sin(e.th) * Math.sin(e.a), Math.cos(e.th), Math.sin(e.th) * Math.cos(e.a))) < 0.1 + e.s * 0.17)) continue;
+    out.push({ d, s: 0.035 + r() * 0.06, k: r() });
+  }
+  return (w2muWartList = out);
+}
+function w2muPaintCap(c, W, H, height) {
+  const eyes = w2muEyes().map(e => ({ d: new THREE.Vector3(Math.sin(e.th) * Math.sin(e.a), Math.cos(e.th), Math.sin(e.th) * Math.cos(e.a)), s: e.s })), warts = w2muWarts();
+  w2PaintRect(c, 0, 0, W, H, (u, t, o) => {
+    const a = W2MU_U.inv(u), th = W2MU_V.inv(1 - t), x = Math.sin(th) * Math.sin(a), y = Math.cos(th), z = Math.sin(th) * Math.cos(a);
+    const n = fbm3(x * 3, y * 3, z * 3, 5, 511), fib = fbm3(Math.cos(a) * 30, th * 3, Math.sin(a) * 30, 3, 513);
+    if (th > W2MU_T1) {
+      // 菌褶：一片一片往中間收（中間夾著暗暗的縫），越靠近菇柄越暗
+      const q = (th - W2MU_T1) / (Math.PI - W2MU_T1), gl = 0.5 + 0.5 * Math.cos(a * 96 + (fbm3(Math.cos(a) * 4, q * 3, Math.sin(a) * 4, 3, 515) - 0.5) * 4);
+      if (height) { o[0] = o[1] = o[2] = 60 + 160 * Math.pow(gl, 0.6); return; }
+      const col = w2Mix(w2Mix([206, 168, 150], [150, 96, 90], q * 0.8 + (n - 0.5) * 0.4), [70, 30, 30], Math.pow(1 - gl, 3) * 0.8);
+      o[0] = col[0]; o[1] = col[1]; o[2] = col[2]; return;
+    }
+    let wart = 0;
+    for (const w of warts) { const dd = Math.acos(clamp(x * w.d.x + y * w.d.y + z * w.d.z, -1, 1)), q = dd / w.s; if (q < 1.6) wart = Math.max(wart, sstep(1.0 + (fbm3(x * 40, y * 40, z * 40, 2, 517) - 0.5) * 0.9, 0.55, q)); }
+    // 眼睛周圍：腫起來的一圈肉（離眼睛中心 1～1.7 個眼球半徑）、眼睛邊上一道深深的縫、往外爬的血絲
+    let flush = 0, vein = 0, swell = 0, crease = 0;
+    for (const e of eyes) {
+      const dd = Math.acos(clamp(x * e.d.x + y * e.d.y + z * e.d.z, -1, 1)) / (0.078 * e.s / 0.62);
+      if (dd > 5) continue;
+      flush = Math.max(flush, sstep(3.2, 1.0, dd));
+      swell = Math.max(swell, Math.exp(-(((dd - 1.32) / 0.32) ** 2)));
+      crease = Math.max(crease, Math.exp(-(((dd - 0.98) / 0.1) ** 2)));
+      const vn = Math.abs(fbm3(x * 26, y * 26, z * 26, 4, 519) - 0.5);
+      vein = Math.max(vein, sstep(0.03, 0.0, vn) * sstep(4.5, 1.4, dd));
+    }
+    if (height) { o[0] = o[1] = o[2] = clamp(100 + 50 * (n - 0.5) + 30 * (fib - 0.5) + wart * 110 + vein * 30 + swell * 30 - crease * 70, 0, 255); return; }
+    const rim = sstep(W2MU_TR - 0.05, W2MU_TR + 0.1, th);
+    let col = w2Mix([84, 4, 12], [168, 20, 32], sstep(0.0, 1.4, th) + (n - 0.5) * 0.5);
+    col = w2Mix(col, [198, 52, 54], sstep(1.25, 1.65, th) * 0.6);
+    col = w2Mix(col, [60, 4, 10], sstep(0.55, 0.8, fbm3(x * 5, y * 5, z * 5, 3, 521)) * 0.45);
+    col = w2Mix(col, [140, 14, 26], flush * 0.6);
+    col = w2Mix(col, [176, 56, 60], swell * 0.55);
+    col = w2Mix(col, [92, 4, 10], vein * 0.8);
+    col = w2Mix(col, [40, 2, 8], crease * 0.8);
+    const k = 0.86 + 0.28 * fib;
+    col = [col[0] * k, col[1] * k, col[2] * k];
+    col = w2Mix(col, w2Mix([236, 222, 196], [196, 170, 140], fbm3(x * 30, y * 30, z * 30, 3, 523)), wart);
+    col = w2Mix(col, w2Mix([232, 196, 176], [196, 120, 112], n), rim);
+    o[0] = col[0]; o[1] = col[1]; o[2] = col[2];
+  });
+  if (height) return;
+  // 淚痕：沿著眼淚流過的路線，菇傘濕濕的、比較暗
+  c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
+  for (const e of w2muEyes()) {
+    for (const off of [0, -W, W]) {
+      c.beginPath();
+      e.path.forEach((q, k) => { const a = Math.atan2(q.x, q.z), th = Math.acos(clamp(q.y / Math.hypot(q.x, q.y, q.z), -1, 1)); const X = W2MU_U(a) * W + off, Y = (W2MU_V(clamp(e.th + (W2MU_T1 - 0.05 - e.th) * k / (e.path.length - 1), 0, Math.PI))) * H; k ? c.lineTo(X, Y) : c.moveTo(X, Y); });
+      c.strokeStyle = 'rgba(40,0,6,.18)'; c.lineWidth = 10 * e.s; c.stroke();
+      c.strokeStyle = 'rgba(30,0,4,.22)'; c.lineWidth = 3.5 * e.s; c.stroke();
+    }
+  }
+  c.restore();
+}
+// 菇柄、菌環、菌托：奶油色、一絲絲直的纖維，一圈圈淡褐色蛇皮般的鱗紋，底部沾著泥土
+function w2muPaintAtlas(c, W, H) {
+  w2PaintRect(c, 0, 0, 512, 640, (u, t, o) => {
+    const a = u * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a), n = fbm3(ca * 2, t * 5, sa * 2, 5, 531), fib = fbm3(ca * 26, t * 4, sa * 26, 3, 533);
+    const zz = 0.5 + 0.5 * Math.sin(t * 70 + Math.sin(a * 9 + t * 8) * 2.2 + (n - 0.5) * 5), scale = sstep(0.82, 0.95, zz) * sstep(0.4, 0.6, fbm3(ca * 4, t * 9, sa * 4, 3, 535)) * sstep(0.12, 0.3, t) * (1 - sstep(0.78, 0.85, t));
+    let col = w2Mix([236, 226, 198], [208, 192, 156], n);
+    col = w2Mix(col, [168, 140, 100], scale * 0.55);
+    col = w2Mix(col, [112, 86, 54], sstep(0.16, 0.0, t + (n - 0.5) * 0.1) * 0.75);
+    col = w2Mix(col, [196, 120, 100], sstep(0.9, 1.0, t) * 0.4);
+    const k = 0.84 + 0.3 * fib;
+    o[0] = col[0] * k; o[1] = col[1] * k; o[2] = col[2] * k;
+  });
+  w2PaintRect(c, 0, 640, 512, 192, (u, t, o) => {
+    const a = u * Math.PI * 2, n = fbm3(Math.cos(a) * 3, t * 3, Math.sin(a) * 3, 4, 541), fold = 0.5 + 0.5 * Math.cos(a * 30 + (n - 0.5) * 4);
+    const col = w2Mix([232, 220, 194], [176, 156, 120], (1 - t) * 0.5 + (1 - fold) * 0.3);
+    o[0] = col[0]; o[1] = col[1]; o[2] = col[2];
+    o[3] = t > 0.12 + 0.35 * fbm3(Math.cos(a) * 8, 1.3, Math.sin(a) * 8, 3, 543) ? 255 : 0;
+  });
+  w2PaintRect(c, 0, 832, 512, 192, (u, t, o) => {
+    const a = u * Math.PI * 2, n = fbm3(Math.cos(a) * 3, t * 3, Math.sin(a) * 3, 4, 551);
+    const col = w2Mix([214, 198, 164], [120, 96, 64], (1 - t) * 0.7 + (n - 0.5) * 0.4);
+    o[0] = col[0]; o[1] = col[1]; o[2] = col[2];
+    o[3] = t < 0.75 + 0.3 * (fbm3(Math.cos(a) * 9, 2.1, Math.sin(a) * 9, 3, 553) - 0.5) ? 255 : 0;
+  });
+}
+// 眼皮（u 繞左右、v 從頂上到眼瞼緣 0.78 再到裡面）：跟菇傘一樣暗紅色、一絲絲的纖維和皺紋，眼瞼緣哭得紅紅濕濕的
+function w2muPaintLid(c, W, H) {
+  w2PaintRect(c, 0, 0, W, H, (u, v, o) => {
+    v = 1 - v;
+    const n = fbm3(u * 5, v * 3, 0.4, 4, 581), fib = fbm3(u * 40, v * 4, 1.1, 3, 583), wr = Math.pow(0.5 + 0.5 * Math.cos((v * 16 + (n - 0.5) * 4) * Math.PI), 8) * sstep(0.35, 0.6, v) * (1 - sstep(0.68, 0.75, v));
+    let col = w2Mix([126, 12, 24], [174, 30, 40], n);
+    col = w2Mix(col, [204, 92, 92], sstep(0.7, 0.78, v));
+    col = w2Mix(col, [150, 36, 44], sstep(0.84, 0.92, v));
+    const k = (0.86 + 0.26 * fib) * (1 - 0.25 * wr);
+    o[0] = col[0] * k; o[1] = col[1] * k; o[2] = col[2] * k;
+  });
+}
+// 眼睛（球面貼圖，正面 u = 0.25）：哭紅了的眼白、滿滿的血絲，褐色的虹膜和很大的瞳孔
+function w2muPaintEye(c, W, H) {
+  const cx = W / 4, cy = H / 2, sc = W / 512;
+  w2PaintRect(c, 0, 0, W, H, (u, t, o) => {
+    const lon = (u - 0.25) * Math.PI * 2, lat = (t - 0.5) * Math.PI, x = Math.cos(lat) * Math.sin(lon), y = Math.sin(lat), z = Math.cos(lat) * Math.cos(lon);
+    const th = Math.acos(clamp(z, -1, 1)), n = fbm3(x * 4, y * 4, z * 4, 4, 571), rr = th / 0.42, ang = Math.atan2(y, x);
+    let col = w2Mix([240, 222, 208], [212, 110, 104], sstep(0.4, 1.3, th) * 0.8 + (n - 0.5) * 0.3);
+    if (rr < 1.05) {
+      const fib = fbm3(Math.cos(ang) * 20, Math.sin(ang) * 20, rr * 3, 3, 573);
+      let ic = w2Mix([62, 34, 18], [128, 84, 44], fib);
+      ic = w2Mix(ic, [150, 110, 60], Math.exp(-(((rr - 0.5) / 0.08) ** 2)) * 0.5);
+      ic = w2Mix(ic, [24, 14, 10], sstep(0.82, 1.0, rr));
+      ic = w2Mix(ic, [6, 4, 4], sstep(0.42, 0.36, rr));
+      col = w2Mix(col, ic, sstep(1.05, 0.97, rr));
+    }
+    o[0] = col[0]; o[1] = col[1]; o[2] = col[2];
+  });
+  overlayDetail(c, 'sclera', W, H, 2, 0.6);
+  drawVeins(c, cx, cy, 30 * sc, 120 * sc, 30, 5791, sc * 0.8, W);
+}
+function w2muMats() {
+  const cap = m5Tex('w2muCap', 1024, 512, (c, W, H) => w2muPaintCap(c, W, H, false)), capH = m5Tex('w2muCapH', 1024, 512, (c, W, H) => w2muPaintCap(c, W, H, true));
+  capH.colorSpace = THREE.NoColorSpace;
+  for (const t of [cap, capH]) t.wrapT = THREE.ClampToEdgeWrapping;
+  const atlas = m5Tex('w2muAtlas', ...W2MU_ATLAS, w2muPaintAtlas); atlas.wrapS = atlas.wrapT = THREE.ClampToEdgeWrapping;
+  const lidT = m5Tex('w2muLid', 256, 128, w2muPaintLid); lidT.wrapS = THREE.ClampToEdgeWrapping;
+  return {
+    cap: ownPhong('#ffffff', { map: cap, bumpMap: capH, bumpScale: 2.5, emissive: 0x120102, specular: 0x2a1012, shininess: 24, shade: 0.8 }),
+    stem: ownLM('#ffffff', { map: atlas, alphaTest: 0.5, side: THREE.DoubleSide, shade: 0.8 }),
+    lid: withDetail(ownPhong('#ffffff', { map: lidT, specular: 0x3a2024, shininess: 30, shade: 0.85 }), 'skin', 12, 0.9),
+    ball: wetEyeMat(m5Tex('w2muEye', 512, 256, w2muPaintEye), 0x1a1414, 0x666666),
+    tear: ownPhong('#6a8098', { transparent: true, opacity: 0.5, emissive: 0x101a28, specular: 0xffffff, shininess: 120, depthWrite: false }),
+    drop: ownPhong('#e2f0ff', { transparent: true, opacity: 0.8, emissive: 0x1a2a3c, specular: 0xffffff, shininess: 100 }),
+    pud: ownPhong('#141a22', { transparent: true, opacity: 0.35, specular: 0xffffff, shininess: 120, depthWrite: false }),
+  };
+}
+function buildShroom2(f, g) {
+  const m = w2muMats(), eyes = w2muEyes(), N = eyes.length;
+  g.add(new THREE.Mesh(w2muStemGeo(), m.stem));
+  const capG = new THREE.Group(); capG.position.y = W2MU_Y; g.add(capG);
+  capG.add(new THREE.Mesh(w2muCapAllGeo(), m.cap));
+  const balls = new THREE.InstancedMesh(geo('w2muBall', () => new THREE.SphereGeometry(1, 11, 8)), m.ball, N);
+  const lidU = new THREE.InstancedMesh(w2muLidGeo(false), m.lid, N), lidL = new THREE.InstancedMesh(w2muLidGeo(true), m.lid, N);
+  const q = new THREE.Quaternion(), mt = new THREE.Matrix4();
+  eyes.forEach((e, i) => {
+    mt.makeBasis(e.x, e.up, e.n); q.setFromRotationMatrix(mt); e.q = q.clone();
+    e.c = e.p.clone().addScaledVector(e.n, -0.1 * e.R);   // 眼球的中心（一點點埋在肉裡）
+  });
+  for (const o of [balls, lidU, lidL]) capG.add(o);
+  capG.add(new THREE.Mesh(w2muTearGeo(), m.tear));
+  const drops = new THREE.InstancedMesh(geo('w2muDrop', () => new THREE.SphereGeometry(1, 6, 4)), m.drop, N); g.add(drops);
+  g.add(new THREE.Mesh(w2muPuddleGeo(), m.pud));
+  g.traverse(o => { if (o.isMesh) { o.castShadow = o.material !== m.tear && o.material !== m.drop && o.material !== m.pud; o.receiveShadow = true; } });
+  return { g, capMat: m.cap, eyes, balls, lidU, lidL, drops, tearMat: m.tear, open: new Float32Array(N).fill(1) };
+}
+const _w2q = new THREE.Quaternion(), _w2q2 = new THREE.Quaternion(), _w2e = new THREE.Euler(), _w2v = new THREE.Vector3();
+function syncShroom2(f, r, t, p, awake) {
+  const dt = clamp(t - (r.lastT ?? t), 0, 0.1); r.lastT = t;
+  // 被手電筒照到時，菇傘上的眼睛全部閉起來（菇傘變暗）；撒孢子時發亮
+  const shut = f.shut > 0 || !awake;
+  r.capMat.emissive.setRGB(shut ? 0.02 : f.spore ? 0.3 + 0.13 * Math.sin(t * 10) : 0.1, shut ? 0.0 : f.spore ? 0.03 : 0.002, shut ? 0.004 : f.spore ? 0.04 : 0.006);
+  r.capMat.color.setRGB(shut ? 0.62 : 1, shut ? 0.52 : 1, shut ? 0.52 : 1);
+  // 每顆眼睛都轉過來盯著你（不會轉進菇傘裡），偶爾眨一下；閉起來時上下眼皮合起來
+  const s = Math.max(0.05, f.grow), lx = (p.x - f.x) / s, lz = (p.y - f.y) / s, ly = EYE / s - W2MU_Y;
+  for (let i = 0; i < r.eyes.length; i++) {
+    const e = r.eyes[i];
+    _w2v.set(lx - e.c.x, ly - e.c.y, lz - e.c.z).normalize();
+    const dn = _w2v.dot(e.n);
+    if (dn < 0.35) _w2v.addScaledVector(e.n, 0.35 - dn).normalize();
+    _q.setFromUnitVectors(Z_AXIS, _w2v);
+    _m4.compose(e.c, _q, _v2.setScalar(e.R)); r.balls.setMatrixAt(i, _m4);
+    const bl = ((t * 0.23 + e.blink) % 1) < 0.025 ? 0 : 1, want = shut ? 0 : bl;
+    r.open[i] += (want - r.open[i]) * Math.min(1, dt * (want ? 6 : 14));
+    const k = 1 - r.open[i];
+    for (const [lid, rx] of [[r.lidU, -0.28 + 0.78 * k], [r.lidL, 0.2 - 0.7 * k]]) {
+      _w2q.setFromEuler(_w2e.set(rx, 0, 0)); _w2q2.copy(e.q).multiply(_w2q);
+      _m4.compose(e.c, _w2q2, _v2.setScalar(e.R)); lid.setMatrixAt(i, _m4);
+    }
+  }
+  r.balls.instanceMatrix.needsUpdate = r.lidU.instanceMatrix.needsUpdate = r.lidL.instanceMatrix.needsUpdate = true;
+  // 眼淚一直流：淚珠沿著淚痕滑到菇傘邊緣、在邊上變大，再掉到地上
+  r.tearMat.opacity = 0.45 + 0.08 * Math.sin(t * 1.7 + f.x);
+  for (let i = 0; i < r.eyes.length; i++) {
+    const e = r.eyes[i], P = e.path, k = (t * 0.22 + e.ph) % 1.5;
+    if (k < 1) { const x = k * (P.length - 1), j = Math.min(P.length - 2, x | 0); _v.lerpVectors(P[j], P[j + 1], x - j); _v.y += W2MU_Y; _m4.compose(_v, _qI, _v2.set(0.012, 0.016, 0.012)); }
+    else if (k < 1.2) { const q = P[P.length - 1], g2 = (k - 1) / 0.2; _v.set(q.x, q.y + W2MU_Y - 0.008 - g2 * 0.01, q.z); _m4.compose(_v, _qI, _v2.set(0.012 + g2 * 0.006, 0.016 + g2 * 0.012, 0.012 + g2 * 0.006)); }
+    else { const q = P[P.length - 1], g2 = (k - 1.2) / 0.3, y = q.y + W2MU_Y - 0.02 - g2 * g2 * (q.y + W2MU_Y); _v.set(q.x, Math.max(0.01, y), q.z); _m4.compose(_v, _qI, _v2.set(0.012, 0.03, 0.012)); }
+    r.drops.setMatrixAt(i, _m4);
+  }
+  r.drops.instanceMatrix.needsUpdate = true;
+}
+const W2MU_FLOWER = { build: buildShroom2, sync: syncShroom2 };
+UPG.shroom = { flower: W2MU_FLOWER, build: (r, g) => w2FakeFlower('shroom', r, g, W2MU_FLOWER), sync: w2FakeSync(W2MU_FLOWER), view: { h: 1.95, d: 3.7 } };   // 鏡頭跟圖鑑的 BOOK_VIEW.shroom 一樣
+
 // ---------- 第二世界到這裡 ----------
 
 
