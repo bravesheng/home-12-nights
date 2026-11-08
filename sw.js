@@ -46,6 +46,9 @@ const ASSETS = [
   './tex/m5-w2glLimb.webp', './tex/m5-w2glHead.webp', './tex/m5-w2glTop.webp', './tex/m5-w2glSkirt.webp', './tex/m5-w2glHair.webp', './tex/m5-w2glPetal.webp',
 
   // 第三世界重做的怪物（新的檔名加在這一行下面）
+  './tex/m5-krSkin.webp', './tex/m5-krHead.webp', './tex/m5-krCap.webp', './tex/m5-krCapE.webp', './tex/m5-krEye.webp', './tex/m5-krRag.webp', './tex/m5-krStrip.webp',
+  './tex/m5-wlSkull.webp', './tex/m5-wlPlate.webp', './tex/m5-wlCloak.webp', './tex/m5-wlWrap.webp',
+  './tex/m5-twFur.webp', './tex/m5-twHead.webp', './tex/m5-twStrand.webp', './tex/m5-twEye.webp',
 
   // 第四世界重做的怪物（新的檔名加在這一行下面）
 
