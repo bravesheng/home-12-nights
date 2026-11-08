@@ -3480,7 +3480,7 @@ function syncMonster4(e, r, t, p, d, dt) {
       // 眼睛：醒著睜得很大、一直盯著你（鏡頭）；睡著眼皮半閉、慢慢飄來飄去，偶爾眨一下
       const v = _shakeV.copy(camera.position); r.eyeG.parent.worldToLocal(v);
       const ly = clamp(Math.atan2(v.x, v.z), -0.75, 0.75), lx = clamp(-Math.atan2(v.y, Math.hypot(v.x, v.z)), -0.5, 0.5);
-      const blink = Math.sin(t * 0.8 + (e.x || 0) * 3.1) > 0.985 ? 1 : 0;
+      const blink = Math.sin(t * 0.8 + (e.x || 0) * 3.1) > 0.992 ? 1 : 0;
       if (awake) { r.eyeG.rotation.y += (ly - r.eyeG.rotation.y) * Math.min(1, dt * 10); r.eyeG.rotation.x += (lx - r.eyeG.rotation.x) * Math.min(1, dt * 10); }
       else { r.eyeG.rotation.y = Math.sin(t * 0.4 + (e.y || 0)) * 0.35; r.eyeG.rotation.x = 0.15; }
       const k = Math.max(blink, awake ? 0 : 0.5);
@@ -6281,6 +6281,306 @@ UPG.shadow = { build: buildShadow, sync: syncShadow, view: { h: 1.9, d: 3.7, cy:
 
 
 // ---------- 第四世界重做的怪物（葵氏奶昔、紅涎偽人、SCP-3008-2、Hubert、燼皇） ----------
+// 這一塊自己用的小工具都是 w4u 開頭。
+// 一塊一塊的網格合成一個：grid(ss, ts, f, rect) 加一塊，ss、ts 是 0～1 的分割，f(s, t, v) 把 (s, t) 變成位置
+// （s 從外面看是左到右、t 是上到下，三角形就會朝外）；rect 是那一塊在貼圖上的位置 [x, y, 寬, 高]（畫布的像素，畫布 TW×TH）。
+// 每一塊的頂點分開（紙盒的邊是摺出來的硬邊），法線各自算
+function w4uPatches(TW, TH) {
+  const P = [], U = [], I = [], v = new THREE.Vector3();
+  const api = {
+    grid(ss, ts, f, rect) {
+      const o = P.length / 3, n = ss.length;
+      for (const t of ts) for (const s of ss) { f(s, t, v); P.push(v.x, v.y, v.z); U.push((rect[0] + s * rect[2]) / TW, 1 - (rect[1] + t * rect[3]) / TH); }
+      for (let j = 0; j < ts.length - 1; j++) for (let i = 0; i < n - 1; i++) { const a = o + j * n + i, b = a + 1, c = a + n, d = c + 1; I.push(a, c, b, b, c, d); }
+      return api;
+    },
+    // 自己排好的頂點：pos、uv（0～1）、三角形（從 0 開始數）
+    raw(pos, uv, idx) { const o = P.length / 3; for (const x of pos) P.push(x); for (const x of uv) U.push(x); for (const k of idx) I.push(k + o); return api; },
+    build() {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
+      g.setIndex(I); g.computeVertexNormals();
+      return g;
+    },
+  };
+  return api;
+}
+const w4uLin = n => Array.from({ length: n + 1 }, (_, i) => i / n);
+
+// ---------- 葵氏奶昔 ----------
+// 照設計圖（1792913783585_1.jpg）和設計師說的「眼睛要畫出來」：一盒 50 公分高的屋頂形紙盒，泛白的紙板、受潮的污漬，
+// 上下各兩條紅條紋，屋脊插著一根白吸管；正面嵌著一顆真的人眼，大約佔紙盒寬度的六成：
+// 紙板到了眼睛周圍變成紅腫、有皺紋的肉，上下眼皮包著凸出來的眼球（泛黃的眼白、細細的血絲、灰色的小虹膜、黑瞳孔，瞪得很大）。
+// 眼皮是紙盒正面的網格貼著眼球雕出來的（crSnapLid）；睡著時另外一片眼皮從上眼皮裡面蓋下來一半，偶爾眨眼
+const SHK = { W: 0.32, H: 0.5, roof: 0.13, fin: 0.05, ft: 0.006, R: 0.103, ex: 0.004, ey: 0.285 };
+SHK.zc = SHK.W / 2 - 0.55 * SHK.R;   // 眼球中心的深度：眼球往外凸出一半左右
+const SHK_LID = { w: 0.95, hu: 0.53, hl: 0.5, lift: 0.06 };          // 眼睛的開口（乘眼球半徑）：寬寬的杏仁形，內眼角在左邊（-x）
+const SHK_LIDROT = [-1.25, 0.62];                                     // 會動的那片眼皮：收在上眼皮裡、整個蓋住
+const SHK_STRIPE = [0.0425, 0.09, 0.4, 0.4475], SHK_SW = 0.0085;    // 紅條紋的高度（公尺）、半寬
+// 貼圖（1024×512）上每一面的位置 [x, y, 寬, 高]：正面一公尺 1000 像素、其他面 500
+const SHK_UV = {
+  F: [0, 0, 320, 500], L: [320, 0, 160, 250], Rt: [480, 0, 160, 250], B: [640, 0, 160, 250], RF: [320, 250, 160, 104], RB: [480, 250, 160, 104],
+  GL: [640, 250, 160, 66], GR: [640, 316, 160, 66], FF: [800, 0, 160, 26], FB: [800, 26, 160, 26], FT: [800, 52, 160, 6], Bt: [800, 60, 160, 160], St: [976, 0, 40, 500],
+};
+// 每一面 (s, t) → 位置（還沒有鼓起來）：四個側面、屋頂的前後兩片斜面、左右兩個三角形、屋脊的封口（前、後、頂、兩端）、底
+const SHK_FACE = (() => {
+  const { W, H, roof, fin, ft } = SHK, w = t => ft + (W / 2 - ft) * t;
+  return {
+    F: (s, t, v) => v.set(-W / 2 + s * W, H * (1 - t), W / 2),
+    L: (s, t, v) => v.set(-W / 2, H * (1 - t), -W / 2 + s * W),
+    Rt: (s, t, v) => v.set(W / 2, H * (1 - t), W / 2 - s * W),
+    B: (s, t, v) => v.set(W / 2 - s * W, H * (1 - t), -W / 2),
+    RF: (s, t, v) => v.set(-W / 2 + s * W, H + roof * (1 - t), w(t)),
+    RB: (s, t, v) => v.set(W / 2 - s * W, H + roof * (1 - t), -w(t)),
+    GL: (s, t, v) => v.set(-W / 2, H + roof * (1 - t), (s * 2 - 1) * w(t)),
+    GR: (s, t, v) => v.set(W / 2, H + roof * (1 - t), (1 - s * 2) * w(t)),
+    FF: (s, t, v) => v.set(-W / 2 + s * W, H + roof + fin * (1 - t), ft),
+    FB: (s, t, v) => v.set(W / 2 - s * W, H + roof + fin * (1 - t), -ft),
+    FT: (s, t, v) => v.set(-W / 2 + s * W, H + roof + fin, -ft + 2 * ft * t),
+    FL: (s, t, v) => v.set(-W / 2, H + roof + fin * (1 - t), -ft + 2 * ft * s),
+    FR: (s, t, v) => v.set(W / 2, H + roof + fin * (1 - t), ft - 2 * ft * s),
+    Bt: (s, t, v) => v.set(-W / 2 + s * W, 0, W / 2 - t * W),
+  };
+})();
+// 裝滿的紙盒每一面中間微微鼓起來，還有一點壓凹的地方（邊上不動，才接得起來）
+const shkBulge = (s, t, v) => Math.sin(Math.PI * s) * (0.0045 * Math.sin(Math.PI * t) ** 0.6 + 0.005 * (fbm3(v.x * 8, v.y * 8, v.z * 8, 3, 5) - 0.5) * Math.sin(Math.PI * t));
+// 眼睛周圍腫起來的肉：整片腫、下眼皮底下的眼袋、上眼皮上面的一道肉摺（離正面的邊緣近就收掉）
+function shkPuff(x, y) {
+  const { W, H, R, ex, ey } = SHK, dx = x - ex, dy = y - ey, g = (a, b) => Math.exp(-a * a - b * b);
+  const p = 0.011 * g(dx / (1.45 * R), dy / (1.15 * R)) + 0.005 * g((dx + 0.1 * R) / (0.75 * R), (dy + 0.74 * R) / (0.2 * R)) + 0.004 * g(dx / (0.9 * R), (dy - 0.8 * R) / (0.18 * R));
+  return p * sstep(0, 0.035, W / 2 - Math.abs(x)) * sstep(0, 0.04, y) * sstep(0, 0.04, H - y);
+}
+// 正面：以眼睛為中心一圈一圈往外排，每條放射線都有一個點剛好在眼皮的邊緣上（rho：沿著這條線走到開口邊緣多遠），
+// 裡面幾圈縮進眼窩（眼瞼緣）、外面幾圈越來越疏，最外圈剛好是正面的四個邊（四個角各有一條放射線）
+function shkFront(pp) {
+  const { W, H, R, ex, ey, zc } = SHK, NA = 56, C = new THREE.Vector3(ex, ey, zc), v = new THREE.Vector3();
+  const ang = Array.from({ length: NA }, (_, j) => -Math.PI + (j + 0.5) / NA * Math.PI * 2);
+  for (const [x, y] of [[W / 2, H], [-W / 2, H], [-W / 2, 0], [W / 2, 0]]) {
+    const ca = Math.atan2(y - ey, x - ex);
+    let bi = 0;
+    for (let j = 1; j < NA; j++) if (Math.abs(angD(ang[j], ca)) < Math.abs(angD(ang[bi], ca))) bi = j;
+    ang[bi] = ca;
+  }
+  const IN = [0, 0.3, 0.6, 0.8, 0.9, 0.96], OFF = [0, 0.004, 0.01, 0.017, 0.025, 0.035, 0.047, 0.06], RO = [0.25, 0.5, 0.75, 1];
+  const rows = IN.length + OFF.length + RO.length, [u0, v0, uw, vh] = SHK_UV.F, pos = [], uv = [], idx = [];
+  for (let j = 0; j < NA; j++) {
+    const c = Math.cos(ang[j]), s = Math.sin(ang[j]);
+    let d = Infinity;
+    if (c > 1e-6) d = Math.min(d, (W / 2 - ex) / c);
+    if (c < -1e-6) d = Math.min(d, (-W / 2 - ex) / c);
+    if (s > 1e-6) d = Math.min(d, (H - ey) / s);
+    if (s < -1e-6) d = Math.min(d, -ey / s);
+    let lo = 0, hi = 1.6 * R;
+    for (let k = 0; k < 30; k++) { const m = (lo + hi) / 2; if (crLidE(c * m, s * m, R, SHK_LID).e < 0) lo = m; else hi = m; }
+    const rho = (lo + hi) / 2, r1 = rho + OFF[OFF.length - 1];
+    const rs = [...IN.map(k => k * rho), ...OFF.map(o => rho + o), ...RO.map(k => r1 + (d - r1) * k)];
+    rs.forEach((rr, i) => {
+      const x = clamp(ex + c * rr, -W / 2, W / 2), y = clamp(ey + s * rr, 0, H);
+      v.set(x, y, W / 2); v.z += shkBulge((x + W / 2) / W, 1 - y / H, v) + shkPuff(x, y);
+      shkSnap(v, C, x - ex, y - ey);
+      const k = i * NA + j;
+      pos[k * 3] = v.x; pos[k * 3 + 1] = v.y; pos[k * 3 + 2] = v.z;
+      uv[k * 2] = (u0 + (v.x + W / 2) / W * uw) / 1024; uv[k * 2 + 1] = 1 - (v0 + (1 - v.y / H) * vh) / 512;
+    });
+  }
+  for (let i = 0; i < rows - 1; i++) for (let j = 0; j < NA; j++) { const a = i * NA + j, b = i * NA + (j + 1) % NA, c = a + NA, d = b + NA; idx.push(a, c, b, b, c, d); }
+  pp.raw(pos, uv, idx);
+}
+// 把正面的點貼到眼球外面變成眼皮（照 crSnapLid 的做法，眼球朝 +z）：上下眼皮的厚度在兩個眼角外面平滑地接起來，
+// 不然眼角往外會有一條水平的斷層
+const _shkQ = new THREE.Vector3();
+function shkSnap(P, C, dx, dy) {
+  const R = SHK.R, S = SHK_LID, L = crLidE(dx, dy, R, S), e = L.e, w = 1 - sstep(0.4 * R, 0.9 * R, e);
+  if (w <= 0) return;
+  if (e < 0 && e > -0.2 * R && Math.abs(dx) < S.w * R) P.y += (L.upper ? L.top : L.bot) - dy;
+  const wu = sstep(-0.15 * R, 0.15 * R, dy - (L.top + L.bot) / 2);
+  const lx = P.x - C.x, ly = P.y - C.y, zP = P.z - C.z, l = Math.hypot(lx, ly), rT = R + crLidT(e, false, R) * (1 - wu) + crLidT(e, true, R) * wu;
+  const zS = l < rT ? Math.sqrt(rT * rT - l * l) : 0;
+  const z = e < 0 ? zS : e < 0.25 * R ? zS + (Math.max(zS, zP) - zS) * sstep(0, 0.25 * R, e) : Math.max(zS, zP);
+  P.lerp(_shkQ.set(C.x + lx, C.y + ly, C.z + z), w);
+}
+// 整個紙盒（加上吸管）合成一個網格
+function shkGeo() {
+  return geo('shkCarton', () => {
+    const pp = w4uPatches(1024, 512), { H, roof, fin } = SHK;
+    shkFront(pp);
+    for (const [key, nx, nz] of [['L', -1, 0], ['Rt', 1, 0], ['B', 0, -1]]) pp.grid(w4uLin(6), w4uLin(10), (s, t, v) => { SHK_FACE[key](s, t, v); const b = shkBulge(s, t, v); v.x += nx * b; v.z += nz * b; }, SHK_UV[key]);
+    for (const key of ['RF', 'RB', 'GL', 'GR']) pp.grid(w4uLin(4), w4uLin(3), SHK_FACE[key], SHK_UV[key]);
+    for (const key of ['FF', 'FB']) pp.grid(w4uLin(4), [0, 1], SHK_FACE[key], SHK_UV[key]);
+    for (const key of ['FT', 'FL', 'FR']) pp.grid([0, 1], [0, 1], SHK_FACE[key], SHK_UV.FT);
+    pp.grid([0, 1], [0, 1], SHK_FACE.Bt, SHK_UV.Bt);
+    // 吸管：從屋脊斜斜地插出來
+    const A = new THREE.Vector3(0.055, H + roof - 0.03, 0), B = new THREE.Vector3(0.082, H + roof + fin + 0.16, -0.014), dir = B.clone().sub(A).normalize();
+    const u = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(1, 0, 0)).normalize(), w = new THREE.Vector3().crossVectors(dir, u);
+    pp.grid(w4uLin(8), [0, 1], (s, t, v) => { const a = s * Math.PI * 2; v.copy(B).lerp(A, t).addScaledVector(u, Math.cos(a) * 0.0065).addScaledVector(w, Math.sin(a) * 0.0065); }, SHK_UV.St);
+    return pp.build();
+  });
+}
+// 紙板：泛白、有一點粉紅，細細的紙纖維，受潮的黃褐色水漬（乾掉的邊緣顏色比較深）；四個側面印著紅條紋（摺邊的油墨磨掉了），底下沾到地上的髒
+function shkPaper(v, key, s, t) {
+  const { x, y, z } = v, { W } = SHK;
+  const grain = fbm3(x * 70, y * 70, z * 70, 3, 11) - 0.5, fib = fbm3(x * 190, y * 24, z * 190, 2, 13) - 0.5;
+  let r = 238 + grain * 16 + fib * 7, g = 225 + grain * 15 + fib * 7, b = 216 + grain * 14 + fib * 6;
+  const st = sstep(0.6, 0.75, fbm3(x * 5 + 3, y * 5, z * 5, 4, 23));
+  r -= st * 7; g -= st * 12; b -= st * 20;
+  if (key === 'F' || key === 'L' || key === 'Rt' || key === 'B') {
+    const edge = Math.min(s, 1 - s) * W;
+    let ink = 0;
+    const wob = (fbm3(x * 20, 0.5, z * 20, 2, 41) - 0.5) * 0.0016;
+    for (const sy of SHK_STRIPE) ink = Math.max(ink, 1 - sstep(SHK_SW - 0.0011, SHK_SW + 0.0011, Math.abs(y - sy + wob)));
+    const wear = clamp(1 - sstep(0.0015, 0.006, edge) + sstep(0.7, 0.84, fbm3(x * 34, y * 34, z * 34, 3, 37)) * 0.55, 0, 1);
+    ink *= 1 - 0.75 * wear;
+    r += (182 - r) * ink; g += (68 - g) * ink; b += (70 - b) * ink;
+    const fold = Math.exp(-((edge / 0.0018) ** 2)) * 0.13 + Math.exp(-(((SHK.H - y) / 0.0018) ** 2)) * 0.1;
+    const low = (1 - sstep(0, 0.05, y + grain * 0.02)) * 0.16;
+    r *= 1 - fold - low; g *= 1 - fold - low * 1.1; b *= 1 - fold - low * 1.2;
+  } else if (key === 'RF' || key === 'RB') {
+    const L = 0.206, fold = Math.exp(-((((1 - t) * L) / 0.002) ** 2)) * 0.14 + Math.exp(-(((t * L) / 0.003) ** 2)) * 0.1;
+    r *= 1 - fold; g *= 1 - fold; b *= 1 - fold;
+  } else if (key === 'Bt') { r *= 0.7; g *= 0.68; b *= 0.66; }
+  return [r, g, b];
+}
+// 正面眼睛周圍的肉：回傳 [r, g, b, 肉有多少]。越靠近眼睛越紅腫，上眼皮一道摺痕、下眼皮幾條細紋、外眼角的魚尾紋、
+// 濕濕的紅色眼瞼緣、內眼角粉紅色的淚阜；肉的邊緣跟紙板混在一起，血色往外暈開
+function shkFlesh(x, y) {
+  const { R, ex, ey } = SHK, dx = x - ex, dy = y - ey, L = crLidE(dx, dy, R, SHK_LID), e = L.e;
+  const nz = fbm3(x * 40, y * 40, 1.3, 3, 51), nz2 = fbm3(x * 130, y * 130, 2.1, 2, 53) - 0.5;
+  if (e > 0.12) return [0, 0, 0, 0, 0];
+  const wu = sstep(-0.015, 0.015, dy - (L.top + L.bot) / 2), lim = 0.052 - 0.01 * wu, fl = 1 - sstep(lim - 0.012, lim + 0.012, e + (nz - 0.5) * 0.028);
+  const halo = (1 - sstep(lim, lim + 0.09, e + (nz - 0.5) * 0.05)) * 0.5;
+  let r = 212 + nz2 * 22, g = 136 + nz2 * 18, b = 122 + nz2 * 16;
+  const near = 1 - sstep(0, 0.022, e);
+  r += (176 - r) * near; g += (72 - g) * near; b += (70 - b) * near;
+  // 摺痕和細紋只在眼睛上下，往兩邊的眼角淡掉，斷斷續續的（不是一圈一圈）
+  const side = 1 - sstep(0.55, 0.95, Math.abs(dx) / (SHK_LID.w * R)), brk = sstep(0.35, 0.65, fbm3(x * 45, y * 45, 3.3, 3, 57));
+  const ln = wu * (0.3 * Math.exp(-(((e - 0.018) / 0.0024) ** 2)) * (0.4 + 0.6 * brk) + 0.1 * Math.exp(-(((e - 0.028) / 0.002) ** 2)) * brk)
+    + (1 - wu) * (0.15 * Math.exp(-(((e - 0.012) / 0.0018) ** 2)) * brk + 0.1 * Math.exp(-(((e - 0.026) / 0.002) ** 2)) * (1 - brk));
+  let wr = ln * side;
+  if (dx > 0.05) { const a = Math.atan2(dy, dx - 0.098), k = sstep(0.07, 0.1, dx) * (1 - sstep(0.13, 0.155, dx)); wr += Math.max(0, Math.sin(a * 24 + nz * 7)) ** 12 * 0.1 * k * brk; }
+  r *= 1 - wr; g *= 1 - wr * 1.15; b *= 1 - wr * 1.15;
+  const rim = 1 - sstep(0, 0.0045, e);
+  r += (146 - r) * rim; g += (46 - g) * rim; b += (52 - b) * rim;
+  const car = Math.exp(-(((dx + 0.093) / 0.011) ** 2) - (((dy + 0.004) / 0.009) ** 2));
+  r += (204 - r) * car; g += (104 - g) * car; b += (104 - b) * car;
+  if (e < 0) { const q = sstep(0, 0.012, -e); r = 146 - 96 * q; g = 46 - 34 * q; b = 52 - 38 * q; }   // 縮進眼窩的眼瞼緣：濕濕的紅，越裡面越暗
+  return [r, g, b, fl, halo];
+}
+// 吸管：白色的塑膠，一邊亮一邊暗；插在紙盒裡的那段灰一點
+function shkStraw(s, t) {
+  const k = 0.88 + 0.12 * Math.cos(s * Math.PI * 2) - (t > 0.82 ? 0.15 : 0);
+  return [246 * k, 246 * k, 242 * k];
+}
+function shkPaintCarton(c, TW, TH) {
+  const img = c.createImageData(TW, TH), d = img.data, v = new THREE.Vector3(), [fx0, fy0, fw, fh] = SHK_UV.F, fleshK = new Float32Array(fw * fh);
+  for (const [key, rect] of Object.entries(SHK_UV)) {
+    const [x0, y0, w, h] = rect, f = SHK_FACE[key];
+    for (let py = y0; py < y0 + h; py++) for (let px = x0; px < x0 + w; px++) {
+      const s = (px - x0 + 0.5) / w, t = (py - y0 + 0.5) / h, i = (py * TW + px) * 4;
+      let col;
+      if (key === 'St') col = shkStraw(s, t);
+      else {
+        f(s, t, v); col = shkPaper(v, key, s, t);
+        if (key === 'F') {
+          const [r, g, b, k, halo] = shkFlesh(v.x, v.y);
+          col[0] += (226 - col[0]) * halo; col[1] += (168 - col[1]) * halo; col[2] += (158 - col[2]) * halo;
+          col[0] += (r - col[0]) * k; col[1] += (g - col[1]) * k; col[2] += (b - col[2]) * k;
+          fleshK[(py - y0) * fw + px - x0] = k;
+        }
+      }
+      d[i] = clamp(col[0], 0, 255); d[i + 1] = clamp(col[1], 0, 255); d[i + 2] = clamp(col[2], 0, 255); d[i + 3] = 255;
+    }
+  }
+  c.putImageData(img, 0, 0);
+  // 皮膚的毛孔和細紋（照片）只疊在肉上
+  if (photos['d-skin']) {
+    const tmp = document.createElement('canvas'); tmp.width = fw; tmp.height = fh;
+    const tc = tmp.getContext('2d', { willReadFrequently: true });
+    tc.drawImage(c.canvas, fx0, fy0, fw, fh, 0, 0, fw, fh);
+    overlayDetail(tc, 'skin', fw, fh, 2.5, 1);
+    const a = c.getImageData(fx0, fy0, fw, fh), b = tc.getImageData(0, 0, fw, fh);
+    for (let k = 0; k < fw * fh; k++) { const m = fleshK[k] * 0.9; for (let q = 0; q < 3; q++) a.data[k * 4 + q] += (b.data[k * 4 + q] - a.data[k * 4 + q]) * m; }
+    c.putImageData(a, fx0, fy0);
+  }
+}
+// 眼白：泛黃，越往旁邊越黃、越紅，細細的血絲（球面貼圖，正面 u = 0.25）
+function shkPaintSclera(c, W, H) {
+  const cx = W / 4, cy = H / 2, img = c.createImageData(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const lon = (x - cx) / W * Math.PI * 2, lat = (cy - y) / H * Math.PI, th = Math.acos(clamp(Math.cos(lat) * Math.cos(lon), -1, 1)), k = clamp((th - 0.4) / 1.3, 0, 1), i = (y * W + x) * 4;
+    const n = fbm3(Math.cos(lat) * Math.cos(lon) * 3, Math.sin(lat) * 3, Math.cos(lat) * Math.sin(lon) * 3, 3, 61) - 0.5;
+    w4uPx(img.data, i, 238 - k * 26 + n * 10, 228 - k * 78 + n * 12, 200 - k * 84 + n * 10);
+  }
+  c.putImageData(img, 0, 0);
+  overlayDetail(c, 'sclera', W, H, 2, 0.55);
+  drawVeins(c, cx, cy, 30, 128, 16, 7311, 0.6, W);
+}
+const w4uPx = (a, i, r, g, b) => { a[i] = clamp(r, 0, 255); a[i + 1] = clamp(g, 0, 255); a[i + 2] = clamp(b, 0, 255); a[i + 3] = 255; };
+// 虹膜：灰色、靠近瞳孔帶一點褐色，一絲一絲的放射紋、深色的外圈、黑瞳孔
+function shkPaintIris(c) {
+  const rr = seeded(4403), g = c.createRadialGradient(128, 128, 40, 128, 128, 124);
+  g.addColorStop(0, '#5e5548'); g.addColorStop(0.3, '#77736a'); g.addColorStop(0.75, '#6e6c66'); g.addColorStop(1, '#3c3c3a');
+  c.fillStyle = g; c.beginPath(); c.arc(128, 128, 126, 0, 7); c.fill();
+  c.lineWidth = 2;
+  for (let i = 0; i < 170; i++) { const a = i / 170 * Math.PI * 2 + rr() * 0.03; c.strokeStyle = `rgba(${rr() < 0.5 ? '30,30,28' : '200,198,190'},${(0.14 + rr() * 0.24).toFixed(2)})`; c.beginPath(); c.moveTo(128 + Math.cos(a) * 50, 128 + Math.sin(a) * 50); c.lineTo(128 + Math.cos(a) * (98 + rr() * 24), 128 + Math.sin(a) * (98 + rr() * 24)); c.stroke(); }
+  c.strokeStyle = 'rgba(24,24,24,.85)'; c.lineWidth = 12; c.beginPath(); c.arc(128, 128, 120, 0, 7); c.stroke();
+  c.fillStyle = '#060505'; c.beginPath(); c.arc(128, 128, 46, 0, 7); c.fill();
+  c.fillStyle = 'rgba(255,255,255,.8)'; c.beginPath(); c.arc(102, 98, 11, 0, 7); c.fill();
+}
+// 會動的那片眼皮（球殼，v = 1 是頂、v = 0 是邊緣）：肉色，邊緣一圈暗紅的眼瞼緣和睫毛的根，上面一道淡淡的摺痕
+function shkPaintLid(c, W, H) {
+  const img = c.createImageData(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const v = 1 - (y + 0.5) / H, n = fbm3(x / W * 6, v * 6, 0.7, 3, 71) - 0.5, edge = 1 - sstep(0.02, 0.09, v), crease = Math.exp(-(((v - 0.42) / 0.05) ** 2)) * 0.18;
+    const r = (206 + n * 20) * (1 - crease), g = (134 + n * 16) * (1 - crease * 1.15), b = (120 + n * 14) * (1 - crease * 1.15);
+    w4uPx(img.data, (y * W + x) * 4, r + (70 - r) * edge, g + (26 - g) * edge, b + (28 - b) * edge);
+  }
+  c.putImageData(img, 0, 0);
+}
+function shkBuild(r, g) {
+  const T = { transparent: true }, R = SHK.R;
+  const carton = ownPhong('#ffffff', { map: m5Tex('shkCarton', 1024, 512, shkPaintCarton), specular: 0x2a2624, shininess: 20, shade: 0.75, ...T });
+  r.ballM = wetEyeMat(m5Tex('shkSclera', 512, 256, shkPaintSclera), 0x1e1a14, 0x555555, T);
+  const iris = wetEyeMat(m5Tex('shkIris', 256, 256, shkPaintIris), 0x060606, 0x888888, T);
+  const lidM = withDetail(ownPhong('#ffffff', { map: m5Tex('shkLid', 128, 128, shkPaintLid), specular: 0x2a1a18, shininess: 24, shade: 0.75, ...T }), 'skin', 12, 1.1);
+  r.mats.push(carton, r.ballM, iris, lidM);
+  r.body = new THREE.Group(); g.add(r.body);
+  r.carton = new THREE.Group(); r.body.add(r.carton);
+  r.carton.add(new THREE.Mesh(shkGeo(), carton));
+  // 眼睛：眼球和虹膜一起轉（gaze），眨眼的眼皮另外開闔
+  r.sock = new THREE.Group(); r.sock.position.set(SHK.ex, SHK.ey, SHK.zc); r.carton.add(r.sock);
+  r.gaze = new THREE.Group(); r.gaze.rotation.order = 'YXZ'; r.sock.add(r.gaze);
+  r.gaze.add(new THREE.Mesh(geo('shkBall', () => new THREE.SphereGeometry(R, 24, 16)), r.ballM));
+  r.gaze.add(new THREE.Mesh(irisGeo('shkIris', R, R * 0.33, 0), iris));
+  r.lid = new THREE.Mesh(lidGeo('shkLid', R * 1.08, 0, 1.45), lidM); r.lid.rotation.x = SHK_LIDROT[0]; r.lid.visible = false; r.sock.add(r.lid);
+}
+const _shkV = new THREE.Vector3();
+function shkSync(e, r, t, p, dt) {
+  const awake = !!e.awake;
+  r.g.position.y = floorH(e.x, e.y);
+  // 眼睛：醒著瞪得很大、一直盯著你（鏡頭）；睡著慢慢飄來飄去
+  const cam = r.g.parent === book.scene ? book.cam : camera, v = _shkV.copy(cam.position); r.sock.worldToLocal(v);
+  const ty = awake ? clamp(Math.atan2(v.x, v.z), -0.55, 0.55) : Math.sin(t * 0.4 + (e.y || 0)) * 0.3;
+  const tx = awake ? clamp(-Math.atan2(v.y, Math.hypot(v.x, v.z)), -0.22, 0.22) : 0.1 + Math.sin(t * 0.3 + (e.x || 0)) * 0.06;   // 往上看不要轉太多，虹膜才不會躲到上眼皮裡
+  const k = Math.min(1, dt * (awake ? 12 : 2));
+  r.gaze.rotation.y += (ty - r.gaze.rotation.y) * k; r.gaze.rotation.x += (tx - r.gaze.rotation.x) * k;
+  // 眼皮：醒著收在上眼皮裡；睡著蓋下來一半，偶爾眨一下
+  const blink = Math.sin(t * 0.8 + (e.x || 0) * 3.1) > 0.992 ? 1 : 0, shut = Math.max(blink, awake ? 0 : 0.7);
+  r.lidK = (r.lidK ?? shut) + (shut - (r.lidK ?? shut)) * Math.min(1, dt * 16);
+  r.lid.rotation.x = SHK_LIDROT[0] + (SHK_LIDROT[1] - SHK_LIDROT[0]) * r.lidK; r.lid.visible = r.lidK > 0.03;
+  r.ballM.emissive.setRGB(awake ? 0.13 : 0.08, awake ? 0.1 : 0.07, awake ? 0.08 : 0.06);   // 黑暗中淡淡看得到眼白
+  if (!awake) {
+    // 睡著：像一盒放在地上的奶昔，站著、稍微歪一邊
+    r.g.rotation.y = faceRot(e.face || 0);
+    r.carton.rotation.set(0, 0, 0.06); r.carton.position.set(0, 0, 0); r.carton.scale.set(1, 1, 1);
+    return;
+  }
+  // 醒著：一跳一跳（落地時壓扁一點），噴奶時往後仰
+  const hop = Math.abs(Math.sin((e.hopT || 0) * 7)), spit = e.spitT > 3.6 ? (e.spitT - 3.6) / 0.4 : 0;
+  r.carton.rotation.set(-0.35 * spit, 0, Math.sin((e.hopT || 0) * 7) * 0.08);
+  r.carton.position.set(0, hop * 0.22, 0);
+  r.carton.scale.set(1 + (1 - hop) * 0.08, 1 - (1 - hop) * 0.12, 1 + (1 - hop) * 0.08);
+}
+UPG.shake = { build: shkBuild, sync: shkSync, view: { h: 0.72, d: 1.75, cy: 0.33 } };
 
 // ---------- 第四世界到這裡 ----------
 

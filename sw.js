@@ -34,6 +34,7 @@ const ASSETS = [
   // 第三世界重做的怪物（新的檔名加在這一行下面）
 
   // 第四世界重做的怪物（新的檔名加在這一行下面）
+  './tex/m5-shkCarton.webp', './tex/m5-shkSclera.webp', './tex/m5-shkIris.webp', './tex/m5-shkLid.webp',
 
 ];
 
