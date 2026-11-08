@@ -33,6 +33,7 @@ const ASSETS = [
   './tex/m5-blSkin.webp', './tex/m5-blBump.webp', './tex/m5-blEye.webp', './tex/m5-blEyeGlow.webp',
   './tex/m5-efStem.webp', './tex/m5-efLeaf.webp', './tex/m5-efCalyx.webp', './tex/m5-efSclera.webp', './tex/m5-efIris.webp',
   './tex/m5-wmHead.webp', './tex/m5-wmIris.webp', './tex/m5-wmDress.webp',
+  './tex/m5-cwHead.webp', './tex/m5-cwIris.webp', './tex/m5-cwStripe.webp', './tex/m5-cwHat.webp', './tex/m5-cwBalloon.webp',
 
   // 第二世界重做的怪物（新的檔名加在這一行下面）
 

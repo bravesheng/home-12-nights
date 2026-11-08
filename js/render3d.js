@@ -7317,6 +7317,278 @@ function syncWoman(e, r, t, p, dt) {
 }
 UPG.woman = { build: buildWoman, sync: syncWoman, view: { h: 1.9, d: 3.9, cy: 1.0 } };
 
+// ---------- 小丑和紅氣球 ----------
+// 照草稿（IMG_7322）：寬鬆的黑白條紋連身衣（棉布、有皺摺）、一層一層的白色皺摺領、白手套、黑色的大鞋子；
+// 光頭塗滿白色的油彩（乾掉裂開一條一條細紋），斜戴一頂小小的黑色禮帽（毛氈）；紅色的菱形穿過眼睛、高高的黑色眉毛、
+// 紅色的橡膠鼻子，臉頰被笑容擠得鼓鼓的，咧開的大嘴塗滿紅色，裡面一排黃黃的牙和舌頭；一手拿著一把亮亮的菜刀（靠近時揮），
+// 一手拉著紅氣球。紅氣球是亮亮的乳膠氣球（底下打了一個結），上面流著一條一條暗紅色的痕跡；黑暗中也看得到（自己微微亮）。
+// 動作跟原本一樣（靠近你時揮刀、氣球上下飄；紅氣球自己飄的時候慢慢轉，被手電筒照到會脹大、抖）
+const CW_HEAD = { y: 1.65, rx: 0.118, ry: 0.142, rz: 0.122 };
+const CW_EYE = { x: 0.33, y: 0.12, R: 0.022 }, CW_LID = { w: 0.98, hu: 0.42, hl: 0.46, lift: 0.1 };   // 上眼皮壓得低低的，瞪著你
+const CW_M = { w: 0.5 }, cwMouthUp = u => -0.34 + 0.07 * u * u, cwMouthLo = u => -0.66 + 0.39 * u * u;
+const CW_FACE = [   // [X, Y, 寬, 高, 凸起多少, 左右對稱]
+  [0.3, 0.3, 0.26, 0.06, 0.035, true],    // 眉骨
+  [0.33, 0.12, 0.18, 0.13, -0.04, true],  // 眼窩
+  [0.5, -0.2, 0.17, 0.14, 0.085, true],   // 被笑容擠得鼓鼓的臉頰
+  [0.47, -0.36, 0.05, 0.14, -0.025, true],// 法令紋
+  [0, 0.02, 0.05, 0.12, 0.04, false],     // 鼻樑
+  [0, -0.86, 0.17, 0.08, 0.05, false],    // 下巴
+];
+const _cwm = { e: 0, upper: false, u: 0 };
+function cwMouth(x, y) {
+  const o = _cwm, u = x / CW_M.w;
+  o.u = u;
+  if (Math.abs(u) <= 1) { const up = cwMouthUp(u), lo = cwMouthLo(u); o.upper = y > (up + lo) / 2; o.e = o.upper ? y - up : lo - y; }
+  else { const cy = cwMouthUp(1); o.upper = y > cy; o.e = Math.hypot((Math.abs(u) - 1) * CW_M.w, y - cy); }
+  return o;
+}
+let cwEyeAt = null;
+function cwEyes() {
+  if (cwEyeAt) return cwEyeAt;
+  cwEyeAt = [-1, 1].map(s => {
+    const X = s * CW_EYE.x, Y = CW_EYE.y, S0 = cwHeadPt(X, Y, Math.sqrt(1 - X * X - Y * Y), new THREE.Vector3(), true);
+    const F = new THREE.Vector3(s * 0.12, 0, 1).normalize();
+    return { s, F, C: S0.addScaledVector(F, -0.85 * CW_EYE.R) };
+  });
+  return cwEyeAt;
+}
+function cwHeadPt(x, y, z, out, noEye) {
+  let X = x, Y = y, Z = z;
+  if (y < 0) { const t = -y; X *= 1 - 0.22 * t * t; }
+  if (Z > 0) Z *= 0.88 + 0.12 * Math.min(1, Math.abs(x) * 1.6);
+  else Z *= 1.06;
+  let d = 0, back = 0;
+  if (z > 0.05) {
+    for (const f of CW_FACE) for (const s of f[5] ? [-1, 1] : [1]) { const u = (x - s * f[0]) / f[2], v = (y - f[1]) / f[3]; if (u * u + v * v < 16) d += f[4] * Math.exp(-u * u - v * v); }
+    const m = cwMouth(x, y);
+    if (m.e < 0.12) { back += 0.32 * sstep(0.004, -0.03, m.e); d += 0.028 * Math.exp(-(((m.e - 0.02) / 0.018) ** 2)); }
+    const w = sstep(0.05, 0.4, z);
+    d *= w; back *= w;
+  }
+  const k = 1 + d / (Math.hypot(X, Y, Z) || 1);
+  out.set(X * k * CW_HEAD.rx, Y * k * CW_HEAD.ry, (Z * k - back) * CW_HEAD.rz);
+  if (noEye || z < 0.3) return out;
+  for (const E of cwEyes()) {
+    const dx = (x - E.s * CW_EYE.x) * E.s * CW_HEAD.rx * 0.95, dy = (y - CW_EYE.y) * CW_HEAD.ry;
+    if (dx * dx + dy * dy < (CW_EYE.R * 2.4) ** 2) crSnapLid(out, E.C, E.F, dx, dy, CW_EYE.R, CW_LID);
+  }
+  return out;
+}
+const cwU = crWarp(-Math.PI, Math.PI, a => 1 + 1.4 * Math.exp(-((a / 0.8) ** 2))), cwV = crWarp(0, Math.PI, th => 1 + 1.3 * Math.exp(-(((th - 1.75) / 0.6) ** 2)));
+const cwHeadGeo = () => sculptGeo('cwHead', cwHeadPt, cwU, cwV, th => sstep(0.95, 1.1, th) * (1 - sstep(2.7, 2.85, th)), a => sstep(-1.25, -1.1, a) * (1 - sstep(1.1, 1.25, a)), [0.06, 0.065], [0.17, 0.18]);
+// 臉（一個一個像素算）：白色的油彩、乾掉裂開的細紋，紅色的菱形穿過眼睛、高高的黑色眉毛、塗滿紅色的大嘴（比嘴唇大一圈、邊緣是刷子刷的），
+// 嘴裡粉紅色的牙齦、黑黑的喉嚨；眼皮邊緣、法令紋和耳朵後面有一點髒髒的灰
+function cwPaintHead(c, W, H) {
+  const img = c.createImageData(W, H), D = img.data, C = [0, 0, 0];
+  const mix = (col, k) => { C[0] += (col[0] - C[0]) * k; C[1] += (col[1] - C[1]) * k; C[2] += (col[2] - C[2]) * k; };
+  for (let py = 0; py < H; py++) {
+    const th = cwV.inv((py + 0.5) / H), st = Math.sin(th), y = Math.cos(th);
+    for (let px = 0; px < W; px++) {
+      const a = cwU.inv((px + 0.5) / W), x = st * Math.sin(a), z = st * Math.cos(a), i = (py * W + px) * 4;
+      const n = fbm3(x * 4, y * 4, z * 4, 4, 191), f = fbm3(x * 30, y * 30, z * 30, 2, 193), crack = sstep(0.93, 0.985, skRidge(fbm3(x * 9, y * 9, z * 9, 3, 195)));
+      C[0] = 234 + (n - 0.5) * 14 + (f - 0.5) * 8; C[1] = 230 + (n - 0.5) * 14 + (f - 0.5) * 8; C[2] = 220 + (n - 0.5) * 14 + (f - 0.5) * 8;
+      mix([160, 150, 136], crack * 0.32);                       // 油彩乾掉的裂紋
+      mix([196, 186, 168], sstep(0.55, 0.8, n) * 0.35);         // 髒髒的地方
+      if (z > 0.05) {
+        for (const s of [-1, 1]) {
+          const ex = x - s * CW_EYE.x, ey = y - CW_EYE.y;
+          const dia = Math.abs(ex) / 0.075 + Math.abs(ey) / (ey > 0 ? 0.3 : 0.34) + 0.08 * (f - 0.5);   // 紅色的菱形（上下拉長）
+          mix([186, 18, 28], 1 - sstep(0.96, 1.02, dia));
+          const by = CW_EYE.y + 0.36 - 3.4 * ex * ex, bw = 0.016 * (1 - (ex / 0.18) ** 2);   // 高高的黑眉毛（中間粗、兩頭尖）
+          if (bw > 0) mix([26, 22, 26], 1 - sstep(bw * 0.6, bw, Math.abs(y - by)));
+          const dx = ex * s * CW_HEAD.rx * 0.95, dy = ey * CW_HEAD.ry, e = crLidE(dx, dy, CW_EYE.R, CW_LID).e;
+          if (e < 0.03) mix([92, 80, 84], (1 - sstep(0.004, 0.03, e + 0.01 * (f - 0.5))) * 0.55 * (ey < 0 ? 1 : 0.6));   // 眼睛周圍暈開的髒油彩
+          if (e < 0.012) { mix([120, 60, 60], (1 - sstep(0.002, 0.012, e)) * 0.6); if (e < 0) mix([60, 16, 18], 1); }
+        }
+        const m = cwMouth(x, y);
+        if (m.e < 0.12) {
+          if (m.e >= 0) mix([190, 22, 32], 1 - sstep(0.06, 0.085, m.e + 0.03 * (n - 0.5) + 0.02 * (f - 0.5)));   // 塗滿紅色的大嘴
+          else { mix([170, 70, 80], 1); mix([20, 4, 6], sstep(0.025, 0.07, -m.e)); }
+        }
+      }
+      D[i] = C[0]; D[i + 1] = C[1]; D[i + 2] = C[2]; D[i + 3] = 255;
+    }
+  }
+  c.putImageData(img, 0, 0);
+}
+function cwPaintIris(c, W, H) {
+  const img = c.createImageData(W, H), D = img.data, C2 = W / 2;
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const dx = (px + 0.5 - C2) / C2, dy = (py + 0.5 - C2) / C2, rr = Math.hypot(dx, dy), a = Math.atan2(dy, dx), i = (py * W + px) * 4;
+    const fib = vnoise3(Math.cos(a) * 30, Math.sin(a) * 30, rr * 3, 197);
+    let L = rr > 1 ? 40 : 62 + (fib - 0.5) * 30;
+    L *= 1 - 0.6 * sstep(0.8, 0.98, rr);
+    const pu = 1 - sstep(0.36, 0.4, rr);
+    L = L * (1 - pu) + 3 * pu;
+    D[i] = L * 1.1; D[i + 1] = L * 0.85; D[i + 2] = L * 0.65; D[i + 3] = 255;
+  }
+  c.putImageData(img, 0, 0);
+}
+// 條紋布（一圈條紋 = 貼圖的高；u 繞一圈）：米白和深灰，棉布的紋路、洗舊了有點髒
+function cwPaintStripe(c, W, H) {
+  const img = c.createImageData(W, H), D = img.data, T = Math.PI * 2;
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const u = (px + 0.5) / W, v = (py + 0.5) / H, cu = Math.cos(T * u), su = Math.sin(T * u), cv = Math.cos(T * v), sv = Math.sin(T * v);
+    const n = fbm3(cu * 1.2 + cv * 0.8, su * 1.2, sv * 0.8, 4, 201), wv = 0.03 * Math.sin(T * u * 3 + n * 3);
+    const band = sstep(0.0, 0.025, ((v + wv) % 1 + 1) % 1) * (1 - sstep(0.52, 0.545, ((v + wv) % 1 + 1) % 1)), weave = (vnoise3(u * 200, v * 60, 0, 203) - 0.5) * 12;
+    const L1 = 224 + (n - 0.5) * 26 + weave, L2 = 52 + (n - 0.5) * 16 + weave * 0.5, i = (py * W + px) * 4;
+    const L = L2 + (L1 - L2) * band;
+    D[i] = L * 1.0; D[i + 1] = L * 0.97; D[i + 2] = L * 0.92; D[i + 3] = 255;
+  }
+  c.putImageData(img, 0, 0);
+}
+// 小禮帽的毛氈：深灰色、斜斜的細紋（草稿上的斜線），帽身底下一圈黑色的緞帶
+function cwPaintHat(c, W, H) {
+  const img = c.createImageData(W, H), D = img.data;
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const u = (px + 0.5) / W, v = 1 - (py + 0.5) / H, hatch = Math.sin((u * 40 + v * 14) * Math.PI) * 0.5 + 0.5, n = fbm3(u * 8, v * 8, 0.3, 3, 205), i = (py * W + px) * 4;
+    let L = 30 + (n - 0.5) * 10 + hatch * 8;
+    if (v > 0.44 && v < 0.56) L = 14 + (n - 0.5) * 4;   // 緞帶
+    D[i] = L; D[i + 1] = L * 0.97; D[i + 2] = L * 1.05; D[i + 3] = 255;
+  }
+  c.putImageData(img, 0, 0);
+}
+// 紅氣球（lathe 的 v 從底下的結往上到頂）：亮紅色的乳膠、淡淡的深淺，一條一條暗紅色的痕跡從中間往下流
+function cwPaintBalloon(c, W, H) {
+  const img = c.createImageData(W, H), D = img.data, T = Math.PI * 2, r = seeded(2121), drips = Array.from({ length: 11 }, () => ({ u: r(), top: 0.35 + r() * 0.3, len: 0.2 + r() * 0.3, w: 0.008 + r() * 0.01 }));
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const u = (px + 0.5) / W, v = 1 - (py + 0.5) / H, n = fbm3(Math.cos(T * u) * 2, Math.sin(T * u) * 2, v * 3, 3, 207), i = (py * W + px) * 4;
+    let R = 212 + (n - 0.5) * 30, G2 = 16 + (n - 0.5) * 8, B = 30 + (n - 0.5) * 8, k = 0;
+    for (const d of drips) {
+      let du = Math.abs(u - d.u); du = Math.min(du, 1 - du);
+      const t = (d.top - v) / d.len;
+      if (t > -0.05 && t < 1.05) k = Math.max(k, (1 - sstep(d.w * (1 - 0.4 * t), d.w * 1.4, du)) * sstep(-0.05, 0.02, t) * (1 - sstep(0.95, 1.05, t)));
+      const bulb = Math.hypot(du / (d.w * 1.6), (v - (d.top - d.len)) / 0.018);
+      if (bulb < 1) k = 1;
+    }
+    k = Math.max(k, sstep(0.6, 0.72, 1 - Math.abs(v - 0.62) * 6) * sstep(0.55, 0.7, n));   // 中間一圈抹開的痕跡
+    R += (96 - R) * k; G2 += (4 - G2) * k; B += (12 - B) * k;
+    if (v < 0.07) { R *= 0.75; G2 *= 0.7; B *= 0.7; }   // 打結的地方比較暗
+    D[i] = R; D[i + 1] = G2; D[i + 2] = B; D[i + 3] = 255;
+  }
+  c.putImageData(img, 0, 0);
+}
+// 氣球：有一點點像水滴（上面圓、底下收窄），底下一個打的結
+function cwBalloonGeo() {
+  return geo('cwBalloon', () => {
+    const P = [new THREE.Vector2(0, -0.278), new THREE.Vector2(0.009, -0.274), new THREE.Vector2(0.016, -0.262), new THREE.Vector2(0.011, -0.25), new THREE.Vector2(0.014, -0.242)];
+    for (let i = 1; i <= 20; i++) {
+      const t = i / 20, a = t * Math.PI, rr = 0.2 * Math.sin(a) * (1 - 0.42 * (1 - t) ** 3), y = -0.236 * Math.cos(a) - 0.02 * (1 - t) ** 4;
+      P.push(new THREE.Vector2(Math.max(rr, i === 20 ? 0 : 0.016), y));
+    }
+    return new THREE.LatheGeometry(P, 20);
+  });
+}
+function cwBalloonMat() {
+  const t = m5Tex('cwBalloon', 256, 256, cwPaintBalloon);
+  return ownPhong('#ffffff', { map: t, emissiveMap: t, emissive: 0x6e6e6e, specular: 0xfff0f0, shininess: 120, shade: 0.45, fog: false, transparent: true });
+}
+function cwRuffGeo() {   // 一層一層的皺摺領：一圈一摺一摺的白布
+  return geo('cwRuff', () => {
+    const N = 64, M = 6, pos = [], uv = [], idx = [];
+    for (let i = 0; i <= N; i++) for (let j = 0; j <= M; j++) {
+      const th = i / N * Math.PI * 2, ph = j / M * Math.PI * 2, pl = Math.sin(th * 16), rr = 0.052 * (1 + 0.35 * pl), R0 = 0.155 + 0.012 * pl;
+      const rad = R0 + rr * Math.cos(ph);
+      pos.push(Math.sin(th) * rad, 0.042 * Math.sin(ph) * (1 + 0.2 * pl), Math.cos(th) * rad);
+      uv.push(i / N * 8, j / M);
+      if (i < N && j < M) { const a = i * (M + 1) + j, b = a + M + 1; idx.push(a, a + 1, b, a + 1, b + 1, b); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals();
+    return g;
+  });
+}
+// 白手套握著拳（手掌、四根彎起來的手指、大拇指）
+function cwGloveGeo(s) {
+  const parts = [[geo('cwPalm', () => new THREE.SphereGeometry(1, 10, 8)), mat4(0, 0, 0, 0, 0, 0, 0.036, 0.042, 0.03)], [geo('cwPalm', () => null), mat4(0, 0.035, 0, 0, 0, 0, 0.034, 0.02, 0.034)]];
+  for (let i = 0; i < 4; i++) parts.push([geo('cwKnuck', () => new THREE.SphereGeometry(1, 8, 6)), mat4(0, 0.012 - i * 0.017, 0.027, 0, 0, 0, 0.026, 0.011, 0.016)]);   // 握起來的四根手指（一節一節疊在手掌前面）
+  parts.push([geo('cwKnuck', () => null), mat4(s * 0.03, 0.005, 0.015, 0, 0, s * 0.6, 0.014, 0.024, 0.014)]);   // 大拇指
+  return mergeParts('cwGlove' + s, parts);
+}
+function cwStripeMat() { return withDetail(ownLM('#ffffff', { map: m5Tex('cwStripe', 256, 256, cwPaintStripe), shade: 0.8, transparent: true }), 'cotton', 6, 0.8); }
+const CW_TORSO = [{ y: 0.78, w: 0.17, d: 0.13 }, { y: 0.9, w: 0.2, d: 0.16, wv: 0.004 }, { y: 1.05, w: 0.215, d: 0.175, wv: 0.004 }, { y: 1.2, w: 0.21, d: 0.16, wv: 0.003 }, { y: 1.32, w: 0.2, d: 0.13 }, { y: 1.39, w: 0.12, d: 0.09 }, { y: 1.44, w: 0.055, d: 0.055 }];
+const cwLeg = s => [{ y: 0.84, x: s * 0.1, w: 0.1, d: 0.1 }, { y: 0.6, x: s * 0.105, w: 0.098, d: 0.098, wv: 0.003 }, { y: 0.36, x: s * 0.108, w: 0.094, d: 0.094, wv: 0.005 }, { y: 0.16, x: s * 0.11, w: 0.1, d: 0.1, wv: 0.006 }, { y: 0.085, x: s * 0.11, w: 0.084, d: 0.084 }];
+function buildClownUpg(r, g) {
+  const T = { transparent: true };
+  const stripe = cwStripeMat(), white = withDetail(ownLM('#ece8e0', { shade: 0.8, ...T }), 'cotton', 6), glove = withDetail(ownLM('#f0ede6', { shade: 0.8, ...T }), 'cotton', 8);
+  const shoe = ownPhong('#17151a', { specular: 0x555560, shininess: 60, shade: 0.7, ...T }), steel = withDetail(ownPhong('#c9ced4', { specular: 0xffffff, shininess: 90, shade: 0.6, ...T }), 'steel', 6);
+  const wood = withDetail(ownLM('#3a2618', { shade: 0.7, ...T }), 'bark', 10, 0.7), hat = ownLM('#ffffff', { map: m5Tex('cwHat', 128, 128, cwPaintHat), shade: 0.75, ...T });
+  const head = withDetail(ownLM('#ffffff', { map: m5Tex('cwHead', 2048, 1024, cwPaintHead), shade: 0.75, ...T }), 'skin', 6, 0.5);
+  head.map.wrapS = THREE.ClampToEdgeWrapping;
+  const nose = ownPhong('#c4121c', { specular: 0xffcccc, shininess: 80, shade: 0.6, ...T }), tongue = ownPhong('#b8505a', { specular: 0x553333, shininess: 40, shade: 0.7, ...T });
+  const tooth = withDetail(ownPhong('#d8c9a0', { specular: 0x4a4436, shininess: 30, shade: 0.7, ...T }), 'bone', 10, 0.7);
+  const eye = { ball: wetEyeMat(m5Tex('efSclera', 2048, 1024, efPaintSclera), 0x1a1212, 0x888888, T), iris: wetEyeMat(m5Tex('cwIris', 128, 128, cwPaintIris), 0x080606, 0xaaaaaa, T), irisK: 0.42 };
+  const str = ownBasic({ color: 0xdddddd, ...T });
+  r.mats.push(stripe, white, glove, shoe, steel, wood, hat, head, nose, tongue, tooth, eye.ball, eye.iris, str);
+  // 條紋的身體和兩條褲管合成一個網格；鞋子
+  g.add(new THREE.Mesh(mergeParts('cwBody', [[loftGeo('cwTorso', CW_TORSO, { seg: 20, sub: 3, uv: [0, 1, 0, 6.5] }), new THREE.Matrix4()], ...[-1, 1].map(s => [loftGeo('cwLeg' + s, cwLeg(s), { seg: 16, sub: 3, uv: [0, 1, 0, 7.5] }), new THREE.Matrix4()])]), stripe));
+  g.add(new THREE.Mesh(mergeParts('cwShoes', [-1, 1].map(s => [geo('cwShoe', () => new THREE.SphereGeometry(1, 12, 8)), mat4(s * 0.11, 0.045, 0.05, 0, s * 0.08, 0, 0.078, 0.05, 0.155)])), shoe));
+  const ruff = new THREE.Mesh(cwRuffGeo(), white); ruff.position.y = 1.42; g.add(ruff);
+  // 左手：垂著拉著氣球的線
+  g.add(new THREE.Mesh(loftGeo('cwArmL', [{ y: 1.37, x: -0.2, w: 0.062, d: 0.062 }, { y: 1.2, x: -0.25, z: 0.02, w: 0.066, d: 0.066, wv: 0.003 }, { y: 1.05, x: -0.29, z: 0.045, w: 0.072, d: 0.072 }, { y: 1.0, x: -0.3, z: 0.05, w: 0.078, d: 0.078 }, { y: 0.988, x: -0.3, z: 0.05, w: 0.04, d: 0.04 }], { seg: 14, sub: 3, uv: [0, 1, 0, 4] }), stripe));
+  const gl = new THREE.Mesh(cwGloveGeo(-1), glove); gl.position.set(-0.3, 0.95, 0.05); g.add(gl);
+  r.balloon = new THREE.Mesh(cwBalloonGeo(), cwBalloonMat()); r.balloon.position.set(-0.42, 2.12, 0); g.add(r.balloon); r.mats.push(r.balloon.material);
+  limb(g, [-0.3, 0.97, 0.05], [-0.41, 1.85, 0], 0.003, str);
+  // 右手：拿著菜刀（肩膀那裡可以轉，靠近時揮）
+  r.knife = new THREE.Group(); r.knife.position.set(0.22, 1.33, 0); g.add(r.knife);
+  r.knife.add(new THREE.Mesh(loftGeo('cwArmR', [{ y: 0.03, w: 0.062, d: 0.062 }, { y: -0.15, x: 0.035, z: 0.02, w: 0.066, d: 0.066, wv: 0.003 }, { y: -0.3, x: 0.068, z: 0.04, w: 0.072, d: 0.072 }, { y: -0.35, x: 0.078, z: 0.05, w: 0.078, d: 0.078 }, { y: -0.362, x: 0.08, z: 0.05, w: 0.04, d: 0.04 }], { seg: 14, sub: 3, uv: [0, 1, 0, 4] }), stripe));
+  const gr = new THREE.Mesh(cwGloveGeo(1), glove); gr.position.set(0.08, -0.4, 0.05); r.knife.add(gr);
+  const hd = new THREE.Mesh(geo('cwHandle', () => new THREE.CylinderGeometry(0.012, 0.014, 0.1, 8)), wood); hd.position.set(0.08, -0.42, 0.05); r.knife.add(hd);
+  const blade = new THREE.Mesh(geo('cwBlade', () => {
+    const sh = new THREE.Shape(); sh.moveTo(-0.004, 0); sh.lineTo(0.036, 0); sh.lineTo(0.035, -0.13); sh.quadraticCurveTo(0.03, -0.215, 0.002, -0.25); sh.lineTo(-0.004, -0.24); sh.closePath();
+    return new THREE.ExtrudeGeometry(sh, { depth: 0.003, bevelEnabled: false }).translate(-0.016, 0, -0.0015);
+  }), steel);
+  blade.position.set(0.08, -0.47, 0.05); r.knife.add(blade);
+  // 頭、眼睛、鼻子、牙、舌頭、禮帽
+  r.head = new THREE.Group(); r.head.position.y = CW_HEAD.y; g.add(r.head);
+  r.head.add(new THREE.Mesh(cwHeadGeo(), head));
+  r.crEyes = [];
+  for (const E of cwEyes()) {
+    const ey = w1Eye(r.head, CW_EYE.R, eye);
+    ey.sock.position.copy(E.C); ey.sock.quaternion.setFromUnitVectors(Z_AXIS, E.F);
+    ey.jig = 0.02; ey.lim = 0.5;
+    r.crEyes.push(ey);
+  }
+  const v = new THREE.Vector3();
+  cwHeadPt(0, -0.12, 0.99, v, true);
+  const ns = new THREE.Mesh(geo('cwNose', () => new THREE.SphereGeometry(0.024, 14, 10)), nose); ns.position.set(v.x, v.y, v.z + 0.008); r.head.add(ns);
+  cwHeadPt(0, -0.56, Math.sqrt(1 - 0.56 * 0.56), v, true);
+  const tg = new THREE.Mesh(geo('cwTongue', () => new THREE.SphereGeometry(1, 12, 8)), tongue); tg.position.set(v.x, v.y + 0.005, v.z - 0.035); tg.scale.set(0.045, 0.016, 0.035); r.head.add(tg);
+  const parts = [], rr = seeded(3131), cone = geo('wmTooth', () => new THREE.CylinderGeometry(0.75, 1, 1, 6, 1).translate(0, 0.5, 0));
+  for (const upper of [true, false]) for (let i = 0; i < (upper ? 11 : 9); i++) {   // 上下兩排黃黃的、歪歪的牙
+    const n = upper ? 11 : 9, u = (upper ? -0.78 : -0.62) + (upper ? 1.56 : 1.24) * (i + 0.5) / n + (rr() - 0.5) * 0.03, X = u * CW_M.w, Y = upper ? cwMouthUp(u) : cwMouthLo(u);
+    cwHeadPt(X, Y, Math.sqrt(Math.max(0, 1 - X * X - Y * Y)), v, true);
+    const L = (upper ? 0.011 + rr() * 0.005 : 0.008 + rr() * 0.004) * (1 - 0.3 * Math.abs(u)), w = 0.0042 + rr() * 0.0008;
+    parts.push([cone, mat4(v.x, v.y + (upper ? 0.003 : -0.003), v.z - 0.009, (upper ? 0.2 : -0.2) + (rr() - 0.5) * 0.15, 0, (upper ? Math.PI - u * 0.15 : u * 0.5) + (rr() - 0.5) * 0.25, w, L, w * 0.6)]);
+  }
+  r.head.add(new THREE.Mesh(mergeParts('cwTeeth', parts), tooth));
+  const hp = [[0, 0.118], [0.058, 0.118], [0.063, 0.112], [0.06, 0.01], [0.098, 0.007], [0.106, 0.002], [0.1, -0.004], [0.056, 0.0], [0, 0.0]].map(([x, y]) => new THREE.Vector2(x, y)).reverse();
+  const ht = new THREE.Mesh(geo('cwHat', () => new THREE.LatheGeometry(hp, 22)), hat); ht.position.set(0.035, CW_HEAD.ry * 0.88, -0.005); ht.rotation.set(-0.06, 0, -0.2); ht.scale.setScalar(0.78); r.head.add(ht);
+}
+function syncClownUpg(e, r, t, p, dt) {
+  const d = Math.hypot(e.x - p.x, e.y - p.y);
+  r.knife.rotation.x = d < 1.8 ? -1.4 * Math.pow(Math.abs(Math.sin(t * 7)), 2) : 0;   // 靠近你時揮刀
+  r.balloon.position.y = 2.12 + Math.sin(e.wob * 1.3) * 0.06;
+  r.head.rotation.z = Math.sin(t * 0.7 + e.wob) * 0.08 + (d < 1.8 ? Math.sin(t * 14) * 0.03 : 0);
+  crLook(r, t, dt, p);
+}
+UPG.clown = { build: buildClownUpg, sync: syncClownUpg, view: { h: 2.4, d: 4.6, cy: 1.2 } };
+function buildBalloonUpg(r, g) {
+  const T = { transparent: true }, str = ownBasic({ color: 0xdddddd, ...T });
+  r.balloon = new THREE.Mesh(cwBalloonGeo(), cwBalloonMat()); r.balloon.position.y = 1.75; g.add(r.balloon);
+  limb(g, [0, 1.48, 0], [0.03, 0.75, 0], 0.003, str);
+  r.mats.push(r.balloon.material, str);
+}
+function syncBalloonUpg(e, r, t, p, dt) {
+  // 被手電筒照到會脹大、抖；自己飄的時候上下飄、慢慢轉
+  const b = 1 + (e.burn || 0) * 0.3;
+  r.balloon.scale.set(b, b, b);
+  r.balloon.position.set(e.burn ? (Math.random() - 0.5) * 0.04 : 0, 1.75 + Math.sin(e.wob * 1.3) * 0.1, 0);
+  r.g.rotation.y = e.wob * 0.3;
+}
+UPG.balloon = { build: buildBalloonUpg, sync: syncBalloonUpg, view: { h: 2.25, d: 3.6, cy: 1.35 } };
+
 // 看模型（?model=eye）和預先畫貼圖（bake5）時當成怪物蓋：裡面放一朵假的花
 UPG.eye = {
   build(r, g) { r.f = { x: 0, y: 0, ptype: 'eye', grow: 1, burn: 0, alarm: 0 }; r.fr = buildEyeFlower(r.f, g); },
