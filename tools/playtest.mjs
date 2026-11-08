@@ -73,7 +73,8 @@ async function scenario(name, title, ctxOpts, fn) {
     if (m.type() === 'error' && !m.text().startsWith('Failed to load resource')) problems.push('console 錯誤：' + m.text());
   });
   page.on('response', r => { if (r.status() >= 400) loadFail(r.url(), r.status()); });
-  page.on('requestfailed', r => loadFail(r.url(), r.failure()?.errorText));
+  // 換頁時還沒載完的圖被瀏覽器中斷（ERR_ABORTED）不算載入失敗：怪物的貼圖是要用時才載的，真的缺檔案會是上面的 404
+  page.on('requestfailed', r => { const why = r.failure()?.errorText; if (why !== 'net::ERR_ABORTED') loadFail(r.url(), why); });
   const shot = label => page.screenshot({ path: path.join(OUT, `${name}-${label}.png`) });
   const check = (ok, msg) => { if (!ok) problems.push('檢查沒過：' + msg); };
   const t0 = Date.now();
@@ -458,7 +459,7 @@ await scenario('w3cold', '第三世界寒寂之境（?world=3&night=3&cold）：
   await shot('2-baymax');
 });
 
-await scenario('monsters', '怪物模型（火柴人、鳥腳女和爬行女會動的頭髮、眼球花，手電筒開關各拍一張；小丑突然出現在面前嚇你、扣血）', {}, async ({ page, shot, check }) => {
+await scenario('monsters', '怪物模型（火柴人、鳥腳女和爬行女會動的頭髮、眼球花，手電筒開關各拍一張；小丑突然出現在面前嚇你、扣血；重做過的怪物貼圖是預先做好的圖檔）', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=1&night=6&kit=1', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
   await skipToDusk(page);
@@ -506,6 +507,10 @@ await scenario('monsters', '怪物模型（火柴人、鳥腳女和爬行女會�
     return { hp0: hp, hp1: G.p.hp, js: document.getElementById('jumpscare').classList.contains('show'), back: c.back > 0 };
   });
   check(scare.js && scare.hp1 < scare.hp0 - 10 && scare.back, `小丑要撲上來嚇你（驚嚇畫面 ${scare.js}）、扣血（${scare.hp0.toFixed(0)} → ${scare.hp1.toFixed(0)}）、再往後退（帶著護身符，只扣一半）`);
+  // 照第五世界的做法重做過的第一世界怪物（火柴人、鳥腳女、爬行女、眼球花、紅氣球、小丑）：貼圖都是預先做好的圖檔（tex/m5-*.webp），不是當場畫的
+  await page.waitForFunction(() => !Object.values(Renderer.m5()).includes('wait'), null, { timeout: 15000 }).catch(() => {});
+  const w1 = await page.evaluate(() => Object.entries(Renderer.m5()).filter(([k]) => /^(sk|mm|kw|ef|cw)[A-Z]/.test(k)));
+  check(w1.length >= 15 && w1.every(([, v]) => v === 'file'), `第一世界重做的怪物貼圖都要從圖檔載入（${w1.filter(([, v]) => v !== 'file').map(([k, v]) => k + ' ' + v).join('、') || w1.length + ' 張'}）`);
 });
 
 await scenario('monsters2', '第二世界怪物模型（草叢人、大嘴觸角蟲、眼花女孩、向日葵眼、千眼菇排成一排，手電筒開關各拍一張）', {}, async ({ page, shot, check }) => {
@@ -695,7 +700,7 @@ await scenario('phone', '手機版面（橫放 852×393、直放 393×852：介�
   await shot('4-portrait');
 });
 
-await scenario('book', '怪物圖鑑（沒見過的只有問號；見過的卡片上是會動的 3D 怪物：三個世界各拍一張；舊存檔會照進度標成見過；?model= 看第五世界七隻怪物的模型）', {}, async ({ page, shot, check }) => {
+await scenario('book', '怪物圖鑑（沒見過的只有問號；見過的卡片上是會動的 3D 怪物：三個世界各拍一張；舊存檔會照進度標成見過；?model= 看第五世界七隻怪物的模型）', { limit: 180000 }, async ({ page, shot, check }) => {   // 圖鑑一頁有十幾隻重做過的 3D 怪物一起畫，軟體算繪很慢
   await page.goto(BASE, { waitUntil: 'load' });
   await page.waitForSelector('#btnBook');
   await page.click('#btnBook');

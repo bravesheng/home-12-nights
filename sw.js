@@ -28,6 +28,15 @@ const ASSETS = [
   // 照第五世界的做法重做的舊怪物：黑影
   './tex/m5-shBody.webp', './tex/m5-shLimb.webp', './tex/m5-shHead.webp', './tex/m5-shGlow.webp', './tex/m5-shShell.webp', './tex/m5-shPuff.webp',
   // 第一世界重做的怪物（新的檔名加在這一行下面）
+  './tex/m5-skLimb.webp', './tex/m5-skEmber.webp', './tex/m5-skHead.webp', './tex/m5-skGlow.webp',
+  './tex/m5-fsSkin.webp', './tex/m5-fsHead.webp', './tex/m5-fsEye.webp',
+  './tex/m5-blSkin.webp', './tex/m5-blBump.webp', './tex/m5-blEye.webp', './tex/m5-blEyeGlow.webp',
+  './tex/m5-efStem.webp', './tex/m5-efLeaf.webp', './tex/m5-efCalyx.webp', './tex/m5-efSclera.webp', './tex/m5-efIris.webp',
+  './tex/m5-wmHead.webp', './tex/m5-wmIris.webp', './tex/m5-wmDress.webp',
+  './tex/m5-cwHead.webp', './tex/m5-cwIris.webp', './tex/m5-cwStripe.webp', './tex/m5-cwHat.webp', './tex/m5-cwBalloon.webp',
+  './tex/m5-kwHead.webp', './tex/m5-kwGown.webp',
+  './tex/m5-mmHead.webp', './tex/m5-mmBody.webp',
+  './tex/m5-tlHead.webp', './tex/m5-tlGlow.webp',
 
   // 第二世界重做的怪物（新的檔名加在這一行下面）
 
