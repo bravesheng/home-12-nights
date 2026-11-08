@@ -6582,6 +6582,355 @@ function shkSync(e, r, t, p, dt) {
 }
 UPG.shake = { build: shkBuild, sync: shkSync, view: { h: 0.72, d: 1.75, cy: 0.33 } };
 
+// ---------- 紅涎偽人 ----------
+// 照設計圖（IMG_7429、1792913783585_1.jpg）和設計師說的「照著我畫的去做」：2 公尺多、皮包骨的灰白人形，全身的皮膚乾裂成一塊一塊；
+// 很大的蛋形頭、長長的細脖子；兩顆凸出來、布滿血絲的眼睛瞪得很大（左邊那隻眼眶一圈紅），臉頰凹陷，鼻子只剩兩個洞，
+// 張得很大的嘴裡上下兩排長長的爛牙；紅色的涎液從頭頂一道一道流過臉，從嘴巴流過脖子到胸口，濕濕亮亮的、一直往下滴。
+// 看得到一根一根肋骨、凹進去的肚子，細長的手臂往兩邊張開、手指很長，長腿
+// 3D 的細胞雜訊：到最近、第二近的點的距離（F1、F2），F2 - F1 很小的地方是兩塊之間的裂縫
+function w4uCell(x, y, z, s = 0) {
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+  let f1 = 9, f2 = 9;
+  for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) {
+    const cx = xi + i, cy = yi + j, cz = zi + k;
+    const d = (cx + nHash3(cx, cy, cz, s) - x) ** 2 + (cy + nHash3(cx, cy, cz, s + 1.7) - y) ** 2 + (cz + nHash3(cx, cy, cz, s + 3.1) - z) ** 2;
+    if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) f2 = d;
+  }
+  return [Math.sqrt(f1), Math.sqrt(f2)];
+}
+// 乾裂的灰白皮膚（位置是公尺）：一塊一塊微微鼓起、邊緣暗一點，塊和塊之間深色的裂縫（大的一層、細的一層），裂縫彎彎曲曲的
+function mimSkin(x, y, z, seed = 3) {
+  const wx = fbm3(x * 11, y * 11, z * 11, 4, seed) - 0.5, wy = fbm3(x * 11 + 5, y * 11, z * 11, 4, seed + 2) - 0.5;
+  const [a1, b1] = w4uCell(x * 30 + wx * 2.4, y * 30 + wy * 2.4, z * 30 + wx, seed + 5);
+  const [a2, b2] = w4uCell(x * 80 + wy * 2.2, y * 80 + wx * 2.2, z * 80, seed + 9);
+  const on = sstep(0.32, 0.62, fbm3(x * 14, y * 14, z * 14, 3, seed + 21));   // 有的裂縫深、有的淡到幾乎看不到
+  const c1 = (1 - sstep(0.008, 0.045, b1 - a1)) * (0.45 + 0.55 * on), c2 = (1 - sstep(0.006, 0.035, b2 - a2)) * 0.32 * on;
+  const n = fbm3(x * 4, y * 4, z * 4, 4, seed + 13) - 0.5, n2 = fbm3(x * 40, y * 40, z * 40, 2, seed + 17) - 0.5, plate = 1 - sstep(0.03, 0.25, b1 - a1);
+  const L = 174 + n * 30 + n2 * 10 - plate * 12;
+  let r = L * 1.0, g = L * 0.97, b = L * 0.94;
+  const cr = Math.max(c1, c2);
+  r += (92 - r) * cr; g += (84 - g) * cr; b += (82 - b) * cr;
+  return [r, g, b];
+}
+const MIM_HEAD = { y: 1.015, z: 0.035, rx: 0.155, ry: 0.205, rz: 0.165 };   // 頭頂離地 2.13 公尺（跟舊的一樣高，頭上的血條才不會蓋到頭）   // 頭的中心（在 r.torso 裡，髖關節是 0）和半徑
+const MIM_EYE = { x: 0.38, y: 0.4, R: 0.04 };                            // 眼睛（單位球上的位置）、眼球半徑
+// 臉上的起伏：[X, Y（正面看，單位球上）, 寬, 高, 凸起多少（負的是凹進去）, 左右對稱]
+const MIM_FACE = [
+  [0, 0.62, 0.55, 0.22, 0.03, 0],           // 額頭
+  [0.36, 0.56, 0.24, 0.07, 0.035, 1],       // 眉骨
+  [0.38, 0.4, 0.23, 0.2, -0.2, 1],          // 眼窩（很深，眼球在裡面凸出來）
+  [0.38, 0.4, 0.36, 0.32, 0.055, 1],        // 眼窩周圍腫起來的一圈
+  [0, 0.17, 0.05, 0.13, 0.025, 0],          // 鼻樑
+  [0.05, 0.05, 0.03, 0.05, -0.07, 1],       // 鼻孔（只剩兩個洞）
+  [0.52, 0.08, 0.15, 0.1, 0.05, 1],         // 顴骨
+  [0.44, -0.24, 0.17, 0.17, -0.1, 1],       // 凹下去的臉頰
+  [0.8, 0.35, 0.15, 0.25, -0.05, 1],        // 太陽穴
+  [0, -0.86, 0.2, 0.09, 0.04, 0],           // 下巴
+];
+const MIM_MOUTH = { y: -0.48, wx: 0.36, wy: 0.25, depth: 0.42 };          // 張得很大的嘴（方方圓圓的洞）
+// 從頭頂流下來的涎液：[角度 a（0 是正面）, 從 th 開始, 流到 th, 寬（公尺）, 彎來彎去的相位]
+const MIM_DROOL = [[-0.7, 0.3, 1.85, 0.014, 0], [-0.24, 0.2, 2.2, 0.016, 1.3], [-0.06, 0.36, 1.42, 0.011, 2.1], [0.17, 0.24, 2.0, 0.015, 3.2],
+  [0.42, 0.3, 1.58, 0.013, 4.4], [0.68, 0.4, 2.3, 0.012, 5.1], [1.3, 0.42, 1.9, 0.013, 0.7], [-1.45, 0.5, 2.05, 0.012, 2.8], [2.5, 0.55, 1.6, 0.012, 1.9], [-2.4, 0.5, 1.75, 0.011, 4.0]];
+const MIM_LIP = [[-0.13, 0.013, 0.26], [0.03, 0.018, 0.4], [0.17, 0.012, 0.2]];   // 從下唇垂下來的：[X, 寬, 垂多長（公尺）]
+function mimMouthM(x, y) { const M = MIM_MOUTH, u = x / M.wx, v = (y - M.y) / M.wy; return Math.pow(u ** 4 + v ** 4, 0.25); }
+function mimHeadD(x, y, z) {
+  if (z <= 0.02) return 0;
+  let d = 0;
+  for (const f of MIM_FACE) for (const s of f[5] ? [-1, 1] : [1]) { const u = (x - s * f[0]) / f[2], v = (y - f[1]) / f[3]; if (u * u + v * v < 16) d += f[4] * Math.exp(-u * u - v * v); }
+  const m = mimMouthM(x, y);
+  d += -MIM_MOUTH.depth * (1 - sstep(0.78, 1.0, m)) + 0.035 * Math.exp(-(((m - 1.1) / 0.12) ** 2));
+  return d * sstep(0.02, 0.35, z);
+}
+// 涎液有多少（0～1）：頭頂流下來的一道一道（尾端一顆血珠），加上從下唇流過下巴的
+function mimDroolM(x, y, z) {
+  const th = Math.acos(clamp(y, -1, 1)), a = Math.atan2(x, z), st = Math.max(Math.sin(th), 0.15), Rr = 0.17;
+  let m = 0;
+  for (const [a0, t0, t1, w, ph] of MIM_DROOL) {
+    if (th < t0 - 0.2 || th > t1 + 0.2) continue;
+    const ac = a0 + 0.05 * Math.sin(th * 6 + ph) + 0.04 * (th - t0) * Math.sign(a0 || 1), da = Math.abs(angD(a, ac)) * st * Rr;
+    const k = clamp((th - t0) / (t1 - t0), 0, 1), ww = w * (0.7 + 0.3 * k);
+    let q = (1 - sstep(ww * 0.55, ww, da)) * sstep(t0 - 0.08, t0 + 0.02, th) * (1 - sstep(t1, t1 + 0.012, th));
+    const acE = a0 + 0.05 * Math.sin(t1 * 6 + ph) + 0.04 * (t1 - t0) * Math.sign(a0 || 1), dd = Math.hypot(Math.abs(angD(a, acE)) * st * Rr, (th - t1) * Rr);
+    q = Math.max(q, 1 - sstep(ww * 0.8, ww * 1.3, dd));
+    m = Math.max(m, q);
+  }
+  if (z > 0 && y < MIM_MOUTH.y - MIM_MOUTH.wy * 0.7 && mimMouthM(x, y) > 1.02) for (const [X0, w] of MIM_LIP) {
+    const dx = Math.abs(x - X0 - 0.02 * Math.sin(y * 9 + X0 * 20)) * MIM_HEAD.rx;
+    m = Math.max(m, (1 - sstep(w * 0.55, w, dx)) * sstep(MIM_MOUTH.y - MIM_MOUTH.wy * 0.95, MIM_MOUTH.y - MIM_MOUTH.wy * 1.05, y));
+  }
+  return m;
+}
+function mimHeadPt(x, y, z, out, noFace) {
+  let X = x, Y = y, Z = z;
+  if (Y < 0) { const t = -Y; X *= 1 - 0.3 * t * t; Z *= Z > 0 ? 1 - 0.06 * t * t : 1 - 0.35 * t * t; }   // 下半臉窄一點、後面收進去
+  else X *= 1 + 0.04 * Y;                                                                          // 蛋形：頭頂寬一點
+  if (Z < 0) Z *= 1.06;
+  const d = noFace ? 0 : mimHeadD(x, y, z) + mimDroolM(x, y, z) * 0.02;
+  const k = 1 + d / (Math.hypot(X, Y, Z) || 1);
+  return out.set(X * k * MIM_HEAD.rx, Y * k * MIM_HEAD.ry, Z * k * MIM_HEAD.rz);
+}
+const mimU = crWarp(-Math.PI, Math.PI, a => 1 + 1.4 * Math.exp(-((a / 0.8) ** 2))), mimV = crWarp(0, Math.PI, th => 1 + 1.3 * Math.exp(-(((th - 1.55) / 0.7) ** 2)));
+const mimHeadGeo = () => sculptGeo('mimHead', mimHeadPt, mimU, mimV, th => sstep(0.75, 0.9, th) * (1 - sstep(2.45, 2.6, th)), a => sstep(-1.0, -0.85, a) * (1 - sstep(0.85, 1.0, a)), [0.066, 0.072], [0.16, 0.17]);   // 一隻偽人常常不只一隻，格子不要太密
+// 頭的貼圖（spec：反光貼圖，涎液很亮、嘴裡濕濕的、皮膚是乾的）
+function mimHeadPx(x, y, z, v) {
+  mimHeadPt(x, y, z, v);
+  const col = mimSkin(v.x, v.y, v.z, 3), dd = mimHeadD(x, y, z);
+  let sp = 14;
+  const ao = clamp(-dd * 2.4, 0, 0.62);
+  col[0] *= 1 - ao; col[1] *= 1 - ao * 1.04; col[2] *= 1 - ao * 0.95;
+  if (z > 0) {
+    for (const s of [-1, 1]) {
+      const q = Math.hypot(x - s * MIM_EYE.x, (y - MIM_EYE.y) * 0.9);
+      const dk = (1 - sstep(0.3, 0.46, q)) * 0.55;
+      col[0] += (82 - col[0]) * dk; col[1] += (60 - col[1]) * dk; col[2] += (68 - col[2]) * dk;
+      if (s < 0) { const rr = (1 - sstep(0.36, 0.5, q)) * sstep(0.2, 0.3, q) * 0.55; col[0] += (150 - col[0]) * rr; col[1] += (26 - col[1]) * rr; col[2] += (32 - col[2]) * rr; }   // 左眼眼眶一圈紅
+      if (q < 0.25) sp = 50;
+    }
+    const m = mimMouthM(x, y);
+    if (m < 1.18) {
+      const lip = Math.exp(-(((m - 1.06) / 0.07) ** 2)) * 0.6, gum = sstep(0.8, 0.93, m) * (1 - sstep(0.97, 1.0, m)), inn = 1 - sstep(0.93, 1.0, m);
+      col[0] += (120 - col[0]) * lip; col[1] += (86 - col[1]) * lip; col[2] += (88 - col[2]) * lip;
+      col[0] += (16 - col[0]) * inn; col[1] += (6 - col[1]) * inn; col[2] += (7 - col[2]) * inn;
+      col[0] += (70 - col[0]) * gum * 0.7; col[1] += (18 - col[1]) * gum * 0.7; col[2] += (22 - col[2]) * gum * 0.7;
+      if (m < 1) sp = 100;
+    }
+  }
+  const dm = mimDroolM(x, y, z);
+  if (dm > 0) {
+    const core = sstep(0.5, 1, dm), n = fbm3(x * 30, y * 30, z * 30, 2, 17) - 0.5;
+    const r = 104 + core * 40 + n * 20, g = 6 + core * 4, b = 12 + core * 4;
+    col[0] += (r - col[0]) * dm; col[1] += (g - col[1]) * dm; col[2] += (b - col[2]) * dm;
+    sp = Math.max(sp, 40 + 200 * dm);
+  }
+  return [col, sp];
+}
+function mimPaintHead(c, W, H, spec) {
+  const img = c.createImageData(W, H), v = new THREE.Vector3();
+  for (let py = 0; py < H; py++) {
+    const th = mimV.inv((py + 0.5) / H), st = Math.sin(th), y = Math.cos(th);
+    for (let px = 0; px < W; px++) {
+      const a = mimU.inv((px + 0.5) / W), [col, sp] = mimHeadPx(st * Math.sin(a), y, st * Math.cos(a), v), i = (py * W + px) * 4;
+      if (spec) w4uPx(img.data, i, sp, sp, sp); else w4uPx(img.data, i, col[0], col[1], col[2]);
+    }
+  }
+  c.putImageData(img, 0, 0);
+}
+// 身體：胯下 → 屁股 → 突出來的髖骨 → 凹進去的肚子 → 一根一根的肋骨 → 鎖骨 → 瘦瘦的肩膀 → 長長的細脖子（伸進頭裡）
+// 凸起：0 髖骨、1 鎖骨、2 背上的脊椎（凹）、3 胸骨、4 肋骨
+const MIM_BODY = (() => {
+  const R = [
+    { y: -0.09, w: 0.07, d: 0.06, z: -0.005 }, { y: -0.05, w: 0.118, f: 0.06, b: 0.082 }, { y: 0.02, w: 0.134, f: 0.058, b: 0.084, s: [0.012, 0, -0.006, 0] },
+    { y: 0.08, w: 0.13, f: 0.05, b: 0.08, s: [0.016, 0, -0.008, 0] }, { y: 0.15, w: 0.112, f: 0.044, b: 0.075, s: [0, 0, -0.01, 0] }, { y: 0.22, w: 0.108, f: 0.046, b: 0.072, s: [0, 0, -0.01, 0] },
+    { y: 0.27, w: 0.124, f: 0.07, b: 0.078, s: [0, 0, -0.01, 0.004] }, { y: 0.3, w: 0.138, f: 0.084, b: 0.082, s: [0, 0, -0.01, 0.006] },
+  ];
+  for (let i = 0; i < 6; i++) {   // 肋骨：前面和兩側一根一根凸起來（凸起 4），背後是平的
+    const y = 0.33 + i * 0.03, f = 0.086 + Math.sin(i / 5 * Math.PI) * 0.008, w = 0.14 + i * 0.004;
+    R.push({ y, w, f, b: 0.081, s: [0, 0, -0.01, 0.007, 0.0045] }, { y: y + 0.015, w, f, b: 0.081, s: [0, 0, -0.01, 0.009, -0.002] });
+  }
+  R.push({ y: 0.51, w: 0.162, f: 0.084, b: 0.08, s: [0, 0.012, -0.008, 0.006] }, { y: 0.545, w: 0.176, f: 0.064, b: 0.07, p: 0.92, s: [0, 0.008, -0.006, 0] }, { y: 0.572, w: 0.15, f: 0.054, b: 0.06, p: 0.95 }, { y: 0.592, w: 0.1, f: 0.048, b: 0.054 },
+    { y: 0.61, w: 0.052, f: 0.046, b: 0.048 }, { y: 0.7, w: 0.039, f: 0.041, b: 0.043, z: 0.005 }, { y: 0.8, w: 0.04, f: 0.043, b: 0.044, z: 0.015 });
+  for (const r of R) r.y *= 1.05;   // 設計圖的身體比較長
+  return R;
+})();
+const mimTorsoGeo = () => loftGeo('mimTorso', MIM_BODY, { seg: 20, sub: 1, capA: 0.03, bumps: [{ a: 0.75, w: 0.3, sym: true }, { a: 0.55, w: 0.45, sym: true }, { a: Math.PI, w: 0.22 }, { a: 0, w: 0.16 }, { a: 1.0, w: 0.75, sym: true }], uv: [0, 1, 1, 0] });
+// 身體貼圖上的一點 (u, v) → 身體表面的位置（照放樣出來的網格內插）
+function mimTorsoAt(u, v, out) {
+  const g = mimTorsoGeo(), P = g.attributes.position, UV = g.attributes.uv, N = 20, C1 = N + 1, R = P.count / C1;
+  let lo = 0, hi = R - 1;
+  const vy = i => UV.getY(i * C1);
+  const up = vy(R - 1) > vy(0);
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if ((vy(m) < v) === up) lo = m; else hi = m; }
+  const f = clamp((v - vy(lo)) / ((vy(hi) - vy(lo)) || 1), 0, 1), jj = clamp(u, 0, 1) * N, j0 = Math.min(N - 1, jj | 0), g2 = jj - j0;
+  const at = (i, j) => [P.getX(i * C1 + j), P.getY(i * C1 + j), P.getZ(i * C1 + j)];
+  const a = at(lo, j0), b = at(lo, j0 + 1), cc = at(hi, j0), d = at(hi, j0 + 1);
+  return out.set(...[0, 1, 2].map(k => (a[k] * (1 - g2) + b[k] * g2) * (1 - f) + (cc[k] * (1 - g2) + d[k] * g2) * f));
+}
+// 從嘴巴流到胸口的涎液（身體正面）：[u（0.5 是正面中間）, 流到多高（髖關節是 0）, 寬, 相位]
+const MIM_CHEST = [[0.49, 0.32, 0.012, 0], [0.515, 0.44, 0.015, 1.5], [0.502, 0.22, 0.01, 2.7], [0.47, 0.52, 0.009, 4.1]];
+function mimPaintTorso(c, W, H, spec) {
+  const img = c.createImageData(W, H), v = new THREE.Vector3(), q = new THREE.Vector3();
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const u = (px + 0.5) / W, vv = 1 - (py + 0.5) / H, i = (py * W + px) * 4;
+    mimTorsoAt(u, vv, v);
+    const col = mimSkin(v.x, v.y, v.z, 23);
+    // 肋骨之間、肚子凹下去的地方暗一點（正面和兩側）
+    const front = Math.max(0, Math.cos((u - 0.5) * Math.PI * 2)), rib = v.y > 0.34 && v.y < 0.55 ? Math.max(0, Math.sin((v.y - 0.363) / 0.033 * Math.PI * 2 - 1.2)) ** 3 * 0.12 * (1 - 0.6 * Math.exp(-(((u - 0.5) / 0.06) ** 2))) : 0;
+    const belly = Math.exp(-(((v.y - 0.21) / 0.066) ** 2)) * 0.18, k = (rib + belly) * front;
+    col[0] *= 1 - k; col[1] *= 1 - k; col[2] *= 1 - k * 0.9;
+    let dm = 0;
+    for (const [u0, y1, w, ph] of MIM_CHEST) {
+      if (v.y < y1 - 0.03 || v.y > 0.84) continue;
+      mimTorsoAt(u0 + 0.006 * Math.sin(v.y * 22 + ph), vv, q);
+      const dx = Math.hypot(v.x - q.x, v.z - q.z), ww = w * (0.8 + 0.2 * sstep(y1, 0.7, v.y));
+      let m = (1 - sstep(ww * 0.55, ww, dx)) * sstep(y1, y1 + 0.01, v.y);
+      m = Math.max(m, 1 - sstep(ww * 0.8, ww * 1.3, Math.hypot(dx, v.y - y1)));
+      dm = Math.max(dm, m);
+    }
+    const core = sstep(0.5, 1, dm);
+    col[0] += (108 + core * 36 - col[0]) * dm; col[1] += (7 - col[1]) * dm; col[2] += (13 - col[2]) * dm;
+    const sp = 14 + 220 * dm;
+    if (spec) w4uPx(img.data, i, sp, sp, sp); else w4uPx(img.data, i, col[0], col[1], col[2]);
+  }
+  c.putImageData(img, 0, 0);
+}
+// 手腳的貼圖（管子：u 沿著長度、v 繞一圈）
+function mimPaintLimb(c, W, H) {
+  const img = c.createImageData(W, H);
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const a = (py + 0.5) / H * Math.PI * 2, L = (px + 0.5) / W * 0.95, col = mimSkin(Math.cos(a) * 0.032, L, Math.sin(a) * 0.032, 41);
+    w4uPx(img.data, (py * W + px) * 4, col[0], col[1], col[2]);
+  }
+  c.putImageData(img, 0, 0);
+}
+// 手臂（右手，從肩膀往下；左手 x 反過來）：上臂、突出來的手肘、前臂、手腕；手掌小小的、手指又細又長
+const MIM_ARM = [[[0, 0, 0], [0.016, -0.2, -0.01], [0.024, -0.42, -0.006], [0.03, -0.62, 0.02], [0.034, -0.8, 0.045]], [0.036, 0.028, 0.032, 0.023, 0.019]];
+function mimArmGeo(s) {
+  const P = MIM_ARM[0].map(([x, y, z]) => [x * s, y, z]), w = P[P.length - 1];
+  const parts = [[tubeGeo('mimArm' + s, P, MIM_ARM[1], 7, 12), new THREE.Matrix4()], [geo('mimPalm', () => new THREE.SphereGeometry(1, 8, 6)), mat4(0, 0.004, 0, 0, 0, 0, 0.041)], [geo('mimPalm', () => new THREE.SphereGeometry(1, 8, 6)), mat4(w[0], w[1] - 0.04, w[2] + 0.005, 0.15, 0, 0, 0.024, 0.045, 0.012)]];
+  for (let i = 0; i < 5; i++) {
+    const th = i === 4, L = th ? 0.085 : [0.15, 0.185, 0.175, 0.14][i];
+    const f = tubeGeo('mimFinger' + i, [[0, 0, 0], [0, -L * 0.35, 0.008], [0, -L * 0.7, 0.024], [0, -L, 0.05]], [0.0085, 0.0075, 0.0058, 0.0024], 4, 6);
+    parts.push([f, mat4(w[0] + s * (th ? 0.022 : -0.018 + i * 0.012), w[1] - (th ? 0.03 : 0.075), w[2] + (th ? 0.016 : 0.008), th ? 0.3 : 0.12, 0, s * (th ? 0.55 : -0.06 + i * 0.045))]);
+  }
+  return mergeParts('mimArmH' + s, parts);
+}
+// 腿：大腿、突出來的膝蓋、小腿、腳踝，細長的腳
+const MIM_LEG = [[[0, 0, 0], [0, -0.23, 0.012], [0, -0.46, 0.026], [0, -0.69, 0.005], [0, -0.85, -0.02]], [0.052, 0.038, 0.037, 0.027, 0.021]];
+function mimLegGeo(s) {
+  const P = MIM_LEG[0].map(([x, y, z]) => [x * s, y, z]);
+  return mergeParts('mimLegF' + s, [[tubeGeo('mimLeg' + s, P, MIM_LEG[1], 8, 12), new THREE.Matrix4()],
+    [tubeGeo('mimFoot' + s, [[0, -0.84, -0.03], [s * 0.004, -0.885, 0.02], [s * 0.01, -0.905, 0.1], [s * 0.014, -0.91, 0.16]], [0.024, 0.022, 0.016, 0.009], 7, 8), new THREE.Matrix4()]]);
+}
+// 嘴裡上下兩排長長的爛牙（長短不一、歪歪的、缺了幾顆），合成一個網格
+function mimTeethGeo() {
+  return geo('mimTeeth', () => {
+    const rr = seeded(5507), parts = [], v = new THREE.Vector3(), cone = geo('mimTooth', () => new THREE.ConeGeometry(1, 1, 5, 1));
+    for (const up of [1, -1]) for (let i = 0; i < 11; i++) {
+      if (rr() < 0.12) continue;
+      const X = (i - 5) / 5 * MIM_MOUTH.wx * 0.84 + (rr() - 0.5) * 0.02, Y = MIM_MOUTH.y + up * MIM_MOUTH.wy * 0.9 * (1 - 0.3 * (X / MIM_MOUTH.wx) ** 4);
+      mimHeadPt(X, Y, Math.sqrt(Math.max(0, 1 - X * X - Y * Y)), v);
+      const L = 0.026 + rr() * 0.026, r0 = 0.004 + rr() * 0.0025;
+      parts.push([cone, mat4(v.x, v.y - up * L * 0.42, v.z - 0.006, up > 0 ? Math.PI + (rr() - 0.5) * 0.35 : (rr() - 0.5) * 0.35, 0, (rr() - 0.5) * 0.4, r0, L, r0)]);
+    }
+    return mergeParts('mimTeethM', parts);
+  });
+}
+function mimBuild(r, g) {
+  const T = { transparent: true };
+  const head = withDetail(ownPhong('#ffffff', { map: m5Tex('mimHead', 1024, 512, (c, W, H) => mimPaintHead(c, W, H, false)), specularMap: m5Tex('mimHeadS', 512, 256, (c, W, H) => mimPaintHead(c, W, H, true)), specular: 0xb0a0a0, shininess: 60, shade: 0.8, ...T }), 'corpse', 6, 0.6);
+  head.map.wrapS = head.specularMap.wrapS = THREE.ClampToEdgeWrapping;
+  const body = withDetail(ownPhong('#ffffff', { map: m5Tex('mimBody', 512, 512, (c, W, H) => mimPaintTorso(c, W, H, false)), specularMap: m5Tex('mimBodyS', 256, 256, (c, W, H) => mimPaintTorso(c, W, H, true)), specular: 0xb0a0a0, shininess: 60, shade: 0.8, ...T }), 'corpse', 5, 0.6);
+  const limb = withDetail(ownLM('#ffffff', { map: m5Tex('mimLimb', 256, 256, mimPaintLimb), shade: 0.8, ...T }), 'corpse', 5, 0.6);
+  const tooth = withDetail(ownLM('#bfb291', { shade: 0.7, ...T }), 'bone', 8, 0.9);
+  r.droolM = ownPhong('#8a0a12', { specular: 0xffb0b0, shininess: 90, emissive: 0x1a0000, shade: 0.5, ...T });
+  const ball = wetEyeMat(eyeballTex, 0x0c0808, 0x555555, T), iris = wetEyeMat(m5Tex('mimIris', 128, 128, mimPaintIris), 0x040404, 0x888888, T);
+  const lidM = withDetail(ownPhong('#ffffff', { vertexColors: true, specular: 0x402828, shininess: 30, shade: 0.8, ...T }), 'skin', 9, 1.0);
+  r.mats.push(head, body, limb, tooth, r.droolM, ball, iris, lidM);
+  r.hip = new THREE.Group(); r.hip.position.y = 0.91; g.add(r.hip);
+  r.legs = [];
+  for (const s of [-1, 1]) { const lg = new THREE.Group(); lg.position.set(s * 0.085, 0, 0); r.hip.add(lg); lg.add(new THREE.Mesh(mimLegGeo(s), limb)); r.legs.push(lg); }
+  r.torso = new THREE.Group(); r.hip.add(r.torso);
+  r.torso.add(new THREE.Mesh(mimTorsoGeo(), body));
+  r.head = new THREE.Group(); r.head.position.set(0, MIM_HEAD.y, MIM_HEAD.z); r.torso.add(r.head);
+  r.head.add(new THREE.Mesh(mimHeadGeo(), head));
+  r.head.add(new THREE.Mesh(mimTeethGeo(), tooth));
+  // 眼睛：凸出來的眼球（原本的臉往外推出眼球的一半多一點），瞪著你
+  r.eyesG = [];
+  const v = new THREE.Vector3();
+  for (const s of [-1, 1]) {
+    const X = s * MIM_EYE.x, Y = MIM_EYE.y, F = new THREE.Vector3(s * 0.3, 0.15, 1).normalize();
+    mimHeadPt(X, Y, Math.sqrt(1 - X * X - Y * Y), v, true);
+    const sock = new THREE.Group(); sock.position.copy(v).addScaledVector(F, -0.62 * MIM_EYE.R); sock.quaternion.setFromUnitVectors(Z_AXIS, F); r.head.add(sock);
+    const gz = new THREE.Group(); gz.rotation.order = 'YXZ'; sock.add(gz);
+    gz.add(new THREE.Mesh(geo('mimBall', () => new THREE.SphereGeometry(MIM_EYE.R, 14, 10)), ball));
+    gz.add(new THREE.Mesh(irisGeo('mimIris', MIM_EYE.R, MIM_EYE.R * 0.25, 0), iris));
+    sock.add(new THREE.Mesh(mimLidGeo(s < 0), lidM));
+    r.eyesG.push({ sock, gz, s });
+  }
+  // 從下唇垂下來的涎液（會晃，一直往下滴）
+  r.drool = []; r.drops = [];
+  MIM_LIP.forEach(([X, w, L], i) => {
+    const Y = MIM_MOUTH.y - MIM_MOUTH.wy * 1.02;
+    mimHeadPt(X, Y, Math.sqrt(1 - X * X - Y * Y), v);
+    const sg = new THREE.Group(); sg.position.set(v.x, v.y + 0.004, v.z - 0.004); r.head.add(sg);
+    const str = mergeParts('mimStrand' + i, [[tubeGeo('mimStr' + i, [[0, 0, 0], [0.003, -L * 0.4, 0.004], [-0.002, -L * 0.8, 0.002], [0, -L, 0]], [w * 0.45, w * 0.28, w * 0.2, w * 0.24], 5, 8), new THREE.Matrix4()],
+      [geo('mimDrop', () => new THREE.SphereGeometry(1, 6, 4)), mat4(0, -L - w * 0.15, 0, 0, 0, 0, w * 0.3, w * 0.42, w * 0.3)]]);
+    sg.add(new THREE.Mesh(str, r.droolM));
+    const tip = new THREE.Object3D(); tip.position.y = -L - w * 0.4; sg.add(tip);
+    r.drool.push(sg);
+    const dm = new THREE.Mesh(geo('mimDrop', () => null), r.droolM); dm.visible = false; g.add(dm);
+    r.drops.push({ m: dm, tip, ph: i * 0.53, w, at: new THREE.Vector3(), n: -1 });
+  });
+  // 手臂（肩膀那裡可以轉）
+  r.arms = [];
+  for (const s of [-1, 1]) { const a = new THREE.Group(); a.position.set(s * 0.185, 0.56, 0); r.torso.add(a); a.add(new THREE.Mesh(mimArmGeo(s), limb)); r.arms.push(a); }
+}
+// 眼眶：一圈貼著眼球邊緣、鼓起來的肉（轉一圈的斷面：[離眼睛中心多遠, 往前多少]，乘眼球半徑），外圈沉到臉的底下；
+// 裡面那圈濕濕的紅，往外變成眼窩的暗灰色；左眼整圈紅腫
+const MIM_LIDP = [[0.74, 0.6], [0.78, 0.67], [0.84, 0.69], [0.91, 0.65], [0.99, 0.56], [1.08, 0.44], [1.2, 0.27], [1.36, 0.06], [1.5, -0.12]];
+function mimLidGeo(red) {
+  return geo('mimLid' + red, () => {
+    const R = MIM_EYE.R, NA = 20, pos = [], col = [], idx = [], c = new THREE.Color(), cIn = new THREE.Color(red ? '#7a1218' : '#6a2a2c'), cMid = new THREE.Color(red ? '#a8343a' : '#8c7a78'), cOut = new THREE.Color(red ? '#6a3036' : '#57434a');
+    MIM_LIDP.forEach(([rr, z], i) => {
+      const k = i / (MIM_LIDP.length - 1);
+      c.copy(cIn).lerp(cMid, sstep(0, 0.3, k)).lerp(cOut, sstep(0.45, 1, k));
+      for (let j = 0; j < NA; j++) { const a = j / NA * Math.PI * 2, w = 1 + 0.04 * Math.sin(a * 3 + 1); pos.push(Math.cos(a) * rr * R * w, Math.sin(a) * rr * R * w, z * R); col.push(c.r, c.g, c.b); }
+    });
+    for (let i = 0; i < MIM_LIDP.length - 1; i++) for (let j = 0; j < NA; j++) { const a = i * NA + j, b = i * NA + (j + 1) % NA, cc = a + NA, d = b + NA; idx.push(a, cc, b, b, cc, d); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    g.setIndex(idx); g.computeVertexNormals();
+    return g;
+  });
+}
+// 虹膜：很小、深褐色（瞪著你的時候幾乎只看得到瞳孔），一點反光
+function mimPaintIris(c) {
+  const g = c.createRadialGradient(64, 64, 16, 64, 64, 62); g.addColorStop(0, '#2a1a12'); g.addColorStop(0.6, '#4a3226'); g.addColorStop(1, '#1a1210');
+  c.fillStyle = g; c.beginPath(); c.arc(64, 64, 63, 0, 7); c.fill();
+  c.fillStyle = '#040303'; c.beginPath(); c.arc(64, 64, 30, 0, 7); c.fill();
+  c.fillStyle = 'rgba(255,255,255,.75)'; c.beginPath(); c.arc(50, 50, 7, 0, 7); c.fill();
+}
+const _mimV = new THREE.Vector3();
+function mimSync(e, r, t, p, dt) {
+  const mv = moveSpeed4(e, r, dt), crawl = e.state === 'hunt' && !(e.retreat > 0) ? 1 : 0;
+  r.crawlK = (r.crawlK || 0) + (crawl - (r.crawlK || 0)) * Math.min(1, dt * 5);
+  const k = r.crawlK;
+  r.wph = (r.wph || 0) + dt * mv * (2.6 + k * 1.6);
+  const w = r.wph, walk = clamp(mv / 1.3, 0, 1.5);
+  if (e.retreat > 0) r.g.rotation.y = faceRot(e.face || 0);
+  // 站著時駝背、頭歪一邊；追你的時候四腳著地衝過來（身體往前倒、頭抬起來看著你）
+  r.hip.position.y = 0.91 - 0.07 * k + Math.abs(Math.sin(w)) * 0.05 * walk;
+  r.torso.rotation.x = 0.18 + 1.2 * k;
+  r.head.rotation.x = -1.05 * k + (e.retreat > 0 ? -0.3 : 0);
+  r.head.rotation.y = e.retreat > 0 ? Math.sin(t * 30) * 0.25 : Math.sin(t * 0.9) * 0.08;
+  r.head.rotation.z = (1 - k) * 0.25 + Math.sin(t * 1.3) * 0.05;
+  r.legs.forEach((leg, i) => { leg.rotation.x = 0.4 * k + Math.sin(w + i * Math.PI) * 0.5 * walk; });   // 爬的時候腳往後蹬、手往前撐
+  const knock = e.knock > 0 && (e.knockTick || 0) > 1.6 ? Math.abs(Math.sin(t * 14)) : 0;
+  r.arms[0].rotation.x = -1.55 * k + Math.sin(w + Math.PI) * (0.25 + 0.4 * k) * walk;
+  r.arms[1].rotation.x = -1.55 * k + Math.sin(w) * (0.25 + 0.4 * k) * walk - (e.knock > 0 ? 1.6 + knock * 0.4 : 0);
+  // 站著的時候細長的手臂往兩邊張開（照設計圖），一直抽動
+  r.arms[0].rotation.z = -(0.55 + Math.sin(t * 1.7) * 0.06) * (1 - k); r.arms[1].rotation.z = (0.55 + Math.sin(t * 1.5 + 1) * 0.06) * (1 - k) * (e.knock > 0 ? 0 : 1);
+  // 眼睛一直瞪著你，微微地抖
+  for (const ey of r.eyesG) {
+    _mimV.set(p.x, 1.55, p.y); ey.sock.worldToLocal(_mimV);
+    const yaw = clamp(Math.atan2(_mimV.x, _mimV.z), -0.5, 0.5) + Math.sin(t * 9 + ey.s) * 0.02, pitch = clamp(Math.atan2(-_mimV.y, Math.hypot(_mimV.x, _mimV.z)), -0.4, 0.4) + Math.sin(t * 7.3) * 0.02;
+    ey.gz.rotation.y += (yaw - ey.gz.rotation.y) * Math.min(1, dt * 10); ey.gz.rotation.x += (pitch - ey.gz.rotation.x) * Math.min(1, dt * 10);
+  }
+  // 垂下來的涎液：不管頭怎麼轉都往下垂、慢慢地晃；尾端的血珠一直往下滴
+  r.drool.forEach((s, i) => { s.rotation.set(-(r.torso.rotation.x + r.head.rotation.x) + Math.sin(t * 2 + i) * 0.08, 0, -r.head.rotation.z + Math.sin(t * 1.7 + i * 2) * 0.06); s.scale.y = 1 + 0.12 * Math.sin(t * 1.1 + i * 1.7); });
+  const a = enemyAlpha(e);
+  for (const d of r.drops) {
+    const P = 1.7, tt = t + d.ph * P, n = Math.floor(tt / P), tau = tt - n * P;
+    if (n !== d.n) { d.n = n; d.tip.getWorldPosition(d.at); r.g.worldToLocal(d.at); }
+    if (tau < 0.5) { d.m.visible = false; continue; }
+    const fall = tau - 0.5, y = d.at.y - 4.9 * fall * fall;
+    d.m.visible = y > 0.02 && a > 0.05;
+    d.m.position.set(d.at.x, y, d.at.z); d.m.scale.set(d.w * 0.4, d.w * (0.55 + fall * 0.8), d.w * 0.4);
+  }
+  r.g.position.y = floorH(e.x, e.y);
+}
+UPG.mimic = { build: mimBuild, sync: mimSync, view: { h: 2.15, d: 4.0, cy: 1.05 } };
+
 // ---------- 第四世界到這裡 ----------
 
 
