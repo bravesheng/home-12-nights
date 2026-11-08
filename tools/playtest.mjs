@@ -784,7 +784,7 @@ await scenario('book', '怪物圖鑑（沒見過的只有問號；見過的卡�
   }
 });
 
-await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板的草原、白天 6 分鐘晚上 5 分鐘、砍樹（掉板子和木柴、樹樁、2 天後長回來）、樹上和花上長的東西、釣魚、沐浴球丟進水裡洗出東西、工作台的合成書做方塊放在地上、12 天的天氣（下雨、雷暴雨打雷、霧）、7 隻新怪物晚上出來（不會出錯）、圖鑑的第五世界、存檔讀檔砍倒的樹', {}, async ({ page, shot, check }) => {
+await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板的草原、白天 6 分鐘晚上 5 分鐘、砍樹（掉板子和木柴、樹樁、2 天後長回來）、樹上和花上長的東西、釣魚、沐浴球丟進水裡洗出東西、工作台的合成書做方塊放在地上、12 天的天氣（下雨、雷暴雨打雷、霧）、7 隻新怪物晚上出來（不會出錯）（貼圖是預先做好的圖檔）、圖鑑的第五世界、存檔讀檔砍倒的樹', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=5&kit=1', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
   await sleep(2000);
@@ -818,9 +818,9 @@ await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板�
     Object.assign(G.p, { x, y, face: a + Math.PI, pitch: Math.atan2(pk.z + 0.1 - 1.5, 0.9) });
     if (!walkable(x, y)) return { skip: true };
     while (bagUsed() >= BAG_SLOTS) delete G.inv[invList().find(i => i !== pk.id)];
-    const lp = lookedPickup4(), n0 = G.inv[pk.id] || 0;
+    const lp = lookedPickup4();
     if (lp) takePickup4(lp.pk);
-    return { looked: !!lp, got: (G.inv[pk.id] || 0) > n0, id: pk.id };
+    return { looked: !!lp, got: !G.pickups.includes(pk), id: pk.id };   // 硬幣、燈泡不會進背包，看樹上的東西有沒有被拿走
   });
   check(fruit.skip || (fruit.looked && fruit.got), `看著樹上的東西按 E 要摘得下來（${JSON.stringify(fruit)}）`);
   // 釣魚：站在水邊看著水按住 E
@@ -920,6 +920,9 @@ await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板�
   await page.evaluate(() => { G.p.hp = 100; G.p.san = 100; for (const e of G.enemies) { e.x = 40.5 + (e.x - 40.5) * 0.6; } });
   await sleep(2500);
   await shot('6-night-monsters');
+  // 怪物的貼圖都是預先做好的圖檔（tex/m5-*.webp），不是當場畫的
+  const m5 = await page.evaluate(() => Renderer.m5());
+  check(Object.keys(m5).length >= 28 && Object.values(m5).every(v => v === 'file'), `第五世界怪物的貼圖都要從圖檔載入（${Object.entries(m5).filter(([, v]) => v !== 'file').map(([k, v]) => k + ' ' + v).join('、') || Object.keys(m5).length + ' 張'}）`);
   const book = await page.evaluate(() => BESTIARY.filter(m => monsterWorlds(m).includes(5)).map(m => m.kind || m.flower));
   check(['daydream', 'gaze', 'slice', 'green', 'cradle', 'clone', 'leak'].every(k => book.includes(k)), `圖鑑的第五世界要有 7 隻新怪物（${book.join('、')}）`);
 });
