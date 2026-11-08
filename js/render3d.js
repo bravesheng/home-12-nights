@@ -773,7 +773,7 @@ function setWorld() {
   for (const [c, r] of chestMap) { disposeGroup(r.g); chestMap.delete(c); }
   for (const k in furn3d) delete furn3d[k];
   // 第四世界：自己蓋的牆、屋頂、地上的板子、地上一灘一灘的東西、震波（不在房子群組裡，要自己拆）
-  for (const m of [wall4Map, roof4Map, loose4Map]) { for (const r of m.values()) disposeGroup(r.g); m.clear(); }
+  for (const m of [wall4Map, roof4Map, loose4Map, ramp4Map]) { for (const r of m.values()) disposeGroup(r.g); m.clear(); }
   for (const k in puddle4) { scene.remove(puddle4[k]); puddle4[k].material.dispose(); puddle4[k].dispose(); delete puddle4[k]; }
   for (const [w, m] of wave4Map) { scene.remove(m); m.material.dispose(); wave4Map.delete(w); }
   panel4 = null; panel4Info = []; grass4Mesh = null;
@@ -9236,8 +9236,14 @@ function makeStoreTextures() {
     c.beginPath(); c.moveTo(64, 14); c.lineTo(108, 62); c.lineTo(80, 62); c.lineTo(80, 114); c.lineTo(48, 114); c.lineTo(48, 62); c.lineTo(20, 62); c.closePath(); c.fill();
   });
   T.arrow.wrapS = T.arrow.wrapT = THREE.ClampToEdgeWrapping;
-  // 牆的裂痕（板子被打的時候疊上去，越破越明顯）
-  T.crack = canvasTex(256, 512, (c, w, h) => {
+  T.crack = crack4Tex();
+  store4Tex = T;
+}
+// 牆的裂痕（板子被打的時候疊上去，越破越明顯）：第五世界沒有蓋賣場（不會呼叫 makeStoreTextures），第一次放板子時才畫
+let crack4 = null;
+function crack4Tex() {
+  if (crack4) return crack4;
+  crack4 = canvasTex(256, 512, (c, w, h) => {
     c.clearRect(0, 0, w, h); c.lineCap = 'round'; c.lineJoin = 'round';
     // 幾個被打到的點，從那裡往外裂出細細的、折來折去的裂縫
     for (let k = 0; k < 4; k++) {
@@ -9252,8 +9258,8 @@ function makeStoreTextures() {
       c.fillStyle = 'rgba(20,15,10,.55)'; c.beginPath(); c.arc(cx, cy, 3 + rnd() * 4, 0, 7); c.fill();
     }
   });
-  T.crack.wrapS = T.crack.wrapT = THREE.ClampToEdgeWrapping;
-  store4Tex = T;
+  crack4.wrapS = crack4.wrapT = THREE.ClampToEdgeWrapping;
+  return crack4;
 }
 // 吊著的招牌（深灰色的板子、白字、下面一條顏色）
 const sign4Cache = new Map();
@@ -9335,7 +9341,7 @@ function buildWall4(w) {
   }
   // 裂痕：兩面各一片，越破越明顯
   if (w.tier !== 5) {
-    const cm = ownBasic({ map: store4Tex.crack, transparent: true, opacity: 0, depthWrite: false });
+    const cm = ownBasic({ map: crack4Tex(), transparent: true, opacity: 0, depthWrite: false });
     for (const s of [-1, 1]) {
       const pl = new THREE.Mesh(geo('crack4w' + W, () => new THREE.PlaneGeometry(W * 0.9, H * 0.9)), cm);
       if (hz) { pl.position.set(W / 2, H * 0.48, s * 0.056); pl.rotation.y = s > 0 ? 0 : Math.PI; } else { pl.position.set(s * 0.056, H * 0.48, W / 2); pl.rotation.y = s > 0 ? Math.PI / 2 : -Math.PI / 2; }
