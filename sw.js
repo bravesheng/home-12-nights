@@ -25,6 +25,16 @@ const ASSETS = [
   './tex/m5-gfLeaffalse.webp', './tex/m5-gfLeaftrue.webp', './tex/m5-gfFace11.webp', './tex/m5-gfFace12.webp', './tex/m5-gfFace13.webp', './tex/m5-gfFace14.webp', './tex/m5-clHead.webp',
   './tex/m5-crSclera.webp', './tex/m5-iris26.webp', './tex/m5-iris22.webp', './tex/m5-iris30.webp', './tex/m5-lkWisp.webp', './tex/m5-dmFlesh.webp',
   './tex/m5-gzIris.webp', './tex/m5-slIn.webp', './tex/m5-gfCore.webp', './tex/m5-clSkin.webp',
+  // 照第五世界的做法重做的舊怪物：黑影
+  './tex/m5-shBody.webp', './tex/m5-shLimb.webp', './tex/m5-shHead.webp', './tex/m5-shGlow.webp', './tex/m5-shShell.webp', './tex/m5-shPuff.webp',
+  // 第一世界重做的怪物（新的檔名加在這一行下面）
+
+  // 第二世界重做的怪物（新的檔名加在這一行下面）
+
+  // 第三世界重做的怪物（新的檔名加在這一行下面）
+
+  // 第四世界重做的怪物（新的檔名加在這一行下面）
+
 ];
 
 self.addEventListener('install', e => {

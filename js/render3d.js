@@ -6040,6 +6040,251 @@ function syncFireballs(t) {
   for (const [f, r] of fbMap) if (!seen.has(f)) { disposeGroup(r.g); fbMap.delete(f); }
 }
 
+// ====================================================================
+// 舊怪物照第五世界的做法重做：雕出來的網格（sculptGeo、loftGeo、tubeGeo）、逐點畫的貼圖，
+// 貼圖一樣預先畫好存成 tex/m5-<key>.webp（m5Tex；tools/make-monster5-tex.mjs 會把 UPG 裡的怪物也蓋一次）。
+// 每隻重做好的怪物在自己那一段登記：UPG.<kind> = { build(r, g), sync(e, r, t, p, dt), view }（view 是圖鑑的鏡頭，跟 BOOK_VIEW 一樣），
+// buildEnemy、syncEnemy、圖鑑會先用這裡的（舊的 build*、NEW_BUILD、BOOK_VIEW 不用改）。順序和進度在 docs/monster-upgrade-plan.md
+// ====================================================================
+const UPG = {};
+// 3D 的雜訊（逐點畫貼圖用）：在單位球、圓柱上取樣，繞一圈不會有接縫
+const nHash3 = (x, y, z, s) => { const h = Math.sin(x * 127.1 + y * 311.7 + z * 74.7 + s * 19.19) * 43758.5453; return h - Math.floor(h); };
+function vnoise3(x, y, z, s = 0) {
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z), xf = x - xi, yf = y - yi, zf = z - zi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf), w = zf * zf * (3 - 2 * zf), h = (i, j, k) => nHash3(xi + i, yi + j, zi + k, s), L = (a, b, t) => a + (b - a) * t;
+  return L(L(L(h(0, 0, 0), h(1, 0, 0), u), L(h(0, 1, 0), h(1, 1, 0), u), v), L(L(h(0, 0, 1), h(1, 0, 1), u), L(h(0, 1, 1), h(1, 1, 1), u), v), w);
+}
+const fbm3 = (x, y, z, oct = 4, s = 0) => { let a = 0, k = 0.5, f = 1; for (let i = 0; i < oct; i++) { a += k * vnoise3(x * f, y * f, z * f, s + i * 7); k *= 0.5; f *= 2.03; } return a / (1 - 0.5 ** oct); };
+// 幾個網格照各自的位置合成一個（手掌和手指合成一隻手，一隻手只要畫一次）
+function mergeParts(key, parts) {
+  return geo(key, () => {
+    const gs = parts.map(([gm, m]) => { const c = (gm.index ? gm.toNonIndexed() : gm.clone()); c.applyMatrix4(m); return c; });
+    let n = 0; for (const c of gs) n += c.attributes.position.count;
+    const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), uv = new Float32Array(n * 2);
+    let o = 0;
+    for (const c of gs) { pos.set(c.attributes.position.array, o * 3); nor.set(c.attributes.normal.array, o * 3); if (c.attributes.uv) uv.set(c.attributes.uv.array, o * 2); o += c.attributes.position.count; c.dispose(); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    return g;
+  });
+}
+const mat4 = (x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = sx, sz = sx) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(sx, sy, sz));
+
+// ---------- 黑影 ----------
+// 一個用很濃的黑煙凝成的人形，比人高一點：駝著背、頭往前伸，長長的手臂垂到膝蓋、手指又細又長；
+// 腰以下散成一縷一縷的煙、飄在地上；臉上沒有五官，只有兩個很深的眼窩，裡面亮著紅光，照得眼窩周圍紅紅的。身上一直冒出黑煙
+const SH_HEAD = { x: 0, y: 1.72, z: 0.15, rx: 0.098, ry: 0.128, rz: 0.112 };
+const SH_EYE = { x: 0.37, y: 0.05, R: 0.016 };
+const SH_FACE = [   // [X, Y, 寬, 高, 凸起多少, 左右對稱]（單位球上，正面看）
+  [0, 0.25, 0.55, 0.085, 0.09, false],            // 眉骨
+  [SH_EYE.x, SH_EYE.y, 0.15, 0.115, -0.32, true],  // 眼窩（很深）
+  [0.52, -0.17, 0.12, 0.09, 0.05, true],          // 顴骨
+  [0.4, -0.42, 0.15, 0.15, -0.07, true],          // 臉頰凹下去
+  [0, 0.03, 0.05, 0.2, 0.035, false],             // 鼻樑（沒有鼻子，只有一條隆起）
+  [0, -0.55, 0.3, 0.06, -0.025, false],           // 嘴的地方淡淡的一條凹痕（沒有嘴）
+];
+function shHeadPt(x, y, z, out) {
+  let X = x, Y = y, Z = z;
+  if (Y < 0) { const t = -Y; X *= 1 - 0.3 * t * t; if (Z > 0) Z *= 1 + 0.1 * t; }   // 下巴窄、往前
+  if (Z < 0) Z *= 1.12;   // 後腦勺大一點
+  else Z *= 1 - 0.14 * (1 - Y * Y);   // 臉平一點（不是一顆蛋）
+  let d = 0;
+  if (z > 0) {
+    for (const f of SH_FACE) for (const s of f[5] ? [-1, 1] : [1]) { const u = (x - s * f[0]) / f[2], v = (y - f[1]) / f[3]; if (u * u + v * v < 16) d += f[4] * Math.exp(-u * u - v * v); }
+    d *= sstep(0.05, 0.45, z);
+  }
+  const k = 1 + d / (Math.hypot(X, Y, Z) || 1);
+  return out.set(X * k * SH_HEAD.rx, Y * k * SH_HEAD.ry, Z * k * SH_HEAD.rz);
+}
+const shU = crWarp(-Math.PI, Math.PI, a => 1 + 1.2 * Math.exp(-((a / 0.8) ** 2))), shV = crWarp(0, Math.PI, th => 1 + 1.0 * Math.exp(-(((th - 1.5) / 0.6) ** 2)));
+const shHeadGeo = () => sculptGeo('shHead', shHeadPt, shU, shV, th => sstep(0.85, 1.0, th) * (1 - sstep(2.2, 2.4, th)), a => sstep(-1.0, -0.85, a) * (1 - sstep(0.85, 1.0, a)), [0.024, 0.028], [0.07, 0.08]);
+// 身體：脖子往下到散開的煙（往前駝，肩膀在脖子後面一點）；SH_SHELL 是外面那層薄薄的煙（大一圈）
+const SH_BODY = [
+  { y: 0.08, w: 0.03, d: 0.03, x: 0.05, z: -0.12 }, { y: 0.28, w: 0.075, d: 0.065, x: 0.025, z: -0.09 }, { y: 0.52, w: 0.13, d: 0.1, z: -0.06 },
+  { y: 0.78, w: 0.175, d: 0.125, z: -0.03 }, { y: 0.97, w: 0.165, d: 0.115, z: -0.02 }, { y: 1.13, w: 0.162, d: 0.105, z: 0 },
+  { y: 1.3, w: 0.2, d: 0.118, z: 0.02 }, { y: 1.44, w: 0.238, d: 0.12, z: 0.05 }, { y: 1.52, w: 0.25, d: 0.11, z: 0.075 },
+  { y: 1.575, w: 0.15, d: 0.088, z: 0.095 }, { y: 1.63, w: 0.056, d: 0.054, z: 0.12 }, { y: 1.7, w: 0.05, d: 0.05, z: 0.135 },
+];
+const SH_SHELL = SH_BODY.map(r => ({ ...r, w: r.w * 1.1 + 0.014, d: r.d * 1.1 + 0.014 }));
+// 手臂（從肩膀往下，左手；右手 x 反過來）：上臂、手肘、前臂、手腕
+const SH_ARM = [[[0, 0, 0], [-0.045, -0.2, -0.02], [-0.065, -0.38, -0.01], [-0.07, -0.56, 0.04], [-0.068, -0.74, 0.09]], [0.05, 0.043, 0.036, 0.031, 0.026]];
+const SH_SHOULDER = { x: 0.215, y: 1.5, z: 0.065 };
+// 煙的貼圖：很黑，有一點點灰紫色的煙紋往上流；身體那張腰以下慢慢散掉（透明），剩下一縷一縷的煙
+function shSmokeLum(cx, cy, cz, s) {
+  const q = fbm3(cx * 1.2, cy * 1.2, cz * 1.2, 3, s);
+  const n = fbm3(cx * 2.6 + q * 1.6, cy * 2.6 - q * 1.2, cz * 2.6, 5, s + 3);
+  return n;
+}
+function shPaintBody(c, W, H) {
+  const img = c.createImageData(W, H), d = img.data;
+  for (let py = 0; py < H; py++) {
+    const t = (py + 0.5) / H, fade = sstep(0.5, 1.0, t);
+    for (let px = 0; px < W; px++) {
+      const a = (px + 0.5) / W * Math.PI * 2, cx = Math.cos(a) * 1.2, cz = Math.sin(a) * 1.2, cy = t * 5.5;
+      const n = shSmokeLum(cx, cy * 0.55, cz, 31), streak = fbm3(cx * 3.5, cy * 0.35, cz * 3.5, 4, 47);
+      const L = 7 + 30 * n * n + 10 * streak * streak;
+      const al = fade ? clamp((streak * 0.75 + n * 0.45 + 0.35 - fade * 1.15) * 5, 0, 1) : 1;
+      const i = (py * W + px) * 4;
+      d[i] = L * 0.93; d[i + 1] = L * 0.9; d[i + 2] = L * 1.1; d[i + 3] = al * 255;
+    }
+  }
+  c.putImageData(img, 0, 0);
+}
+// 外面那層煙：一塊一塊破破的、邊緣很淡（只用透明度，顏色是黑的）
+function shPaintShell(c, W, H) {
+  const img = c.createImageData(W, H), d = img.data;
+  for (let py = 0; py < H; py++) {
+    const t = (py + 0.5) / H;
+    for (let px = 0; px < W; px++) {
+      const a = (px + 0.5) / W * Math.PI * 2, n = fbm3(Math.cos(a) * 2.2, t * 7, Math.sin(a) * 2.2, 5, 61);
+      const al = clamp((n - 0.42) * 2.6, 0, 1) * (1 - sstep(0.7, 1, t)) * sstep(0, 0.06, t);
+      const i = (py * W + px) * 4;
+      d[i] = 6; d[i + 1] = 5; d[i + 2] = 8; d[i + 3] = al * 255;
+    }
+  }
+  c.putImageData(img, 0, 0);
+}
+function shPaintLimb(c, W, H) {
+  const img = c.createImageData(W, H), d = img.data;
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const a = (px + 0.5) / W * Math.PI * 2, n = shSmokeLum(Math.cos(a), (py + 0.5) / H * 3, Math.sin(a), 71), L = 7 + 28 * n * n, i = (py * W + px) * 4;
+    d[i] = L * 0.93; d[i + 1] = L * 0.9; d[i + 2] = L * 1.1; d[i + 3] = 255;
+  }
+  c.putImageData(img, 0, 0);
+}
+// 頭：一樣是黑煙，眼窩裡最黑；emissive 那張是眼睛的紅光照在眼窩周圍
+function shPaintHead(c, W, H, glow) {
+  const img = c.createImageData(W, H), d = img.data;
+  for (let py = 0; py < H; py++) {
+    const th = shV.inv((py + 0.5) / H), st = Math.sin(th), y = Math.cos(th);
+    for (let px = 0; px < W; px++) {
+      const a = shU.inv((px + 0.5) / W), x = st * Math.sin(a), z = st * Math.cos(a), i = (py * W + px) * 4;
+      let e = 0;
+      if (z > 0) for (const s of [-1, 1]) { const u = (x - s * SH_EYE.x) / (glow ? 0.1 : 0.13), v = (y - SH_EYE.y) / (glow ? 0.08 : 0.1); e += Math.exp(-(u * u + v * v)); }
+      if (glow) {
+        const n = fbm3(x * 6, y * 6, z * 6, 3, 91), k = clamp(e * (0.5 + 0.4 * n), 0, 1);
+        d[i] = clamp(255 * k, 0, 255); d[i + 1] = 30 * k * k; d[i + 2] = 34 * k * k; d[i + 3] = 255;
+      } else {
+        const n = shSmokeLum(x * 1.6, y * 1.6, z * 1.6, 83), L = (8 + 26 * n * n) * (1 - 0.65 * clamp(e, 0, 1));
+        d[i] = L * 0.93; d[i + 1] = L * 0.9; d[i + 2] = L * 1.1; d[i + 3] = 255;
+      }
+    }
+  }
+  c.putImageData(img, 0, 0);
+}
+// 一團冒出來的煙（看板）：中間濃、邊緣破破的
+function shPaintPuff(c, W, H) {
+  const img = c.createImageData(W, H), d = img.data;
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const x = (px + 0.5) / W * 2 - 1, y = (py + 0.5) / H * 2 - 1, q = fbm3(x * 1.5, y * 1.5, 2.5, 3, 107), n = fbm3(x * 3 + q * 2, y * 3 - q, 0.5, 5, 101), r = Math.hypot(x, y);
+    const al = clamp((1 - r * (0.9 + 1.1 * (1 - n))) * 2.2, 0, 1) * clamp(n * 1.6 - 0.2, 0, 1), i = (py * W + px) * 4;
+    d[i] = 10; d[i + 1] = 9; d[i + 2] = 12; d[i + 3] = al * 255;
+  }
+  c.putImageData(img, 0, 0);
+}
+// 手：小小的手掌、四根很長的手指（尾端尖尖的）、大拇指，合成一個網格
+function shHandGeo(s) {
+  const parts = [[geo('shPalm', () => new THREE.SphereGeometry(1, 10, 8)), mat4(0, -0.035, 0.004, 0, 0, 0, 0.021, 0.038, 0.01)], [geo('shPalm', () => null), mat4(0, 0, 0, 0, 0, 0, 0.027)]];   // 手掌、手腕（蓋住手臂的切口）
+  for (let i = 0; i < 5; i++) {
+    const th = i === 4, L = th ? 0.09 : [0.165, 0.2, 0.19, 0.15][i];
+    const f = tubeGeo('shFinger' + i, [[0, 0, 0], [0, -L * 0.4, 0.012], [0, -L * 0.75, 0.032], [0, -L, 0.06]], [0.0095, 0.008, 0.0062, 0.0022], 6, 10);
+    parts.push([f, mat4(s * (th ? 0.024 : -0.02 + i * 0.013), th ? -0.025 : -0.066, th ? 0.012 : 0.004, th ? 0.25 : 0, 0, s * (th ? 0.55 : -0.08 + i * 0.05))]);
+  }
+  return mergeParts('shHand' + s, parts);
+}
+function buildShadow(r, g) {
+  const T = { transparent: true };
+  const body = ownPhong('#ffffff', { map: m5Tex('shBody', 512, 1024, shPaintBody), specular: 0x0c0b10, shininess: 6, shade: 0.8, depthWrite: true, ...T });
+  const limb = ownPhong('#ffffff', { map: m5Tex('shLimb', 256, 256, shPaintLimb), specular: 0x0c0b10, shininess: 6, shade: 0.8, ...T });
+  const head = ownPhong('#ffffff', { map: m5Tex('shHead', 1024, 512, (c, W, H) => shPaintHead(c, W, H, false)), emissiveMap: m5Tex('shGlow', 512, 256, (c, W, H) => shPaintHead(c, W, H, true)), emissive: 0xffffff, specular: 0x0c0b10, shininess: 6, shade: 0.8, ...T });
+  for (const m of [head]) { m.map.wrapS = THREE.ClampToEdgeWrapping; m.emissiveMap.wrapS = THREE.ClampToEdgeWrapping; }
+  const ball = ownPhong('#050405', { specular: 0x553333, shininess: 80, shade: 0.5, ...T });
+  const pupil = ownBasic({ color: 0xff2630, ...T });
+  r.mats.push(body, limb, head, ball, pupil);
+  r.headM = head;
+  r.body = new THREE.Group(); g.add(r.body);
+  r.body.add(new THREE.Mesh(loftGeo('shBody', SH_BODY, { seg: 26, sub: 4, capA: 0.04, capB: 0.02, uv: [0, 1, 1, 0] }), body));
+  // 外面那層薄薄的煙：不寫深度、慢慢轉，邊緣看起來一直在飄（透明度在 syncShadow 照怪物的透明度算）
+  r.shellM = ownBasic({ map: m5Tex('shShell', 256, 512, shPaintShell), transparent: true, depthWrite: false, side: THREE.DoubleSide });
+  r.shell = new THREE.Mesh(loftGeo('shShell', SH_SHELL, { seg: 22, sub: 3, uv: [0, 1, 1, 0] }), r.shellM); r.body.add(r.shell);
+  // 頭和眼睛（眼睛縮在眼窩最裡面：黑黑亮亮的眼球、紅色的瞳孔、往外透的紅光）
+  r.head = new THREE.Group(); r.head.position.set(SH_HEAD.x, SH_HEAD.y, SH_HEAD.z); r.body.add(r.head);
+  r.head.add(new THREE.Mesh(shHeadGeo(), head));
+  const v = new THREE.Vector3();
+  for (const s of [-1, 1]) {
+    const X = s * SH_EYE.x, Y = SH_EYE.y;
+    shHeadPt(X, Y, Math.sqrt(1 - X * X - Y * Y), v);
+    const e = new THREE.Group(); e.position.set(v.x - s * 0.002, v.y, v.z - SH_EYE.R * 1.1); r.head.add(e);
+    e.add(new THREE.Mesh(geo('shBall', () => new THREE.SphereGeometry(SH_EYE.R, 14, 10)), ball));
+    const pu = new THREE.Mesh(geo('shPupil', () => new THREE.SphereGeometry(SH_EYE.R * 0.5, 10, 8)), pupil); pu.position.z = SH_EYE.R * 0.62; pu.scale.z = 0.5; e.add(pu);
+    const gl = ownSprite(glowTex, 0xff3344); gl.position.z = SH_EYE.R * 1.4; gl.scale.setScalar(0.075); e.add(gl);
+    const halo = ownSprite(glowTex, 0x4a0a10); halo.position.z = SH_EYE.R * 2; halo.scale.setScalar(0.12); e.add(halo);
+    r.eyes.push(gl, halo);
+  }
+  // 手臂和手（肩膀那裡可以轉：走路時前後晃）
+  r.arms = [];
+  for (const s of [-1, 1]) {
+    const a = new THREE.Group(); a.position.set(s * SH_SHOULDER.x, SH_SHOULDER.y, SH_SHOULDER.z); r.body.add(a);
+    const P = SH_ARM[0].map(([x, y, z]) => [x * -s, y, z]);
+    a.add(new THREE.Mesh(tubeGeo('shArm' + s, P, SH_ARM[1], 9, 14), limb));
+    const h = new THREE.Mesh(shHandGeo(s), limb); h.position.set(...P[P.length - 1]); h.rotation.set(0.18, 0, s * 0.05); a.add(h);
+    r.arms.push(a);
+  }
+  // 冒出來的黑煙：從肩膀、頭、背、手臂和散開的下半身往上飄、越飄越大、越淡
+  r.puffs = [];
+  const puffTex = m5Tex('shPuff', 128, 128, shPaintPuff);
+  const at = [[0.18, 1.5, -0.02], [-0.2, 1.48, 0], [0, 1.82, 0.1], [0.06, 1.3, -0.1], [-0.08, 1.1, -0.1], [0.3, 0.95, 0.1], [-0.3, 0.9, 0.1], [0.04, 0.45, -0.05], [-0.06, 0.25, -0.08], [0.02, 0.6, 0.06]];
+  at.forEach((p, i) => {
+    const m = new THREE.SpriteMaterial({ map: puffTex, color: 0xffffff, transparent: true, depthWrite: false, fog: true }); m.userData.own = true;
+    const sp = new THREE.Sprite(m); sp.userData = { p, ph: hash01(i * 3.7 + 1), rate: 0.35 + hash01(i * 1.3) * 0.25, dx: (hash01(i * 5.1) - 0.5) * 0.25, rot: (hash01(i * 2.9) - 0.5) * 2 };
+    r.body.add(sp); r.puffs.push(sp);
+  });
+}
+function syncShadow(e, r, t, p, dt) {
+  const a = enemyAlpha(e);
+  // 往前駝，追你的時候更往前傾；頭偶爾歪一下、抽一下
+  const sp = r.lx === undefined ? 0 : Math.hypot(e.x - r.lx, e.y - r.ly) / Math.max(dt, 1e-3);
+  r.lx = e.x; r.ly = e.y;
+  r.spd = (r.spd || 0) + (Math.min(sp, 3) - (r.spd || 0)) * Math.min(1, dt * 3);
+  r.body.rotation.x = 0.05 + r.spd * 0.05;
+  const jerk = Math.sin(t * 0.37 + e.wob) > 0.93 ? Math.sin(t * 40) * 0.06 : 0;
+  r.head.rotation.set(-0.05 + Math.sin(t * 0.8 + e.wob) * 0.05, Math.sin(t * 0.45 + e.wob * 0.5) * 0.12, Math.sin(t * 0.6) * 0.1 + jerk);
+  r.arms.forEach((arm, i) => { const s = i ? 1 : -1; arm.rotation.set(Math.sin(e.wob * 2.2 + i * Math.PI) * (0.06 + r.spd * 0.06), 0, s * (0.04 + Math.sin(t * 0.9 + i) * 0.03)); });
+  r.headM.emissiveIntensity = 0.75 + 0.25 * Math.sin(e.wob * 5);
+  // 外面那層煙慢慢轉、一漲一縮
+  r.shellM.opacity = a * 0.7;
+  r.shell.rotation.y = Math.sin(t * 0.4 + e.wob) * 0.25;
+  const br = 1 + Math.sin(t * 1.3 + e.wob) * 0.025; r.shell.scale.set(br, 1, br);
+  for (const sp2 of r.puffs) {
+    const u = sp2.userData, k = (t * u.rate + u.ph) % 1;
+    sp2.position.set(u.p[0] + u.dx * k, u.p[1] + 0.45 * k - (u.p[1] < 0.7 ? 0.25 * k : 0), u.p[2] - 0.12 * k);
+    sp2.scale.setScalar(0.12 + 0.34 * k);
+    sp2.material.rotation = u.rot * k;
+    sp2.material.opacity = a * 0.38 * Math.sin(Math.PI * k);
+  }
+}
+UPG.shadow = { build: buildShadow, sync: syncShadow, view: { h: 1.9, d: 3.7, cy: 0.95 } };
+
+// ---------- 第一世界重做的怪物（火柴人、衣櫃怪、黑球、血淚女、小丑和紅氣球、爬行女、鳥腳女、它；眼球花） ----------
+
+// ---------- 第一世界到這裡 ----------
+
+
+// ---------- 第二世界重做的怪物（草叢人、大嘴觸角蟲、眼花女孩；向日葵眼、千眼菇） ----------
+
+// ---------- 第二世界到這裡 ----------
+
+
+// ---------- 第三世界重做的怪物（克羅諾斯・蕈裂、熔岩暴君、墮落戰神、檮杌・九瞳） ----------
+
+// ---------- 第三世界到這裡 ----------
+
+
+// ---------- 第四世界重做的怪物（葵氏奶昔、紅涎偽人、SCP-3008-2、Hubert、燼皇） ----------
+
+// ---------- 第四世界到這裡 ----------
+
+
 const enemyMap = new Map();
 function eyePair(g, y, z, color, size, gap) {
   const eyes = [];
@@ -6054,7 +6299,8 @@ function buildEnemy(e, parent = scene) {
   const g = new THREE.Group(); parent.add(g);
   const mat = ownBasic({ color: 0x000000, transparent: true, opacity: 1 });
   const r = { g, mat, wisps: [], eyes: [], mats: [mat] };
-  if (e.kind === 'woman') {
+  if (UPG[e.kind]) UPG[e.kind].build(r, g);   // 照第五世界的做法重做過的
+  else if (e.kind === 'woman') {
     // 深色長裙、蒼白細長的手、垂到背後的長髮、永遠面向你的臉
     const dress = new THREE.Mesh(geo('dress', () => new THREE.ConeGeometry(0.34, 1.32, 16, 1, true)), mat);
     dress.position.y = 0.72; g.add(dress);
@@ -6119,7 +6365,8 @@ function syncEnemy(e, r, t, p) {
     const eo = a * (0.6 + 0.4 * Math.sin(e.wob * 5));
     for (const ey of r.eyes) ey.material.opacity = eo;
     r.wisps.forEach((w, i) => w.position.set(Math.sin(e.wob * 3 + i * 1.7) * 0.22, 0.25 + Math.abs(Math.sin(e.wob * 2 + i)) * 0.3, Math.cos(e.wob * 2.5 + i * 2.1) * 0.18));
-    if (e.kind === 'woman') {
+    if (UPG[e.kind]) { const dt = clamp(t - (r.lastT ?? t), 0, 0.1); r.lastT = t; UPG[e.kind].sync(e, r, t, p, dt); }
+    else if (e.kind === 'woman') {
       // 被看著時完全不動、頭歪一邊；沒被看著時飄著、會抖
       const jit = e.seen ? 0 : (Math.random() - 0.5) * 0.015;
       r.g.position.set(e.x + jit, fh + (e.seen ? 0.06 : 0.06 + Math.sin(e.wob * 1.6) * 0.05), e.y + jit);
@@ -10570,11 +10817,11 @@ function warmMonsters5(t) {
   const r = buildEnemy({ kind: WARM5[warm5i++], x: 0, y: 0, wob: 0 });
   disposeGroup(r.g);
 }
-// tools/make-monster5-tex.mjs（網址有 &bake5）：7 隻都蓋一次、當場畫貼圖，把每張貼圖壓成 WebP 傳回去，存成 tex/m5-<key>.webp；
+// tools/make-monster5-tex.mjs（網址有 &bake5）：7 隻和重做過的舊怪物（UPG）都蓋一次、當場畫貼圖，把每張貼圖壓成 WebP 傳回去，存成 tex/m5-<key>.webp；
 // 沒有 &bake5 時只傳回每隻蓋多久（量卡頓用）
 function bake5() {
   const ms = {};
-  for (const kind of WARM5) { const t0 = performance.now(); disposeGroup(buildEnemy({ kind, x: 0, y: 0, wob: 0 }).g); ms[kind] = Math.round(performance.now() - t0); }
+  for (const kind of [...WARM5, ...Object.keys(UPG)]) { const t0 = performance.now(); disposeGroup(buildEnemy({ kind, x: 0, y: 0, wob: 0 }).g); ms[kind] = Math.round(performance.now() - t0); }
   const tex = !M5_BAKE ? [] : Object.entries(m5Texs).map(([key, t]) => ({ key, w: t.image.width, h: t.image.height, url: t.image.toDataURL('image/webp', 0.9) }));
   return { ms, tex };
 }
@@ -10897,7 +11144,7 @@ function bookModel(spec) {
       pose: true, thrust: 0, limpT: 0, retreat: 0, stomp: 0, cooled: 0, swing: 0, roar: 0, pounce: 0, lit: false, face: Math.PI / 2, eyes: Array.from({ length: 9 }, () => ({ shut: false })) };
     m = { key, e, r: buildEnemy(e, book.scene) };
   }
-  const v = BOOK_VIEW[spec.flower || spec.kind] || {};
+  const v = (!spec.flower && UPG[spec.kind] && UPG[spec.kind].view) || BOOK_VIEW[spec.flower || spec.kind] || {};
   m.h = v.h || barH(m.e || m.f); m.d = v.d || m.h * 1.85 + 0.3; m.cy = v.cy ?? m.h * 0.5;
   m.ds = v.ds || 1;
   m.r.g.visible = false;
