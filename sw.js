@@ -1,7 +1,7 @@
 // 在家生存 12 夜 — 離線快取
 // 第一次打開時把整個遊戲存到平板裡，之後沒有網路也能玩。
 // 每次更新遊戲都要改 VERSION，平板連上網路時就會自動下載新版本。
-const VERSION = 'home12-v35';
+const VERSION = 'home12-v36';
 const ASSETS = [
   './', './index.html', './style.css', './manifest.webmanifest', './test.html', './manifest-test.webmanifest',
   './js/version.js', './js/data.js', './js/audio.js', './js/world2.js', './js/world3.js', './js/world4.js', './js/world5.js', './js/net.js', './js/netmon.js', './js/game.js', './js/render3d.js',
@@ -28,12 +28,34 @@ const ASSETS = [
   // 照第五世界的做法重做的舊怪物：黑影
   './tex/m5-shBody.webp', './tex/m5-shLimb.webp', './tex/m5-shHead.webp', './tex/m5-shGlow.webp', './tex/m5-shShell.webp', './tex/m5-shPuff.webp',
   // 第一世界重做的怪物（新的檔名加在這一行下面）
+  './tex/m5-skLimb.webp', './tex/m5-skEmber.webp', './tex/m5-skHead.webp', './tex/m5-skGlow.webp',
+  './tex/m5-fsSkin.webp', './tex/m5-fsHead.webp', './tex/m5-fsEye.webp',
+  './tex/m5-blSkin.webp', './tex/m5-blBump.webp', './tex/m5-blEye.webp', './tex/m5-blEyeGlow.webp',
+  './tex/m5-efStem.webp', './tex/m5-efLeaf.webp', './tex/m5-efCalyx.webp', './tex/m5-efSclera.webp', './tex/m5-efIris.webp',
+  './tex/m5-wmHead.webp', './tex/m5-wmIris.webp', './tex/m5-wmDress.webp',
+  './tex/m5-cwHead.webp', './tex/m5-cwIris.webp', './tex/m5-cwStripe.webp', './tex/m5-cwHat.webp', './tex/m5-cwBalloon.webp',
+  './tex/m5-kwHead.webp', './tex/m5-kwGown.webp',
+  './tex/m5-mmHead.webp', './tex/m5-mmBody.webp',
+  './tex/m5-tlHead.webp', './tex/m5-tlGlow.webp',
 
   // 第二世界重做的怪物（新的檔名加在這一行下面）
+  './tex/m5-w2sfAtlas.webp', './tex/m5-w2sfDisc.webp', './tex/m5-w2sfDiscH.webp', './tex/m5-w2sfLid.webp', './tex/m5-w2sfEye.webp', './tex/m5-w2sfIris.webp',
+  './tex/m5-w2muCap.webp', './tex/m5-w2muCapH.webp', './tex/m5-w2muAtlas.webp', './tex/m5-w2muLid.webp', './tex/m5-w2muEye.webp',
+  './tex/m5-w2grBlade.webp', './tex/m5-w2grHead.webp', './tex/m5-w2grBody.webp',
+  './tex/m5-w2snBody.webp', './tex/m5-w2snBodyH.webp', './tex/m5-w2snBodyS.webp', './tex/m5-w2snLip.webp', './tex/m5-w2snThroat.webp', './tex/m5-w2snEye.webp',
+  './tex/m5-w2glLimb.webp', './tex/m5-w2glHead.webp', './tex/m5-w2glTop.webp', './tex/m5-w2glSkirt.webp', './tex/m5-w2glHair.webp', './tex/m5-w2glPetal.webp',
 
   // 第三世界重做的怪物（新的檔名加在這一行下面）
+  './tex/m5-krSkin.webp', './tex/m5-krHead.webp', './tex/m5-krCap.webp', './tex/m5-krCapE.webp', './tex/m5-krEye.webp', './tex/m5-krRag.webp', './tex/m5-krStrip.webp',
+  './tex/m5-wlSkull.webp', './tex/m5-wlPlate.webp', './tex/m5-wlCloak.webp', './tex/m5-wlWrap.webp',
+  './tex/m5-twFur.webp', './tex/m5-twHead.webp', './tex/m5-twStrand.webp', './tex/m5-twEye.webp',
 
   // 第四世界重做的怪物（新的檔名加在這一行下面）
+  './tex/m5-shkCarton.webp', './tex/m5-shkSclera.webp', './tex/m5-shkIris.webp', './tex/m5-shkLid.webp',
+  './tex/m5-mimHead.webp', './tex/m5-mimHeadS.webp', './tex/m5-mimBody.webp', './tex/m5-mimBodyS.webp', './tex/m5-mimLimb.webp', './tex/m5-mimIris.webp',
+  './tex/m5-stfHead.webp', './tex/m5-stfShirt.webp', './tex/m5-stfSleeve.webp', './tex/m5-stfPants.webp', './tex/m5-stfBadge.webp',
+  './tex/m5-hubBody.webp', './tex/m5-hubLeg.webp', './tex/m5-hubPipe.webp',
+  './tex/m5-embBody.webp', './tex/m5-embLimb.webp', './tex/m5-embHead.webp', './tex/m5-embGlow.webp', './tex/m5-embWing.webp', './tex/m5-embWingE.webp', './tex/m5-embFlame.webp', './tex/m5-embFlameMask.webp',
 
 ];
 
