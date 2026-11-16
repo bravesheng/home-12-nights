@@ -290,7 +290,7 @@ function saveGame() {
     p: { x: G.p.x, y: G.p.y, hp: G.p.hp, san: G.p.san, hunger: G.p.hunger, bat: G.p.bat, flashLv: G.p.flashLv },
     inv: G.inv, selId: G.selId,
     sockets: G.sockets.map(s => s.bulb), socketIds: G.sockets.map(s => s.id),   // 燈座用 id 對，地圖改版燈泡才不會裝錯位置
-    lamps: G.lamps.map(l => ({ type: l.type, x: l.x, y: l.y, bulb: l.bulb, free: l.free ? 1 : undefined, face: l.face })),
+    lamps: G.lamps.map(l => ({ type: l.type, x: l.x, y: l.y, bulb: l.bulb, free: l.free ? 1 : undefined, face: l.face, h: l.h || undefined })),   // h：第四世界放在家具、貨架、屋頂上的燈
     containers: G.containers, stats: G.stats,
     flowers: G.flowers.map(f => ({ x: f.x, y: f.y, lv: f.lv, pt: f.ptype || 'eye', g: Math.round(f.grow * 100) / 100 })),
     coins: G.coins, chests: G.chests, gift: G.gift, treasure: G.treasure, stock: G.stock,
@@ -335,7 +335,7 @@ function loadGame() {
     if (so) so.bulb = b;
     else if (b && BULBS[b]) G.inv['bulb' + b] = (G.inv['bulb' + b] || 0) + 1;
   });
-  G.lamps = (s.lamps || []).filter(l => walkable(l.x + 0.5, l.y + 0.5)).map(l => ({ kind: 'lamp', ...l, dying: 0, room: roomGrid[l.y][l.x] }));
+  G.lamps = (s.lamps || []).filter(l => walkable(l.x + 0.5, l.y + 0.5) || (l.h > 0 && inMap(l.x, l.y) && furnGrid[l.y][l.x])).map(l => ({ kind: 'lamp', ...l, dying: 0, room: roomGrid[l.y][l.x] }));
   G.containers = s.containers || {};
   if (G.mapReset4) {
     // 第四世界的賣場改版了：放好的檯燈收回背包、櫃子裡自己放的東西放在入口旁邊的地上（不會不見）、掉在地上的東西重新排
@@ -345,7 +345,7 @@ function loadGame() {
     for (const c of Object.values(G.containers)) for (const e of c.items || []) if (e.includes(':')) keep.push(e.split(':'));
     s.pickups = keep.filter(([id]) => ITEMS[id]).map(([id, n], i) => ({ x: W4.start.x + 2 + (i % 4) * 0.5, y: W4.start.y - 2 - Math.floor(i / 4) * 0.5, id, n: +n || 1 }));
     G.containers = {};
-    toast('🏬 3008 賣場變大了！你之前蓋的板子都疊在入口旁邊的地上，放好的檯燈收回背包了，要重新蓋家喔。', 'warn');
+    toast('🏬 賣場重新整理過了（貨架排開、梯子收在貨架裡）！你之前蓋的板子都疊在入口旁邊的地上，放好的檯燈收回背包了，要重新蓋家喔。', 'warn');
   }
   for (const f of FURN) if (f.loot && !G.containers[f.id]) G.containers[f.id] = { items: [] };
   G.stats = Object.assign(G.stats, s.stats || {});
@@ -623,7 +623,10 @@ function hits(x, y, r) {
   for (let ty = Math.floor(y - r); ty <= Math.floor(y + r); ty++)
     for (let tx = Math.floor(x - r); tx <= Math.floor(x + r); tx++) {
       if (!isSolid(tx, ty)) continue;
-      if (pz >= 0) { const top = tileTopH(tx, ty); if (top !== null && pz >= top - STEP_H) continue; }
+      if (pz >= 0) {
+        const top = tileTopH(tx, ty); if (top !== null && pz >= top - STEP_H) continue;
+        const dk = deckAt(tx, ty, pz); if (dk && pz + bodyH(G.p) <= dk.next - DECK_BEAM) continue;   // 貨架的某一層：頭上夠高才進得去（要蹲下）
+      }
       const nx = clamp(x, tx, tx + 1), ny = clamp(y, ty, ty + 1);
       if ((x - nx) ** 2 + (y - ny) ** 2 < r * r) return true;
     }
@@ -649,14 +652,25 @@ function tileTopH(tx, ty) {
   const f = furnGrid[ty][tx];
   return f ? furnTopH(f, tx - f.x, ty - f.y) : null;
 }
+// 一層一層的家具（第四世界的倉儲貨架，data.js 的 FURN_DECKS）：腳的高度是 z 的時候站在哪一層（h）、頭上那一層多高（next）；
+// 比最下面那一層還低就是 null（從地上走不進去）
+function deckAt(tx, ty, z) {
+  const f = inMap(tx, ty) ? furnGrid[ty][tx] : null, D = f && FURN_DECKS[f.type];
+  if (!D) return null;
+  let h = null, next = Infinity;
+  for (const d of D) { if (d <= z + STEP_H) h = d; else { next = d; break; } }
+  return h === null ? null : { h, next };
+}
+const bodyH = p => (p.crouch ? 1.0 : 1.8);   // 身體多高（蹲下比較矮，才鑽得進貨架的層和層之間）
 // 腳下的高度：玩家（半徑 r 的圓）壓到的格子裡最高的家具頂面；都沒壓到家具就是 0（地板）
 function groundUnder(x, y, r = PLAYER_R) {
   let h = 0;
   for (let ty = Math.floor(y - r); ty <= Math.floor(y + r); ty++)
     for (let tx = Math.floor(x - r); tx <= Math.floor(x + r); tx++) {
       if (!isSolid(tx, ty)) continue;
-      const top = tileTopH(tx, ty);
+      let top = tileTopH(tx, ty);
       if (top === null) continue;
+      if (FURN_DECKS[furnGrid[ty][tx].type]) { const dk = deckAt(tx, ty, G.p.z || 0); if (!dk) continue; top = dk.h; }   // 貨架：站在腳下那一層
       const nx = clamp(x, tx, tx + 1), ny = clamp(y, ty, ty + 1);
       if ((x - nx) ** 2 + (y - ny) ** 2 < r * r && top > h) h = top;
     }
@@ -3439,14 +3453,34 @@ function lampTile() {
   const ok = (x, y) => inMap(x, y) && tiles[y][x] === 1 && !solid[y][x] &&
     ![...G.sockets, ...G.lamps].some(o => o.x === x && o.y === y);
   const tx = Math.floor(p.x + Math.cos(p.face) * 0.95), ty = Math.floor(p.y + Math.sin(p.face) * 0.95);
-  if (ok(tx, ty) && !(isW4() && moveBlocked4(p.x, p.y, tx + 0.5, ty + 0.5))) return { x: tx, y: ty };   // 不要放到牆的另一邊
+  if (isW4()) {
+    // 第四世界（設計師第六次紙條：燈沒有限制只能放哪，鐵架上也可以，只要兩個東西不黏在一起）：
+    // 前面那一格是家具就放在它上面（桌上、櫃子上、貨架的某一層），站在屋頂上就放在屋頂上；同一格同一個高度不能有兩盞
+    const z = p.z || 0, free = (x, y, h) => !G.lamps.some(o => o.x === x && o.y === y && Math.abs((o.h || 0) - h) < 0.4);
+    const spot = (x, y) => {
+      if (!inMap(x, y) || tiles[y][x] !== 1 || (dynSolid && dynSolid[y][x])) return null;
+      const f = furnGrid[y][x];
+      let h = 0;
+      if (f) {
+        const inRack = !!deckAt(Math.floor(p.x), Math.floor(p.y), z);   // 自己蹲在貨架裡：放在腳下這一層；站在外面：放在胸口高的那一層
+        const dk = FURN_DECKS[f.type] ? deckAt(x, y, inRack ? z : z + 1.35) : null, top = dk ? dk.h : FURN_DECKS[f.type] ? null : tileTopH(x, y);
+        if (top === null || top > z + 1.5 || top < z - 1.2) return null;   // 站不上去的家具（太高、沒有平的頂面）放不了
+        h = top;
+      } else if (solid[y][x]) return null;
+      else h = Math.max(0, surf4(x + 0.5, y + 0.5, z + 0.3) - 0.04);
+      return free(x, y, h) ? { x, y, h: Math.round(h * 100) / 100 } : null;
+    };
+    const a = !moveBlocked4(p.x, p.y, tx + 0.5, ty + 0.5) ? spot(tx, ty) : null;   // 不要放到牆的另一邊
+    return a || spot(Math.floor(p.x), Math.floor(p.y));
+  }
+  if (ok(tx, ty)) return { x: tx, y: ty };
   if (ok(Math.floor(p.x), Math.floor(p.y))) return { x: Math.floor(p.x), y: Math.floor(p.y) };
   return null;
 }
 function placeLamp(type, id) {
   const t = lampTile();
   if (!t) { toast('這裡放不下。'); return; }
-  G.lamps.push({ kind: 'lamp', type, x: t.x, y: t.y, room: roomGrid[t.y][t.x], bulb: 0, dying: 0 });
+  G.lamps.push({ kind: 'lamp', type, x: t.x, y: t.y, h: t.h || 0, room: roomGrid[t.y][t.x], bulb: 0, dying: 0 });
   removeItem(id); Sound.play('place');
   toast(`放下了${ITEMS[id].name}。選擇燈泡後看著它按 E 裝上。`);
   const bulbs = invList().filter(i => ITEMS[i].kind === 'bulb');
@@ -3702,7 +3736,7 @@ function updateFx(dt) {
 // 燈泡在 3D 空間的位置（h = 離地高度）
 function bulbPos(o) {
   const h = { socket: isW3() ? 2.7 : 2.3, chand: 2.2, floor: 1.5, desk: 0.48, tv: 0.62 }[o.type];   // 第三世界的天花板比較高，天花板的燈也掛高一點
-  return { x: o.x + 0.5, y: o.y + 0.5, h };
+  return { x: o.x + 0.5, y: o.y + 0.5, h: h + (o.h || 0) };
 }
 
 // ====================================================================
@@ -4270,6 +4304,7 @@ addEventListener('keydown', e => {
   else if (isW4() && code === 'KeyH') whistle4();
   else if (isW4() && code === 'KeyT') nudgeDist(1);
   else if (isW4() && code === 'KeyB') nudgeDist(-1);
+  else if (isW4() && code === 'KeyN') toggleThick4();
   else if (isW4() && code === 'KeyC') toggleCrouch4();
   else if (isW4() && code === 'KeyI') openBag4();
   else if (isW4() && code === 'KeyP') setHome4(false);

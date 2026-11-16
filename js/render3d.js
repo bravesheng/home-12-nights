@@ -1325,6 +1325,14 @@ function buildOneFurn(f) {
       g.add(r.glint);
     }
     if (isW4()) mergeByMat(g);   // 賣場的家具很多：零件照材質合成幾個網格，平板才跑得動
+    if (f.tx || f.tz) {
+      // 第四世界斜著放、橫著放的家具（繞 X、Z 轉）：整件繞底部的中心倒下去，再墊高一點不要陷進地板（只是擺的樣子，佔的格子不變）
+      const piv = new THREE.Group(), ax = f.tx * Math.PI / 180, az = f.tz * Math.PI / 180;
+      for (const c of [...g.children]) { c.position.x -= W / 2; c.position.z -= D / 2; piv.add(c); }
+      piv.rotation.set(ax, 0, az);
+      piv.position.set(W / 2, D / 2 * Math.abs(Math.sin(ax)) + W / 2 * Math.abs(Math.sin(az)), D / 2);
+      g.add(piv);
+    }
     if (f.yaw) {
       // 第四世界擺得斜斜的家具（轉 15°、45°）：繞家具的中心轉
       const th = -f.yaw * Math.PI / 180, cx = W / 2, cz = D / 2;
@@ -1754,7 +1762,7 @@ function addDecor(res, g, y, tier, th) {
   }
 }
 function buildFixture(o) {
-  const g = new THREE.Group(); g.position.set(o.x + 0.5, floorH(o.x + 0.5, o.y + 0.5), o.y + 0.5); scene.add(g);
+  const g = new THREE.Group(); g.position.set(o.x + 0.5, floorH(o.x + 0.5, o.y + 0.5) + (o.h || 0), o.y + 0.5); scene.add(g);   // o.h：第四世界放在家具、貨架、屋頂上的燈
   const th = THEME[o.bulb], metal = lm(th.metal), edge = lm(th.edge), metal2 = lm(th.metal, { side: THREE.DoubleSide });
   const bh = bulbPos(o).h;
   const res = { g, bulbs: [], halos: [], spin: null, rays: null, gems: null };
@@ -1823,7 +1831,7 @@ function syncFixtures(t) {
   for (const o of [...G.sockets, ...G.lamps]) {
     seen.add(o);
     let f = fixMap.get(o);
-    const key = `${curWorld}:${o.type}:${o.bulb}:${o.x},${o.y}`;
+    const key = `${curWorld}:${o.type}:${o.bulb}:${o.x},${o.y},${o.h || 0}`;
     if (!f || f.key !== key) {
       if (f) disposeGroup(f.g);
       f = buildFixture(o); f.key = key;
@@ -15893,7 +15901,7 @@ function buildWall4(w) {
 }
 function buildRoof4(r) {
   // 屋頂：2×2 公尺躺平的板子，蓋住 2×2 格；沒有完全躺平的屋頂（倒了 60°、75°）斜斜的：繞中心轉
-  const W = PLANK4, g = new THREE.Group(); g.position.set(r.x + W / 2, ROOF4_H, r.y + W / 2); scene.add(g);
+  const W = PLANK4, g = new THREE.Group(); g.position.set(r.x + W / 2, r.h || ROOF4_H, r.y + W / 2); scene.add(g);
   if (r.tilt) g.rotation[r.tax === 'z' ? 'z' : 'x'] = r.tilt * Math.PI / 180;
   box(g, -W / 2, W / 2, -0.04, 0.04, -W / 2, W / 2, plankMats[r.tier], r.tier !== 5);
   const edge = lm(PLANK_EDGE[r.tier]);
@@ -15935,12 +15943,13 @@ function syncBuild4(t) {
   sync(ramp4Map, rampList4(), buildRamp4);
   sync(loose4Map, G.loose4, buildLoose4);
   for (const [w, r] of wall4Map) {
-    const k = w.tier === 5 ? 1 : clamp(w.hp / PLANKS[w.tier].hp, 0, 1);
+    const k = w.tier === 5 ? 1 : clamp(w.hp / (PLANKS[w.tier].hp + (w.plies || []).reduce((s, t) => s + PLANKS[t].hp, 0)), 0, 1);
     if (r.crack) r.crack.opacity = k < 0.85 ? Math.min(0.9, (1 - k) * 1.2) : 0;
     const sh = w.hitT > 0 ? (Math.random() - 0.5) * 0.03 : 0;
     // 下面的板子被打破時，上面的慢慢掉下來（lv 變小）
     r.y = r.y === undefined ? w.lv : r.y > w.lv ? Math.max(w.lv, r.y - 0.15) : w.lv;
     if (w.free) r.g.position.set(w.cx + sh, r.y, w.cy); else r.g.position.set(w.x + (w.o === 'v' ? sh : 0), r.y, w.y + (w.o === 'h' ? sh : 0));
+    if (!w.door) r.piv.scale[w.free || w.o === 'h' ? 'z' : 'x'] = 1 + ((w.ply || 1) - 1) * 1.6;   // 加厚過的板子比較厚
     if (w.door) { const a = w.open ? 1.45 : 0; r.piv.rotation.y += (-a - r.piv.rotation.y) * 0.25; r.piv2.rotation.y += (a - r.piv2.rotation.y) * 0.25; }
     r.fire.visible = w.burn > 0;
     if (r.fire.visible) r.fire.material.opacity = 0.5 + 0.4 * Math.random();
@@ -15996,21 +16005,21 @@ function syncGhost4() {
   const col = g.ok ? 0x60ff80 : 0xff5050;
   ghostMesh4.box.material.color.setHex(col); ghostMesh4.edge.material.color.setHex(g.ok ? 0xb0ffc0 : 0xff9a9a);
   ghostMesh4.rotation.set(0, 0, 0, 'YXZ');
-  if (g.kind === 'wall' || g.kind === 'free') {
-    // 一片 2×2 公尺的正方形板子（門也是），疊在第 lv 公尺；斜靠的話從底部倒下去（中心跟著移）
-    const W = PLANK4, H = PLANK4, y0 = g.lv || 0;
-    const th = g.kind === 'free' ? -g.ang : g.o === 'h' ? 0 : -Math.PI / 2, lean = (g.lean || 0) * Math.PI / 180;
-    const cx = g.kind === 'free' ? g.cx : g.o === 'h' ? g.x + W / 2 : g.x, cz = g.kind === 'free' ? g.cy : g.o === 'h' ? g.y : g.y + W / 2;
+  if (g.kind === 'wall' || g.kind === 'free' || g.kind === 'thick') {
+    // 一片 2×2 公尺的正方形板子（門也是），疊在第 lv 公尺；斜靠的話從底部倒下去（中心跟著移）。加厚（thick）：框住要釘上去的那一片，比較厚
+    const W = PLANK4, H = PLANK4, y0 = g.lv || 0, free = (g.kind === 'thick' ? g.was : g.kind) === 'free';
+    const th = free ? -g.ang : g.o === 'h' ? 0 : -Math.PI / 2, lean = (g.lean || 0) * Math.PI / 180;
+    const cx = free ? g.cx : g.o === 'h' ? g.x + W / 2 : g.x, cz = free ? g.cy : g.o === 'h' ? g.y : g.y + W / 2;
     ghostMesh4.rotation.set(lean, th, 0, 'YXZ');
     ghostMesh4.position.set(cx + Math.sin(th) * Math.sin(lean) * H / 2, y0 + Math.cos(lean) * H / 2, cz + Math.cos(th) * Math.sin(lean) * H / 2);
-    ghostMesh4.scale.set(W - 0.04, H, 0.1);
+    ghostMesh4.scale.set(W - 0.04, H, g.kind === 'thick' ? 0.34 : 0.1);
   } else if (g.kind === 'ramp') {
     // 斜坡：2×2 格斜 45°，往 dir 的方向升高
     const W = PLANK4;
     ghostMesh4.rotation.set(Math.PI / 4, { e: -Math.PI / 2, w: Math.PI / 2, s: Math.PI, n: 0 }[g.dir], 0, 'YXZ');
     ghostMesh4.position.set(g.x + W / 2, g.lv + W / 2, g.y + W / 2); ghostMesh4.scale.set(W - 0.04, 0.06, W * Math.SQRT2);
-  } else if (g.kind === 'roof') { ghostMesh4.position.set(g.x + PLANK4 / 2, ROOF4_H, g.y + PLANK4 / 2); ghostMesh4.scale.set(PLANK4, 0.08, PLANK4); if (g.tilt) ghostMesh4.rotation[g.tax === 'z' ? 'z' : 'x'] = g.tilt * Math.PI / 180; }
-  else { const fh = G.hand.f.solid === false ? 0.05 : 1.0; ghostMesh4.position.set(g.x + g.w / 2, fh / 2, g.y + g.h / 2); ghostMesh4.scale.set(g.w, fh, g.h); ghostMesh4.rotation.y = -(g.yaw || 0) * Math.PI / 180; }
+  } else if (g.kind === 'roof') { ghostMesh4.position.set(g.x + PLANK4 / 2, g.h || ROOF4_H, g.y + PLANK4 / 2); ghostMesh4.scale.set(PLANK4, 0.08, PLANK4); if (g.tilt) ghostMesh4.rotation[g.tax === 'z' ? 'z' : 'x'] = g.tilt * Math.PI / 180; }
+  else { const fh = G.hand.f.solid === false ? 0.05 : 1.0; ghostMesh4.position.set(g.x + g.w / 2, fh / 2, g.y + g.h / 2); ghostMesh4.scale.set(g.w, fh, g.h); ghostMesh4.rotation.set((g.tx || 0) * Math.PI / 180, -(g.yaw || 0) * Math.PI / 180, (g.tz || 0) * Math.PI / 180, 'YXZ'); }
 }
 // 手上拿的板子（畫面右下角）
 function syncHand4() {
@@ -16332,6 +16341,14 @@ function store4Furniture(f, g, r, W, D, side, len, cabinet) {
       r.top = 0.92;
       break;
     }
+    case 'lad4': {
+      // 長鋁梯（從貨架拿出來自己架的）：腳在這一格的中間，往後面斜 f.lean 度（0 是直直地立著）
+      const o = orient4(g, f, side), al = lm('#c8ccd0'), foot = lm('#2a2a2a'), a = (f.lean ?? 15) * Math.PI / 180, H = LAD4_LEN * Math.cos(a), back = LAD4_LEN * Math.sin(a);
+      for (const x of [-0.22, 0.22]) { beam4(o, x, 0, 0, x, H, -back, 0.06, al, 0.035); box(o, x - 0.05, x + 0.05, 0, 0.05, -0.06, 0.06, foot); }
+      for (let d = 0.3; d < LAD4_LEN - 0.1; d += 0.3) { const k = d / LAD4_LEN; box(o, -0.22, 0.22, k * H - 0.015, k * H + 0.015, -k * back - 0.03, -k * back + 0.03, al, false); }
+      r.top = 0.2;
+      break;
+    }
     case 'ladder4': {
       if (f.tall) {
         // 倉儲區的高梯子（照 3008）：靠在貨架上的長鋁梯，底下有防滑腳
@@ -16453,8 +16470,8 @@ function store4Furniture(f, g, r, W, D, side, len, cabinet) {
       for (let i = 0; i <= bays; i++) {
         const u = Math.min(len - 0.05, Math.max(0.05, i * len / bays));
         for (const v of [0.12, dep - 0.12]) F(u - 0.045, u + 0.045, 0, H, v - 0.045, v + 0.045, blue);
-        // 前後兩根立柱中間的斜撐（Z 字形）
-        for (let k = 0; k < 5; k++) {
+        // 前後兩根立柱中間的斜撐（Z 字形）：只有頭尾兩端有，中間的拿掉，每一層才走得過去
+        for (let k = 0; k < 5 && (i === 0 || i === bays); k++) {
           const y0 = 0.25 + k * 0.98, a = fpt4(f, side, u, y0, k % 2 ? dep - 0.12 : 0.12), b = fpt4(f, side, u, y0 + 0.98, k % 2 ? 0.12 : dep - 0.12);
           beam4(g, a.x, a.y, a.z, b.x, b.y, b.z, 0.025, blue);
           F(u - 0.012, u + 0.012, y0, y0 + 0.025, 0.12, dep - 0.12, blue, false);
@@ -16474,25 +16491,24 @@ function store4Furniture(f, g, r, W, D, side, len, cabinet) {
           }
           // 第二層前面 1 公尺留給真的東西；其他地方疊幾個紙箱（設計師：紙箱少一點），最上層是空的（爬上來站的地方）
           if (lv === RACK4_LEVELS.length - 1) continue;
-          const v0 = lv === 1 ? 1.0 : 0.18;
+          // 每一層都要走得過去（蹲著）：紙箱只堆在最裡面那一條
+          const v0 = dep - 0.75;
           let u = ub;
           while (u < ue - 0.3) {
-            const bw = Math.min(ue - u, 0.45 + R() * 0.6), bh = 0.3 + R() * 0.6, bd = Math.min(dep - 0.2 - v0, 0.45 + R() * (dep - 0.75));
-            if (R() < 0.4) F(u, u + bw - 0.03, y + 0.13, y + 0.13 + bh, v0, v0 + bd, cb);
+            const bw = Math.min(ue - u, 0.45 + R() * 0.6), bh = 0.3 + R() * 0.5, bd = Math.min(dep - 0.2 - v0, 0.35 + R() * 0.3);
+            if (R() < 0.35) F(u, u + bw - 0.03, y + 0.13, y + 0.13 + bh, v0, v0 + bd, cb);
             u += bw;
           }
         }
       });
       // 貨架頂上鋪一層木板（爬上來站的地方，高 RACK4_H）
       F(0.05, len - 0.05, H - 0.04, H, 0.08, dep - 0.08, ply);
-      // 正面中間一把靠在貨架上的長鋁梯（可以爬：world4.js 的 ladders4），從地上一直到貨架頂
-      const al = lm('#c8ccd0'), foot = lm('#2a2a2a');
-      for (const du of [-0.24, 0.24]) {
-        const a = fpt4(f, side, len / 2 + du, 0, -0.6), b = fpt4(f, side, len / 2 + du, H + 0.4, 0.02);
-        beam4(g, a.x, a.y, a.z, b.x, b.y, b.z, 0.06, al, 0.035);
-        F(len / 2 + du - 0.05, len / 2 + du + 0.05, 0, 0.05, -0.66, -0.54, foot);
+      // 最下層的木板上平放著一把長鋁梯（f.lad；world4.js 的 takeLadder4：對著貨架按住 E 拿出來，自己架）
+      if (f.lad > 0) {
+        const al = lm('#c8ccd0'), u0 = Math.max(0.3, (len - LAD4_LEN) / 2), u1 = Math.min(len - 0.3, u0 + LAD4_LEN), yl = 0.98;
+        for (const v of [0.2, 0.64]) F(u0, u1, yl, yl + 0.06, v - 0.018, v + 0.018, al, false);
+        for (let u = u0 + 0.2; u < u1 - 0.1; u += 0.3) F(u - 0.015, u + 0.015, yl + 0.015, yl + 0.045, 0.2, 0.64, al, false);
       }
-      for (let i = 1; i < 16; i++) { const k = i / 16; F(len / 2 - 0.24, len / 2 + 0.24, k * (H + 0.4) - 0.015, k * (H + 0.4) + 0.015, -0.6 + k * 0.62 - 0.03, -0.6 + k * 0.62 + 0.03, al, false); }
       r.top = H;
       break;
     }
