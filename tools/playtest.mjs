@@ -86,7 +86,7 @@ async function scenario(name, title, ctxOpts, fn) {
     await Promise.race([fn({ page, ctx, shot, check }), stop]).finally(() => clearTimeout(timer));
     fps = await measureFps(page);
   } catch (e) {
-    problems.push('執行失敗：' + e.message.split('\n')[0]);
+    problems.push('執行失敗：' + e.message.split('\n')[0] + (process.env.PT_DEBUG ? '\n' + e.stack : ''));   // PT_DEBUG=1：連出錯的位置一起印
     await shot('crash').catch(() => {});
   }
   results.push({ name, title, problems, fps, secs: ((Date.now() - t0) / 1000).toFixed(0) });
@@ -808,16 +808,16 @@ await scenario('book', '怪物圖鑑（沒見過的只有問號；見過的卡�
   }
 });
 
-await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板的草原、白天 6 分鐘晚上 5 分鐘、砍樹（掉板子和木柴、樹樁、2 天後長回來）、撿木板放下當牆和門、樹上和花上長的東西、釣魚、沐浴球丟進水裡洗出東西、工作台的合成書做方塊放在地上、12 天的天氣（下雨、雷暴雨打雷、霧）、7 隻新怪物晚上出來（不會出錯）（貼圖是預先做好的圖檔）、圖鑑的第五世界、存檔讀檔砍倒的樹', {}, async ({ page, shot, check }) => {
+await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板的草原、白天 6 分鐘晚上 5 分鐘、砍樹（掉木頭方塊和木柴、樹樁、2 天後長回來）、舊的木板和門還放得下、樹上和花上長的東西、釣魚、沐浴球丟進水裡洗出東西、工作台的合成書做方塊、用方塊蓋房子（一格一格放、往上疊、矮洞要蹲、怪物會打）、水可以踩進去、12 天的天氣（下雨、雷暴雨打雷、霧）、7 隻新怪物晚上出來（不會出錯）（貼圖是預先做好的圖檔）、圖鑑的第五世界、存檔讀檔砍倒的樹', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=5&kit=1', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
   await sleep(2000);
-  const info = await page.evaluate(() => ({ world: curWorld, w: MAP_W, h: MAP_H, day: DAY_LEN, night: NIGHT_LEN, bag: bagUsed(), trees: FURN.filter(f => f.type === 'tree5').length, flowers: FURN.filter(f => f.type === 'flower5').length, water: W5MAP.water.size, grown: G.pickups.filter(p => p.s).length, loose: G.loose4.length, bench: !!FURN_BY_ID.bench5, bath: !!FURN_BY_ID.bath5, ceil: Renderer.dbg().scene.children.length > 0 }));
+  const info = await page.evaluate(() => ({ world: curWorld, w: MAP_W, h: MAP_H, day: DAY_LEN, night: NIGHT_LEN, bag: bagUsed(), trees: FURN.filter(f => f.type === 'tree5').length, flowers: FURN.filter(f => f.type === 'flower5').length, water: W5MAP.water.size, grown: G.pickups.filter(p => p.s).length, loose: G.loose4.length, blk: G.inv.blk1 || 0, kitBlk: G.pickups.filter(p => p.id === 'blk1' || p.id === 'blk5').length, bench: !!FURN_BY_ID.bench5, bath: !!FURN_BY_ID.bath5, ceil: Renderer.dbg().scene.children.length > 0 }));
   check(info.world === 5 && info.w === 80 && info.h === 80, `第五世界的地圖要是 80×80（世界 ${info.world}、${info.w}×${info.h}）`);
   check(info.day === 360 && info.night === 300, `白天 6 分鐘、晚上 5 分鐘（${info.day}／${info.night} 秒）`);
   check(info.trees > 120 && info.flowers > 100 && info.water > 300, `草原上要有樹、花、池塘和河（樹 ${info.trees}、花 ${info.flowers}、水 ${info.water} 格）`);
   check(info.grown > 60, `樹上和花上要長著東西（${info.grown} 個）`);
-  check(info.bench && info.bath && info.loose >= 4, `起點旁邊要有工作台、沐浴球機和地上的板子（板子 ${info.loose} 片）`);
+  check(info.bench && info.bath && info.blk === 12 && info.kitBlk === 2, `起點旁邊要有工作台、沐浴球機，背包裡有 12 個木頭方塊（${info.blk} 個；kit 另外在地上放兩堆：${info.kitBlk}）`);
   check(info.bag <= 16, `kit 帶的東西不能超過背包 16 格（${info.bag} 格）`);
   await page.evaluate(() => { G.t = 100; Object.assign(G.p, { x: 40.5, y: 44.5, face: -Math.PI / 2, pitch: 0.02 }); });
   await sleep(1500);
@@ -827,12 +827,12 @@ await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板�
     const f = FURN.filter(o => o.type === 'tree5' && !o.cut).sort((a, b) => Math.hypot(a.x - 40, a.y - 40) - Math.hypot(b.x - 40, b.y - 40))[0];
     const spot = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => ({ x: f.x + 0.5 + dx * 1.0, y: f.y + 0.5 + dy * 1.0 })).find(q => walkable(q.x, q.y));
     Object.assign(G.p, { x: spot.x, y: spot.y, face: Math.atan2(f.y + 0.5 - spot.y, f.x + 0.5 - spot.x), pitch: 0 });
-    const t = getTarget(), loose0 = G.loose4.length, pk0 = G.pickups.filter(p => p.id === 'wood').length;
+    const t = getTarget(), loose0 = G.pickups.filter(p => p.id === 'blk1').reduce((s, p) => s + p.n, 0), pk0 = G.pickups.filter(p => p.id === 'wood').length;
     for (let i = 0; i < 3; i++) { const tt = getTarget(); if (tt && tt.id && tt.id.startsWith('tree:')) tt.action(); }
-    return { label: t && t.label, cut: !!f.cut, solid: solid[f.y][f.x], planks: G.loose4.length - loose0, wood: G.pickups.filter(p => p.id === 'wood').length - pk0, id: f.id };
+    return { label: t && t.label, cut: !!f.cut, solid: solid[f.y][f.x], planks: G.pickups.filter(p => p.id === 'blk1').reduce((s, p) => s + p.n, 0) - loose0, wood: G.pickups.filter(p => p.id === 'wood').length - pk0, id: f.id };
   });
   check(chop.label === '砍樹' && chop.cut && !chop.solid, `看著樹按住 E 砍 3 下樹要倒（「${chop.label}」、倒了 ${chop.cut}、還擋路 ${chop.solid}）`);
-  check(chop.planks === 2 && chop.wood === 1, `樹倒了要掉 2 片板子和木柴（板子 ${chop.planks}、木柴 ${chop.wood}）`);
+  check(chop.planks === 4 && chop.wood === 1, `樹倒了要掉 4 個木頭方塊和木柴（方塊 ${chop.planks}、木柴 ${chop.wood}）`);
   await sleep(800);
   await shot('2-chopped');
   // 撿起樹掉的木板放下來當牆、再放一扇門：第五世界沒有蓋賣場，畫板子要的貼圖要自己準備（以前放下木板就當機）
@@ -842,7 +842,7 @@ await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板�
     Object.assign(G.p, { x: 40.5, y: 52.5, face: 0, pitch: 0 });
     for (const door of [false, true]) {
       G.hand = null;
-      if (door) holdThing({ k: 'plank', tier: 2, door: true }); else takeLoose4(G.loose4[G.loose4.length - 1]);
+      holdThing({ k: 'plank', tier: door ? 2 : 1, door });   // 第五世界現在用方塊蓋，但舊存檔的板子和木門還是要能放
       Object.assign(G.bld, { dist: 1.0, rx: 0, ry: 0, rz: 0 });
       if (door) G.p.y = 56.5;
       const g = ghost4(); place4();
@@ -853,7 +853,7 @@ await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板�
   });
   await sleep(1500);
   const wall2 = await page.evaluate(t0 => ({ ran: G.time > t0 }), wall.t0);
-  check(wall.wood.placed && wall.door.placed && wall.n === 2 && wall2.ran, `第五世界撿起木板放下當牆、放門，遊戲要繼續跑（${JSON.stringify({ ...wall, ...wall2 })}）`);
+  check(wall.wood.placed && wall.door.placed && wall.n === 2 && wall2.ran, `第五世界放下木板當牆、放門（舊存檔的板子、合成的木門），遊戲要繼續跑（${JSON.stringify({ ...wall, ...wall2 })}）`);
   await page.evaluate(() => { Object.assign(G.p, { x: 37.5, y: 54.5, face: 0, pitch: 0 }); });
   await sleep(1000);
   await shot('2b-wall');
@@ -898,7 +898,7 @@ await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板�
   check(bath.fizz === 1 && bath.left === 1 && bath.washed >= 2 && bath.washed <= 4, `沐浴球丟進水裡要冒泡、洗出 2～4 樣東西（${JSON.stringify(bath)}）`);
   await sleep(600);
   await shot('3-water');
-  // 工作台：打開合成書，2 根木柴做 2 個方塊，拿在手上放到地上（站得上去的 1 公尺方塊）
+  // 工作台：打開合成書，2 根木柴做 4 個木頭方塊（放進背包）
   const craft = await page.evaluate(() => {
     const b = FURN_BY_ID.bench5;
     Object.assign(G.p, { x: b.x + 1, y: b.y + 2.2, face: -Math.PI / 2, pitch: 0 });
@@ -906,18 +906,61 @@ await scenario('w5', '第五世界（?world=5&kit=1）：80×80 沒有天花板�
     const t = getTarget();
     if (t && t.id === 'bench5') t.action();
     const opened = mode === 'modal' && document.getElementById('mTitle').textContent.includes('合成書');
-    const n0 = FURN.filter(f => f.type === 'cube5').length;
+    const n0 = G.inv.blk1 || 0;
     modalAct('cube');
     closeModal();
-    const hand = G.hand && G.hand.k === 'furn' && G.hand.f.type;
-    G.p.face = Math.PI / 2;
-    const g = ghost4(); if (g && g.ok) place4();
-    const cubes = FURN.filter(f => f.type === 'cube5' && !f.held);
-    return { label: t && t.label, opened, made: FURN.filter(f => f.type === 'cube5').length - n0, hand, placed: cubes.length, top: cubes[0] ? tileTopH(cubes[0].x, cubes[0].y) : null, wood: G.inv.wood };
+    return { label: t && t.label, opened, made: (G.inv.blk1 || 0) - n0, wood: G.inv.wood };
   });
-  check(craft.opened && craft.made === 2 && craft.hand === 'cube5', `工作台要打開合成書、做出 2 個方塊拿在手上（${JSON.stringify(craft)}）`);
-  check(craft.placed >= 2 && craft.top === 1 && craft.wood === 4, `方塊要放得到地上、站得上去（1 公尺高）、用掉 2 根木柴（${JSON.stringify(craft)}）`);
-  await page.evaluate(() => { const c = FURN.find(f => f.type === 'cube5' && !f.held); Object.assign(G.p, { x: c.x + 0.5, y: c.y + 3, face: -Math.PI / 2, pitch: -0.15 }); });
+  // 水可以踩進去（設計師第六次紙條）：水不是牆、河床比草地低、在水裡走得慢；橋上不算在水裡
+  const wade = await page.evaluate(() => {
+    const [px, py] = W5MAP.ponds[0], b = W5MAP.bridges[0], keep = { x: G.p.x, y: G.p.y };
+    Object.assign(G.p, { x: px + 0.5, y: py + 0.5, z: 0 });
+    const r = { walk: walkable(px + 0.5, py + 0.5), wall: isWall(px, py), bed: floorH(px + 0.5, py + 0.5), wading: wading(G.p.x, G.p.y), slow: speedMult4(), bridge: floorH(b.x + 0.5, b.y + 0.5), bridgeWade: wading(b.x + 0.5, b.y + 0.5) };
+    Object.assign(G.p, keep);
+    return r;
+  });
+  check(wade.walk && !wade.wall && wade.bed < -0.4 && wade.wading && wade.slow < 0.7 && wade.bridge === 0 && !wade.bridgeWade, `水要可以踩進去：不是牆、河床比較低、在水裡走得慢，橋上不算（${JSON.stringify(wade)}）`);
+  check(craft.opened && craft.made === 4 && craft.wood === 4, `工作台要打開合成書、用 2 根木柴做出 4 個木頭方塊（${JSON.stringify(craft)}）`);
+  // 方塊（設計師第六次紙條：木板改為方塊，像麥塊一樣）：選方塊按 Q 放在看著的地上，再看著它放會接在旁邊、疊在上面；
+  // 站得上去（跳得上一格）、兩層高跟牆一樣、留一格矮洞要蹲著才鑽得過去、圍起來算在家、頭上有方塊淋不到雨、怪物會打、看著按 E 拿回來、存檔讀檔
+  const vox = await page.evaluate(() => {
+    const out = {}, p = G.p, keep = { home: G.home, x: p.x, y: p.y, sel: G.selId };
+    G.hand = null; G.inv.blk1 = 60;
+    Object.assign(p, { x: 44.5, y: 47.5, z: 0, vz: 0, face: -Math.PI / 2, pitch: -0.45, crouch: false });
+    G.selId = 'blk1';
+    const a0 = aim5().put; useSelected();
+    out.first = a0 && voxAt5(a0.x, a0.y, 0) ? [a0.x, a0.y, a0.z] : null; out.used = 60 - G.inv.blk1;
+    p.pitch = -0.2; const a1 = aim5(); out.onTop = !!(a1.hit && a1.put && (a1.put.z === 1 || a1.put.y === a0.y + 1));
+    const tc = []; addTargets5(tc); const t = tc.find(c => c.id.startsWith('vox:')); out.take = t && t.label;
+    if (t && t.action) t.action(); out.back = !voxAt5(a0.x, a0.y, 0) && G.inv.blk1 === 60;
+    // 一間 4×4 的小屋：牆兩層、屋頂一層，南邊留一個只有上面一塊的矮洞
+    for (let x = 50; x <= 53; x++) for (let y = 50; y <= 53; y++) {
+      const edge = x === 50 || x === 53 || y === 50 || y === 53;
+      if (edge) { if (!(x === 51 && y === 53)) setVox5(x, y, 0, 1); setVox5(x, y, 1, 1); }
+      setVox5(x, y, 2, 1);
+    }
+    Object.assign(p, { x: 51.5, y: 51.5, z: 0 });
+    out.home = enclosure4(51, 51).inside; out.shelter = sheltered4(51.5, 51.5); out.wall = isWall(50, 50) && !isWall(51, 53); out.head = headroom4(51.5, 51.5, 0);
+    Object.assign(p, { x: 51.5, y: 52.6 }); moveWho = null; move(p, 0, 1.2, PLAYER_R); out.stand = p.y < 52.8;
+    p.crouch = true; move(p, 0, 1.6, PLAYER_R); out.crawl = p.y > 53.8; p.crouch = false;
+    Object.assign(p, { x: 55.5, y: 51.5, z: 0, vz: 0, face: Math.PI }); tryJump(); let top = 0; keys.w = true; for (let i = 0; i < 40; i++) { updatePlayer(0.05); top = Math.max(top, p.z); } keys.w = false;
+    out.jump = top;
+    Object.assign(p, { x: 51.5, y: 51.5, z: 3, vz: 0 }); out.roofTop = groundUnder(p.x, p.y);
+    const f = computeFlow4(51, 51, ''); out.flow = f[55][51] > 4 && f[55][51] < Infinity;
+    const e = spawnEnemy('shadow', { x: 51.5, y: 54.45 }); e.spawn = 0; e.wallAhead = { vox: true, x: 51, y: 53 };
+    const hp0 = voxAt5(51, 53, 1).hp; for (let i = 0; i < 10; i++) bash4(e, 0.1); out.bash = voxAt5(51, 53, 1) ? voxAt5(51, 53, 1).hp < hp0 : true;
+    G.enemies = G.enemies.filter(x => x !== e);
+    const n = voxList5().length, sv = JSON.parse(JSON.stringify(save4()));
+    out.saved = sv.w5 ? sv.w5.vox.length === n : (JSON.parse(JSON.stringify(save5())).vox.length === n);
+    loadVox5(JSON.parse(JSON.stringify(save5())).vox); out.loaded = voxList5().length === n;
+    for (const [x, y, z] of voxList5()) delVox5(x, y, z);
+    Object.assign(p, { x: keep.x, y: keep.y, z: 0, vz: 0, pitch: 0 }); G.home = keep.home; G.selId = keep.sel;
+    return out;
+  });
+  check(vox.first && vox.used === 1 && vox.onTop && vox.take && vox.take.includes('拿起木頭方塊') && vox.back, `方塊要放得到看著的地上、再放會接上去、看著按 E 拿回來（${JSON.stringify(vox)}）`);
+  check(vox.home && vox.shelter && vox.wall && vox.head < 0.3 && vox.stand && vox.crawl && vox.jump > 0.95 && vox.roofTop === 3, `方塊蓋的小屋要算在家、淋不到雨、兩層高跟牆一樣、矮洞要蹲著才過得去、跳得上一格、站得上屋頂（${JSON.stringify(vox)}）`);
+  check(vox.flow && vox.bash && vox.saved && vox.loaded, `怪物要會打擋路的方塊、存檔讀檔方塊都在（${JSON.stringify(vox)}）`);
+  await page.evaluate(() => { for (let x = 50; x <= 52; x++) for (let z = 0; z < 2; z++) setVox5(x, 50, z, 1); setVox5(53, 50, 0, 5); setVox5(51, 50, 2, 1); Object.assign(G.p, { x: 51.5, y: 54, face: -Math.PI / 2, pitch: 0.05 }); G.selId = 'blk1'; });
   await sleep(1000);
   await shot('4-cubes');
   // 天氣：第 7 天雷暴雨（打雷、閃電）、第 2 天下雨加起霧、第 3 天寒寂之境；下雨有雨聲
@@ -1790,7 +1833,7 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   check(cl.toast.includes('小明 離開了'), `客人關掉分頁，房主要看到「小明 離開了」（${cl.toast.slice(-60)}）`);
 });
 
-await scenario('net5', '跟朋友一起玩第五世界（?nettest）：客人進到房主的草原、砍倒的樹、砍樹（樹倒了掉的板子和木柴）、樹上的東西拿走、工作台做的方塊、沐浴球冒泡和洗出來的東西、閃電、記憶的光點、早上長回來的樹，兩邊都一樣', { limit: 240000, viewport: { width: 640, height: 400 } }, async ({ page, ctx, check }) => {   // 兩個分頁都畫小一點：無頭瀏覽器的分頁共用一個軟體算繪，草原很重，畫大張兩邊都會卡到斷線
+await scenario('net5', '跟朋友一起玩第五世界（?nettest）：客人進到房主的草原、砍倒的樹、砍樹（樹倒了掉的方塊和木柴）、樹上的東西拿走、放方塊和拿方塊、沐浴球冒泡和洗出來的東西、閃電、記憶的光點、早上長回來的樹，兩邊都一樣', { limit: 240000, viewport: { width: 640, height: 400 } }, async ({ page, ctx, check }) => {   // 兩個分頁都畫小一點：無頭瀏覽器的分頁共用一個軟體算繪，草原很重，畫大張兩邊都會卡到斷線
   const guest = await ctx.newPage();
   guest.on('pageerror', e => check(false, '客人的分頁 JS 錯誤：' + e.message));
   guest.on('console', m => { if (m.type() === 'error' && !m.text().startsWith('Failed to load resource')) check(false, '客人的分頁 console 錯誤：' + m.text()); });
@@ -1828,25 +1871,21 @@ await scenario('net5', '跟朋友一起玩第五世界（?nettest）：客人進
   const fell = await page.evaluate(() => {
     const f = FURN.find(o => o.type === 'tree5' && !o.cut);
     for (let i = 0; i < 3; i++) chop5(f);
-    return { id: f.id, loose: G.loose4.slice(-2).map(l => l.uid), wood: G.pickups.filter(p => p.id === 'wood').map(p => p.uid).pop() };
+    return { id: f.id, loose: G.pickups.filter(p => p.id === 'blk1').map(p => p.uid).slice(-1), wood: G.pickups.filter(p => p.id === 'wood').map(p => p.uid).pop() };
   });
-  await guest.waitForFunction(d => FURN_BY_ID[d.id] && FURN_BY_ID[d.id].cut && d.loose.every(u => G.loose4.some(l => l.uid === u)), fell, { timeout: 15000 }).catch(() => {});
-  const g1 = await guest.evaluate(d => ({ cut: !!FURN_BY_ID[d.id].cut, solid: solid[FURN_BY_ID[d.id].y][FURN_BY_ID[d.id].x], loose: d.loose.every(u => G.loose4.some(l => l.uid === u)), wood: G.pickups.some(p => p.uid === d.wood) }), fell);
-  check(g1.cut && !g1.solid && g1.loose && g1.wood, `房主砍倒樹，客人那邊也要倒、掉一樣的板子和木柴（${JSON.stringify(g1)}）`);
+  await guest.waitForFunction(d => FURN_BY_ID[d.id] && FURN_BY_ID[d.id].cut && d.loose.every(u => G.pickups.some(l => l.uid === u)), fell, { timeout: 15000 }).catch(() => {});
+  const g1 = await guest.evaluate(d => ({ cut: !!FURN_BY_ID[d.id].cut, solid: solid[FURN_BY_ID[d.id].y][FURN_BY_ID[d.id].x], loose: d.loose.length === 1 && d.loose.every(u => G.pickups.some(l => l.uid === u)), wood: G.pickups.some(p => p.uid === d.wood) }), fell);
+  check(g1.cut && !g1.solid && g1.loose && g1.wood, `房主砍倒樹，客人那邊也要倒、掉一樣的方塊和木柴（${JSON.stringify(g1)}）`);
   // 客人拿走樹上的東西：房主那邊也不見
   const took = await guest.evaluate(() => { const pk = G.pickups.find(p => p.s); const uid = pk.uid; while (bagUsed() >= BAG_SLOTS) delete G.inv[invList()[0]]; takePickup4(pk); return uid; });
   await page.waitForFunction(u => !G.pickups.some(p => p.uid === u), took, { timeout: 15000 }).catch(() => check(false, '客人摘走樹上的東西，房主那邊也要不見'));
-  // 房主在工作台做方塊放在地上：客人那邊也有
-  const cube = await page.evaluate(() => {
-    G.hand = null; G.inv.wood = 4; openBook5(); modalAct('cube'); closeModal();
-    const f = G.hand && G.hand.f; G.p.face = Math.PI / 2;
-    const g = ghost4(); if (g && g.ok) place4();
-    const other = FURN.filter(o => o.type === 'cube5' && o !== f).map(o => o.id);
-    return { id: f && f.id, placed: f && !f.held, x: f && f.x, y: f && f.y, other };
-  });
-  await guest.waitForFunction(c => FURN_BY_ID[c.id] && !FURN_BY_ID[c.id].held, cube, { timeout: 15000 }).catch(() => {});
-  const g2 = await guest.evaluate(c => { const f = FURN_BY_ID[c.id]; return { has: !!f, placed: !!f && !f.held && furnGrid[c.y][c.x] === f, other: c.other.every(id => !!FURN_BY_ID[id]) }; }, cube);
-  check(cube.placed && g2.has && g2.placed && g2.other, `房主做的方塊（拿在手上的、放在工作台旁邊的），客人那邊也要有、放在一樣的地方（${JSON.stringify({ cube, g2 })}）`);
+  // 房主放方塊、客人拿走一個：兩邊都一樣
+  const cube = await page.evaluate(() => { for (const [x, y, z] of [[45, 45, 0], [45, 45, 1], [46, 45, 0]]) { setVox5(x, y, z, 1); net4('vox', { x, y, z, tier: 1, hp: 40 }); } return voxList5().length; });
+  await guest.waitForFunction(n => voxList5().length === n, cube, { timeout: 15000 }).catch(() => {});
+  const g2 = await guest.evaluate(() => { const n = voxList5().length, wall = isWall(45, 45); G.hand = null; delete G.inv[invList()[0]]; takeBlock5({ x: 46, y: 45, z: 0 }); return { n, wall, got: G.inv.blk1 || 0 }; });
+  await page.waitForFunction(() => !voxAt5(46, 45, 0), null, { timeout: 15000 }).catch(() => {});
+  const h2 = await page.evaluate(() => ({ left: voxList5().length, gone: !voxAt5(46, 45, 0) }));
+  check(cube === 3 && g2.n === 3 && g2.wall && g2.got >= 1 && h2.gone && h2.left === 2, `房主放的方塊客人那邊也要有、客人拿走的房主那邊也要不見（${JSON.stringify({ cube, g2, h2 })}）`);
   // 沐浴球：房主丟進水裡，客人看到冒泡、洗出來的東西也看得到
   const bath = await page.evaluate(() => {
     for (const k of W5MAP.water) { const [x, y] = k.split(',').map(Number); if (walkable(x + 0.5, y + 1.5)) { Object.assign(G.p, { x: x + 0.5, y: y + 1.5, face: -Math.PI / 2 }); break; } }

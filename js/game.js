@@ -169,14 +169,21 @@ function isWall(tx, ty) {
   if (!inMap(tx, ty)) return true;
   if (tiles[ty][tx] === 0) return true;
   const d = doorGrid[ty][tx];
-  return !!(d && (d.front || d.locked || d.closed));   // 鎖住、關上的門跟牆一樣
+  if (d && (d.front || d.locked || d.closed)) return true;   // 鎖住、關上的門跟牆一樣
+  return voxWall5(tx, ty);   // 第五世界：疊了兩層以上的方塊跟牆一樣（擋視線、擋光、圍得住家）
 }
-const isSolid = (tx, ty) => !inMap(tx, ty) || solid[ty][tx] || !!(dynSolid && dynSolid[ty][tx]);
+const isSolid = (tx, ty) => !inMap(tx, ty) || solid[ty][tx] || !!(dynSolid && dynSolid[ty][tx]) || voxLow5(tx, ty);   // voxLow5：第五世界的方塊（world5.js）
 // 這個位置是不是站得住的地板（房間裡、不是牆也不是家具）
 const walkable = (x, y) => { const tx = Math.floor(x), ty = Math.floor(y); return inMap(tx, ty) && tiles[ty][tx] === 1 && !solid[ty][tx]; };
 // 地板的高度：第三世界的車頂比車廂的地板高（3D 畫面放東西、擺鏡頭時要加上去）
-function floorH(x, y) { const tx = Math.floor(x), ty = Math.floor(y); const r = inMap(tx, ty) ? roomGrid[ty][tx] : null; return r && r.roof ? ROOF_H : 0; }
+function floorH(x, y) {
+  const tx = Math.floor(x), ty = Math.floor(y);
+  if (curWorld === 5) return W5MAP.water.has(tx + ',' + ty) ? W5MAP.bed(x, y) : 0;   // 第五世界：水裡的河床比草地低（橋上不算）
+  const r = inMap(tx, ty) ? roomGrid[ty][tx] : null; return r && r.roof ? ROOF_H : 0;
+}
 const onRoof = (x, y) => floorH(x, y) > 0;
+// 第五世界：站在水裡（水淹過腳踝）
+const wading = (x, y) => curWorld === 5 && floorH(x, y) < W5MAP.surf - 0.08;
 // 家具旁邊第一個站得住的格子的中心（衣櫃怪衝出來、從車頂爬下來時站的位置）
 function besideFurn(f) {
   for (let y = f.y - 1; y <= f.y + f.h; y++) for (let x = f.x - 1; x <= f.x + f.w; x++) {
@@ -262,9 +269,10 @@ function newGame(diff = 'normal', world = 1, carry = null) {
     G.selId = 'bulb1';
   }
   if (world === 3) addItem('wood', 3);   // 第三世界：第 1 夜要燒的木柴，不然會不夠
+  if (world === 5) addItem('blk1', 12);   // 第五世界：12 個木頭方塊，先蓋個小地方（帶著背包過來的也送）
   saveGame();
   startPlay();
-  if (world === 5) showBig('第五世界：世界夾層', '第 1 天：砍樹、摘果子、蓋一間房子');
+  if (world === 5) showBig('第五世界：世界夾層', '第 1 天：砍樹、摘果子、用方塊蓋一間房子');
   else if (world === 4) showBig('第四世界：無盡賣場', '第 1 天：拿板子蓋一間房子、找食物');
   else if (world === 3) showBig('第三世界：末班列車', '第 1 天：下車去車站找燃料和物資');
   else if (world === 2) showBig('第二世界：夢核花園', '第 1 天：白天趕快找燈泡');
@@ -622,6 +630,12 @@ function hits(x, y, r) {
   const pz = G && moveWho === G.p ? G.p.z || 0 : -1;   // 玩家：腳比家具高就走得上去（站在家具上）
   for (let ty = Math.floor(y - r); ty <= Math.floor(y + r); ty++)
     for (let tx = Math.floor(x - r); tx <= Math.floor(x + r); tx++) {
+      if (pz >= 0 && voxAny5(tx, ty)) {   // 第五世界的方塊：玩家照高度算（站在上面、從底下走過去）
+        if (voxFree5(tx, ty, pz, bodyH(G.p))) continue;
+        const nx = clamp(x, tx, tx + 1), ny = clamp(y, ty, ty + 1);
+        if ((x - nx) ** 2 + (y - ny) ** 2 < r * r) return true;
+        continue;
+      }
       if (!isSolid(tx, ty)) continue;
       if (pz >= 0) {
         const top = tileTopH(tx, ty); if (top !== null && pz >= top - STEP_H) continue;
@@ -667,6 +681,11 @@ function groundUnder(x, y, r = PLAYER_R) {
   let h = 0;
   for (let ty = Math.floor(y - r); ty <= Math.floor(y + r); ty++)
     for (let tx = Math.floor(x - r); tx <= Math.floor(x + r); tx++) {
+      if (voxAny5(tx, ty)) {   // 第五世界：站在方塊上面
+        const vt = voxTop5(tx, ty, G.p.z || 0), nx = clamp(x, tx, tx + 1), ny = clamp(y, ty, ty + 1);
+        if (vt > h && (x - nx) ** 2 + (y - ny) ** 2 < r * r) h = vt;
+        continue;
+      }
       if (!isSolid(tx, ty)) continue;
       let top = tileTopH(tx, ty);
       if (top === null) continue;
@@ -2538,7 +2557,9 @@ function makeStock() {
     const lv = G.p.flashLv || 1;
     if (lv >= 3 && lv < FLASH_MAX) G.stock.unshift({ id: 'flash' + (lv + 1), price: [0, 0, 0, 0, 20, 28, 36, 48][lv + 1], qty: 1 });
     G.stock.push({ id: 'wood', price: 1, qty: 3 }, { id: 'charcoal', price: 2, qty: 2 }, { id: 'hotdog', price: 2, qty: 2 });
-    for (let t = 2; t <= PLANK_MAX; t++) G.stock.push({ plank: t, price: PLANKS[t].price, qty: t >= LAVA_TIER ? 1 : 2 });
+    // 第五世界賣的是方塊（一次 4 個，放進背包），第四世界賣板子
+    if (isW5()) for (let t = 2; t <= PLANK_MAX; t++) G.stock.push({ id: 'blk' + t, price: Math.ceil(PLANKS[t].price / 2), qty: t >= LAVA_TIER ? 1 : 2, n: 4 });
+    else for (let t = 2; t <= PLANK_MAX; t++) G.stock.push({ plank: t, price: PLANKS[t].price, qty: t >= LAVA_TIER ? 1 : 2 });
   }
   for (const st of G.stock) if (WEAPON_PRICE[st.id]) st.price = WEAPON_PRICE[st.id];
 }
@@ -3433,7 +3454,8 @@ function useSelected() {
       break;
     }
     case 'charm': toast('📿 護身符帶在身上就有效，被怪物抓到只扣一半的血。'); break;
-    case 'bath5': useBath5(); break;   // 第五世界：沐浴球丟進水裡（world5.js）
+    case 'bath5': useBath5(); break;
+    case 'block': placeBlock5(it.tier); break;   // 第五世界：把方塊放在你看著的地方（world5.js）   // 第五世界：沐浴球丟進水裡（world5.js）
     case 'tool5': toast('🎣 釣竿帶在身上就有效：走到水邊看著水按住 E 釣魚，快一倍。'); break;
     case 'fuel': {
       if (isW4()) { const f = FURN.find(o => o.type === 'fireplace4' && !o.held && rectDist(p.x, p.y, o) < 1.4); if (f) fuelFire4(f, id); else toast(`🪵 走到火爐前面按 E，就會把${itemName(id)}丟進去燒（火爐可以從樣品間搬回家）。`); break; }
@@ -3531,7 +3553,8 @@ function pickUp() {
 // ====================================================================
 const JUMP_V = 5.2, JUMP_G = 22;     // 起跳速度、重力：跳 0.6 公尺高、0.47 秒落地（設計師說不要像在外太空一樣，要有重力）
 // 第三世界跳得比較高（1.3 公尺）：設計師要能跳到床、椅子、桌子、乘客的頭上
-const JUMP_V_WORLD = { 3: 7.6, 4: 7.6 };   // 第三、四世界跳得比較高（可以跳上桌子；第四世界設計師說要可以跑跳）
+const JUMP_V_WORLD = { 3: 7.6, 4: 7.6, 5: 7.6 };   // 第五世界也要跳得上一格高的方塊
+const _JUMP_NOTE = 0;   // 第三、四世界跳得比較高（可以跳上桌子；第四世界設計師說要可以跑跳）
 function tryJump() {
   if (!G || mode !== 'play') return;
   const p = G.p;

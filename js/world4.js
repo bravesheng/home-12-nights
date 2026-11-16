@@ -32,7 +32,7 @@ const WALL_T = 0.05;   // 牆的半個厚度（碰撞用）
 const PIECE_MAX = 6;   // 同一個位置最多疊到 6 公尺高（3 片）
 let moveWho = null;    // 現在正在移動的是誰（黑球鑽得過木頭、水泥、黃金、岩漿板子的縫；玩家跳起來可以跳過矮牆）
 function initB4() {
-  G.b4 = { h: new Array((MAP_H + 1) * MAP_W).fill(null), v: new Array(MAP_H * (MAP_W + 1)).fill(null), roofs: new Map(), ramps: new Map(), n: 0, ver: 1, list: [], cells: new Map() };
+  G.b4 = { h: new Array((MAP_H + 1) * MAP_W).fill(null), v: new Array(MAP_H * (MAP_W + 1)).fill(null), roofs: new Map(), ramps: new Map(), n: 0, ver: 1, list: [], cells: new Map(), vox: new Map() };   // vox：第五世界的方塊（world5.js）
 }
 const pieceH = () => PLANK4;
 const stk = w => (w ? w.stk || [w] : []);
@@ -223,6 +223,7 @@ function surf4(x, y, above) {
 function headroom4(x, y, z) {
   let top = Infinity;
   if (G.b4 && G.b4.roofs.size) for (const r of roofsAt4(Math.floor(x), Math.floor(y))) if (z < roofH4(r) - 0.3) { top = Math.max(0, roofH4(r) - 0.04 - 1.8); break; }   // 頭上最低的那一片
+  top = Math.min(top, voxHead5(x, y, z));   // 第五世界：頭上的方塊
   const dk = deckAt(Math.floor(x), Math.floor(y), z);   // 在貨架的某一層裡：頭上是上面那一層的層板
   if (dk && dk.next < Infinity) top = Math.min(top, Math.max(dk.h, dk.next - DECK_BEAM - bodyH(G.p)));
   return top;
@@ -234,7 +235,8 @@ function headroom4(x, y, z) {
 // ====================================================================
 function edgeCost4(ax, ay, bx, by, mode) {
   const w = wallBetween(ax, ay, bx, by) || (G.b4.cells.size ? freeIn(bx, by) : null);
-  if (!wallClosed(w)) return 1;
+  if (voxLow5(bx, by)) return voxCost5(bx, by);   // 第五世界：方塊擋著，要打破才過得去
+  if (!wallClosed(w)) return curWorld === 5 && W5MAP.water.has(bx + ',' + by) ? 3 : 1;   // 第五世界：怪物可以涉水，但比較想走橋和岸上
   if (hasGlass(w)) return Infinity;
   if (mode === 'blob') return 1;
   return 1 + Math.ceil(stk(w).reduce((a, p) => a + p.hp, 0) / 8);
@@ -251,8 +253,9 @@ function computeFlow4(sx, sy, mode) {
       if (f[y][x] !== d) continue;
       for (const [dx, dy] of DIRS4) {
         const nx = x + dx, ny = y + dy;
-        if (isSolid(nx, ny)) continue;
+        if (isSolid(nx, ny) && !voxLow5(nx, ny)) continue;
         const nd = d + edgeCost4(x, y, nx, ny, mode);
+        if (nd === Infinity) continue;
         if (nd < f[ny][nx]) { f[ny][nx] = nd; (buckets[nd] || (buckets[nd] = [])).push([nx, ny]); }
       }
     }
@@ -268,7 +271,7 @@ function nextStep4(e, f, tx, ty) {
     if (v === Infinity || v === undefined) continue;
     const c = edgeCost4(tx, ty, nx, ny, e.kind === 'blob' ? 'blob' : '');
     if (c === Infinity) continue;
-    if (v + c < bv) { bv = v + c; best = [nx, ny]; bw = c > 1 ? wallBetween(tx, ty, nx, ny) || freeIn(nx, ny) : null; }
+    if (v + c < bv) { bv = v + c; best = [nx, ny]; bw = c > 1 ? (voxLow5(nx, ny) ? { vox: true, x: nx, y: ny } : wallBetween(tx, ty, nx, ny) || freeIn(nx, ny)) : null; }
   }
   e.wallAhead = bw;
   return best;
@@ -331,12 +334,12 @@ function enclosure4(tx, ty) {
   const ver = G.b4 ? G.b4.ver : 0;
   if (encCache && encCache.tx === tx && encCache.ty === ty && encCache.ver === ver) return encCache;
   const seen = new Set([tx + ',' + ty]), q = [[tx, ty]];
-  let inside = !!(G.b4 && G.b4.n) && inMap(tx, ty) && !isSolid(tx, ty);
+  let inside = !!(G.b4 && (G.b4.n || G.b4.vox.size)) && inMap(tx, ty) && !isSolid(tx, ty);   // 用方塊圍起來的也算
   for (let i = 0; i < q.length && inside; i++) {
     const [x, y] = q[i];
     for (const [dx, dy] of DIRS4) {
       const nx = x + dx, ny = y + dy, k = nx + ',' + ny;
-      if (seen.has(k) || !inMap(nx, ny) || isWall(nx, ny)) continue;
+      if (seen.has(k) || !inMap(nx, ny) || isWall(nx, ny) || voxLow5(nx, ny)) continue;   // 方塊擋著的格子（只留上面一塊的矮洞也算：要蹲著才鑽得過去）
       if (wallHigh(wallBetween(x, y, nx, ny)) || wallHigh(freeIn(nx, ny))) continue;   // 2 公尺以上的牆才算圍起來
       seen.add(k); q.push([nx, ny]);
       if (seen.size > ENC_MAX) { inside = false; break; }
@@ -471,6 +474,7 @@ function ghost4() {
   const solidF = f.solid !== false;
   for (let ty = y; ty < y + hh && g.ok; ty++) for (let tx = x; tx < x + w; tx++) {
     if (!inMap(tx, ty) || tiles[ty][tx] !== 1 || (solidF && isSolid(tx, ty))) { g.ok = false; g.why = '要放在空的地板上'; break; }
+    if (curWorld === 5 && W5MAP.water.has(tx + ',' + ty)) { g.ok = false; g.why = '不能放在水裡'; break; }
     if ([...G.sockets, ...G.lamps].some(o => o.x === tx && o.y === ty)) { g.ok = false; g.why = '那裡有燈'; break; }
     if (!solidF && FURN.some(o => o !== f && o.solid === false && !o.held && tx >= o.x && tx < o.x + o.w && ty >= o.y && ty < o.y + o.h)) { g.ok = false; g.why = '那裡已經有地毯了'; break; }
     if (tx + 1 < x + w && wallClosed(wallBetween(tx, ty, tx + 1, ty))) { g.ok = false; g.why = '會壓到板子'; break; }
@@ -1014,7 +1018,7 @@ function setHome4(auto) {
   const p = G.p;
   G.home = { x: Math.floor(p.x) + 0.5, y: Math.floor(p.y) + 0.5 };
   Sound.play(auto ? 'click' : 'install');
-  toast(auto ? '📍 這裡記成你的家了（之後可以按 📍 記錄位置換地方）。早晨禮物會放在家裡。' : `📍 記住了！你的家在「${zoneName(p.x, p.y)}」。早晨禮物會放在這裡，狀態列會告訴你家在哪個方向。`, 'good');
+  toast(auto ? '📍 這裡記成你的家了（之後可以按 📍 記錄位置換地方）。' : `📍 記住了！你的家在「${zoneName(p.x, p.y)}」。狀態列會告訴你家在哪個方向。`, 'good');
 }
 const HOME_R = 9;   // 據點的範圍：家附近幾格內的燈算「據點的燈」
 const nearHome4 = (x, y, r = HOME_R) => !!G.home && Math.hypot(x - G.home.x, y - G.home.y) < r;
@@ -1185,6 +1189,7 @@ function bedAtHome4() {
 const BASH4 = { staff: 7, mimic: 3, tyrant: 14, warlord: 9, kronos: 4, tall: 10, woman: 4, clown: 5, momo: 5, snail: 3, girl: 4, grass: 3, shake: 1.5, ember: 6, shadow: 3, gaze: 6, slice: 4, clone: 30 };
 function bash4(e, dt) {
   const w = e.wallAhead;
+  if (w && w.vox) { bashVox5(e, w, dt); return; }   // 第五世界：打擋路的方塊
   if (!w || !wallClosed(w) || hasGlass(w) || e.spawn > 0 || e.stunT > 0) return;   // 怪物打那一疊最下面那片（有玻璃的打不破）
   if (distToWall(e.x, e.y, w) > ENEMY_R + 0.3) return;
   const k = BASH4[e.kind];
@@ -1265,6 +1270,7 @@ function randomSpot4(minD = 10) {
     for (let dy = -1; dy <= 1 && ok; dy++) for (let dx = -1; dx <= 1; dx++) if (!walkable(x + dx + 0.5, y + dy + 0.5)) { ok = false; break; }
     const z = zoneAt(x, y);
     if (!ok || (z && (z.cube || z.aisle))) continue;
+    if (curWorld === 5 && [-1, 0, 1].some(dy => [-1, 0, 1].some(dx => W5MAP.water.has((x + dx) + ',' + (y + dy))))) continue;   // 不要站在水裡
     if (nearHome4(x, y, 6)) continue;
     return { x: x + 0.5, y: y + 0.5 };
   }
@@ -1333,7 +1339,7 @@ function sheltered4(x, y) {
   if (!inMap(tx, ty)) return true;
   if (isW5()) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const f = inMap(tx + dx, ty + dy) && furnGrid[ty + dy][tx + dx]; if (f && f.type === 'tree5' && Math.hypot(f.x + 0.5 - x, f.y + 0.5 - y) < 1.25) return true; }   // 第五世界：站在樹底下（樹冠遮著）
   const r = roomGrid[ty][tx] || (doorGrid[ty][tx] && doorGrid[ty][tx].rooms[0]);
-  return !!(r && r.ceil) || roofsAt4(tx, ty).length > 0;
+  return !!(r && r.ceil) || roofsAt4(tx, ty).length > 0 || voxRoof5(tx, ty);
 }
 const acidOn4 = () => !!(G.acid && G.acid.started && G.acidT > 0);
 function updateAcid4(dt) {
@@ -1409,7 +1415,7 @@ function updateTemp4(dt) {
   G.ev.windT = (G.ev.windT || 0) - dt;
   if (G.ev.windT <= 0) { G.ev.windT = rand(7, 12); Sound.play('wind', 0.35); }
 }
-const speedMult4 = () => (G.cold && G.p.temp < 30 ? 0.8 : 1) * (G.p.slowT > 0 ? 0.6 : 1) * (G.p.crouch ? 0.45 : 1) * (onMilk4() ? 0.6 : 1);
+const speedMult4 = () => (G.cold && G.p.temp < 30 ? 0.8 : 1) * (G.p.slowT > 0 ? 0.6 : 1) * (G.p.crouch ? 0.45 : 1) * (onMilk4() ? 0.6 : 1) * (wading(G.p.x, G.p.y) && !(G.p.z > 0.3) ? 0.6 : 1);   // 第五世界：在水裡走得慢
 
 // ====================================================================
 // 介面：狀態列的提示、小地圖、蓋房子的按鈕、背包
@@ -1675,7 +1681,7 @@ function migrate4(s) {
 // 新遊戲：送 8 片木頭板子放在入口旁邊的地上
 function newGame4(carry) {
   load4(null);
-  G.loose4 = (isW5() ? W5 : W4).starterPlanks.map(([x, y]) => ({ x, y, tier: 1, k: 'plank', a: Math.random() * 3 }));
+  G.loose4 = isW5() ? [] : W4.starterPlanks.map(([x, y]) => ({ x, y, tier: 1, k: 'plank', a: Math.random() * 3 }));   // 第五世界不用板子，改用方塊（下面送 12 個）
   G.tutorial4 = 1;
   startDay4(1);
   if (!carry && isW5()) { addItem('apple5', 2); addItem('soda', 1); addItem('pan', 1); addItem('bathbomb', 1); }   // 第五世界：送一顆沐浴球試試看
@@ -1695,10 +1701,11 @@ function testStart4(q, night, kit) {
   if (q.has('acid')) { G.acid = { day: G.day, night: false, at: 0, dur: 90, started: true, warned: true }; G.acidT = 90; }
   if (kit) {
     const st = isW5() ? W5.start : W4.start, oy = isW5() ? 4.4 : 0;   // 第五世界放在起點南邊（北邊是工作台）
-    for (let t = 1; t <= PLANK_MAX; t++) for (let i = 0; i < 2; i++) G.loose4.push({ x: st.x - 2 + t * 0.7, y: st.y - 1.4 - i * 0.5 + oy, tier: t, k: 'plank', a: 0 });
+    if (isW5()) for (const [i, id, n] of [[0, 'blk1', 20], [1, 'blk5', 4]]) G.pickups.push({ x: st.x - 1 + i * 0.8, y: st.y + 4.2, z: 0, id, n, keep: 1, t: 0 });   // 第五世界用方塊蓋：放在起點南邊的地上（背包只有 16 格）
+    else for (let t = 1; t <= PLANK_MAX; t++) for (let i = 0; i < 2; i++) G.loose4.push({ x: st.x - 2 + t * 0.7, y: st.y - 1.4 - i * 0.5 + oy, tier: t, k: 'plank', a: 0 });
     G.loose4.push({ x: st.x + 2.2, y: st.y - 1 + oy, tier: 1, door: true, k: 'plank', a: 0 });
     addItem('wood', isW5() ? 10 : 4);
-    if (isW5()) addItem('bathbomb', 2); else addItem('charcoal', 4);   // 第五世界的背包也只有 16 格：木柴多帶一點（工作台做方塊），不帶煤炭
+    if (isW5()) { addItem('bathbomb', 2); delete G.inv.soda; } else addItem('charcoal', 4);   // 第五世界多了木頭方塊那一格，汽水不帶   // 第五世界的背包也只有 16 格：木柴多帶一點（工作台做方塊），不帶煤炭
   }
 }
 
