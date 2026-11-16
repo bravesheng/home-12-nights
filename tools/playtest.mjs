@@ -1012,7 +1012,7 @@ await scenario('cut2', '第二到第三世界的過場動畫（?cut=2）：月�
   await shot('3-day1');
 });
 
-await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：100×76 的大賣場、架上真的東西（拿起、放下再撿回來）、2×2 公尺的正方形板子疊高蓋牆圍成家、屋頂、沒有早晨禮物和電箱、電視的梗圖、口哨的紅色影子、寒寂之境的蠟燭和檯燈取暖、斜放 45° 的牆、45° 斜坡接屋頂、屋頂底下跳會撞頭、自己爬貨架的梯子、電視、檯燈的光不穿牆、搬家具、背包 16 格、火爐、存檔讀檔、舊存檔', {}, async ({ page, shot, check }) => {
+await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：100×76 的大賣場、架上真的東西（拿起、放下再撿回來）、2×2 公尺的正方形板子疊高蓋牆圍成家、屋頂、沒有早晨禮物和電箱、電視的梗圖、口哨的紅色影子、寒寂之境的蠟燭和檯燈取暖、斜放 45° 的牆、45° 斜坡接屋頂、屋頂底下跳會撞頭、從貨架拿長鋁梯自己架、貨架每一層都站得上去（要蹲）、屋頂可以放在 4 公尺、板子加厚、燈放在桌上、電視、檯燈的光不穿牆、搬家具、背包 16 格、火爐、存檔讀檔、舊存檔', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=4&kit=1', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
   await sleep(2000);
@@ -1194,8 +1194,16 @@ await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：100×76 的大
     let top = 0; for (let i = 0; i < 120; i++) { keys.w = true; updatePlayer(0.05); top = Math.max(top, G.p.z); } keys.w = false;
     // 屋頂底下跳：頭撞到屋頂
     Object.assign(G.p, { x: 49.5, y: 54.0, z: 0, vz: 0 }); tryJump(); let head = 0; for (let i = 0; i < 20; i++) { updatePlayer(0.05); head = Math.max(head, G.p.z); }
-    // 梯子：按 E 抓住倉儲貨架的梯子；不推就停著（要自己爬），往前推往上爬，按跳放手會掉下來，再抓住爬到頂
-    const L = ladderList4().find(l => l.f.type === 'rack4');
+    // 梯子（設計師第六次紙條）：貨架沒有擺好的梯子，要從貨架最下層拿長鋁梯出來、自己架在貨架前面；
+    // 按 E 抓住，不推就停著（要自己爬），往前推往上爬，按跳放手會掉下來，再抓住爬到頂
+    const rack = FURN.find(f => f.type === 'rack4'), noLad = !ladderList4().some(l => l.f.type === 'rack4' || l.free);
+    G.hand = null;
+    Object.assign(G.p, { x: rack.x + rack.w + 0.9, y: rack.y + 1.5, z: 0, vz: 0, face: Math.PI, pitch: 0, crouch: false });
+    const lc = []; addTargets4(lc); const takeT = lc.find(c => c.id.startsWith('lad:'));
+    if (takeT) takeT.action();
+    const held = G.hand && G.hand.f && G.hand.f.type, ladLeft = rack.lad;
+    G.p.x = rack.x + rack.w + 1.5; bld().dist = 1.0; place4();
+    const L = ladderList4().find(l => l.free);
     const grab = () => { Object.assign(G.p, { x: L.base.x, y: L.base.y, z: 0, vz: 0, face: Math.atan2(L.edge.y - L.base.y, L.edge.x - L.base.x), pitch: 0.2 }); const t = getTarget(); if (t && t.action) t.action(); return t; };
     const t = grab();
     for (let i = 0; i < 10; i++) updatePlayer(0.05);
@@ -1207,17 +1215,70 @@ await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：100×76 的大
     grab(); keys.w = true; for (let i = 0; i < 200 && ride; i++) updatePlayer(0.05); keys.w = false;
     for (let i = 0; i < 5; i++) updatePlayer(0.05);
     const rackZ = G.p.z;
+    // 貨架是一層一層的：爬到第一層的高度按 E 跨進去（自動蹲下）、蹲著走得動、站不起來、頭上頂著上一層；燈可以放在這一層上
+    grab(); keys.w = true; for (let i = 0; i < 60 && ride && G.p.z < 1.5; i++) updatePlayer(0.05); keys.w = false;
+    const st = getTarget(); if (st && st.action) st.action();
+    for (let i = 0; i < 12; i++) updatePlayer(0.05);
+    const deck = { label: st && st.label, z: G.p.z, crouch: !!G.p.crouch, cell: furnGrid[Math.floor(G.p.y)][Math.floor(G.p.x)] === rack };
+    G.p.face = Math.PI / 2; const y0 = G.p.y; keys.w = true; for (let i = 0; i < 30; i++) updatePlayer(0.05); keys.w = false;
+    deck.walk = G.p.y - y0; deck.z2 = G.p.z;
+    toggleCrouch4(); deck.cantStand = !!G.p.crouch;
+    const lt = lampTile(); deck.lampH = lt && lt.h;
+    G.p.crouch = false;
     Object.assign(G.p, { x: 49.5, y: 66.5, z: 0, vz: 0 });
     const jumpVis = getComputedStyle(document.querySelector('#tbtns .tb.jump')).visibility;
-    return { jumpVis, lvs, kinds: [a.lv, b.lv], low, over, above, ramps: r.map(g => g && g.ok && (g.kind === 'ramp' ? g.lv : g.kind)), top, head, climb: t && t.label, idle, mid, letGo, fell, rackZ, tv: bulbName(7), lamp: bulbName(3) };
+    return { jumpVis, lvs, kinds: [a.lv, b.lv], low, over, above, ramps: r.map(g => g && g.ok && (g.kind === 'ramp' ? g.lv : g.kind)), top, head, climb: t && t.label, idle, mid, letGo, fell, rackZ, noLad, take: takeT && takeT.label, held, ladLeft, deck, tv: bulbName(7), lamp: bulbName(3) };
   });
   check(JSON.stringify(sq.lvs) === '[0,2]' && sq.low && sq.over && !sq.above, `2×2 公尺的板子要往上疊（${JSON.stringify(sq.lvs)}）、跟人一樣高：跳起來也越不過去、站在 2 公尺高的地方才過得去（地上 ${sq.low}、跳起來 ${sq.over}、2 公尺 ${sq.above}）`);
   check(JSON.stringify(sq.ramps) === '[0,"roof",2]' && sq.top > 3.9, `45° 的斜坡要接到屋頂、屋頂上再接斜坡（${JSON.stringify(sq.ramps)}），走得上去（最高 ${sq.top.toFixed(2)} 公尺）`);
   check(sq.head < 0.3, `在屋頂底下跳，頭要撞到屋頂（腳最高 ${sq.head.toFixed(2)} 公尺）`);
   check(sq.climb && sq.climb.includes('抓住梯子') && sq.idle.on && sq.idle.z < 0.05 && sq.mid > 1, `梯子要自己爬：按 E 抓住、不推就停著、往前推才往上爬（「${sq.climb}」、停著 ${JSON.stringify(sq.idle)}、爬了 ${sq.mid.toFixed(2)} 公尺）`);
   check(sq.letGo && sq.fell < 0.05, `抓著梯子按跳要放手、掉下來（放手 ${sq.letGo}、高度 ${sq.fell.toFixed(2)}）`);
-  check(Math.abs(sq.rackZ - 5.2) < 0.05, `貨架的梯子要爬得上去（高度 ${sq.rackZ}）`);
+  check(sq.noLad && sq.take === '拿長鋁梯' && sq.held === 'lad4' && sq.ladLeft === 0, `貨架沒有擺好的梯子，要從貨架拿長鋁梯出來自己架（${JSON.stringify({ noLad: sq.noLad, take: sq.take, held: sq.held, left: sq.ladLeft })}）`);
+  check(Math.abs(sq.rackZ - 5.2) < 0.05, `架好的長鋁梯要爬得到貨架頂（高度 ${sq.rackZ}）`);
+  check(sq.deck.label && sq.deck.label.includes('跨到這一層') && Math.abs(sq.deck.z - 1.43) < 0.05 && sq.deck.crouch && sq.deck.cell && sq.deck.walk > 0.5 && Math.abs(sq.deck.z2 - 1.43) < 0.05 && sq.deck.cantStand && Math.abs(sq.deck.lampH - 1.43) < 0.05,
+    `貨架每一層都要站得上去：從梯子跨進去會自動蹲下、蹲著走得動、站不起來、燈可以放在這一層（${JSON.stringify(sq.deck)}）`);
   check(sq.jumpVis === 'visible', `第四世界平板要有跳的按鈕（${sq.jumpVis}）`);
+  // 設計師第六次紙條：牆疊兩片高，屋頂就放在 4 公尺（不是只能 2 公尺）；板子可以加厚（耐打加起來，拆的時候先拆外面那一層）；燈可以放在桌上
+  const b6 = await page.evaluate(() => {
+    const keep = { hand: G.hand, home: G.home, p: { ...G.p } };
+    // 找一塊 6×6 的空地
+    let X = 0, Y = 0;
+    find: for (let y = 40; y < MAP_H - 8; y++) for (let x = 55; x < MAP_W - 8; x++) {
+      let ok = true;
+      for (let j = -2; j < 5 && ok; j++) for (let i = -2; i < 5; i++) if (!walkable(x + i + 0.5, y + j + 0.5) || wallBetween(x + i, y + j, x + i + 1, y + j) || wallBetween(x + i, y + j, x + i, y + j + 1) || roofsAt4(x + i, y + j).length) { ok = false; break; }
+      if (ok) { X = x; Y = y; break find; }
+    }
+    const out = { X, Y };
+    setWall({ o: 'h', x: X, y: Y, tier: 1, hp: 40 }); setWall({ o: 'h', x: X, y: Y, tier: 1, hp: 40 });
+    Object.assign(G.p, { x: X + 1, y: Y + 2.6, z: 0, vz: 0, face: -Math.PI / 2, pitch: 0, crouch: false });
+    G.hand = null; holdThing({ k: 'plank', tier: 1 }); bld().rx = 90; bld().dist = 1.6;
+    const g1 = ghost4(); out.roof = g1 && { kind: g1.kind, h: g1.h, ok: g1.ok, why: g1.why };
+    place4();
+    out.at = roofsAt4(X, Y).map(roofH4); out.head = headroom4(X + 0.5, Y + 0.5, 0); out.shelter = sheltered4(X + 0.5, Y + 0.5);
+    holdThing({ k: 'plank', tier: 1 }); bld().rx = 90; bld().dist = 1.6;
+    const g2 = ghost4(); out.again = g2 && g2.ok;
+    const sv = JSON.parse(JSON.stringify(save4())); out.saved = (sv.roofs.find(r => r[0] === X && r[1] === Y) || [])[6];
+    // 加厚：對著那一疊牆
+    G.hand = null; holdThing({ k: 'plank', tier: 2 }); toggleThick4(); bld().dist = 1.2; G.p.y = Y + 1.2;
+    const g3 = ghost4(); out.thick = g3 && { kind: g3.kind, ok: g3.ok, why: g3.why };
+    place4();
+    const pc = stackAt('h', X, Y).find(w => w.ply > 1); out.ply = pc && { ply: pc.ply, hp: pc.hp, plies: pc.plies.slice() };
+    const sv2 = JSON.parse(JSON.stringify(save4())); out.savedPly = (sv2.walls.find(w => w[10] === (pc && pc.pid)) || [])[11];
+    if (pc) { takeWall4(pc); G.hand = null; takeWall4(pc); out.back = { tier: G.hand && G.hand.tier, ply: pc.ply, hp: pc.hp, n: stackAt('h', X, Y).length }; }   // 先拿走上面那一片，再拆加厚的那一層
+    // 收拾
+    G.hand = null;
+    for (const r of roofsAt4(X, Y)) delRoof4(r);
+    for (const w of [...(stackAt('h', X, Y) || [])]) removeWall(w);
+    // 燈放在桌上
+    const tb = FURN.find(f => f.type === 'table4' && !f.held && walkable(f.x + 0.5, f.y + f.h + 0.5));
+    if (tb) { Object.assign(G.p, { x: tb.x + 0.5, y: tb.y + tb.h + 0.5, z: 0, face: -Math.PI / 2 }); const lt = lampTile(); out.lamp = lt && lt.h; }
+    Object.assign(G.p, keep.p); G.hand = keep.hand; G.home = keep.home;
+    return out;
+  });
+  check(b6.roof && b6.roof.kind === 'roof' && b6.roof.h === 4 && b6.roof.ok && JSON.stringify(b6.at) === '[4]' && Math.abs(b6.head - 2.16) < 0.01 && b6.shelter && b6.again === false && b6.saved === 4, `牆疊兩片高，屋頂要放在 4 公尺、存檔記得高度（${JSON.stringify(b6)}）`);
+  check(b6.thick && b6.thick.kind === 'thick' && b6.thick.ok && b6.ply && b6.ply.ply === 2 && b6.ply.hp === 140 && JSON.stringify(b6.savedPly) === '[2]' && b6.back && b6.back.tier === 2 && b6.back.ply === 1 && b6.back.n === 1, `板子要可以加厚：耐打加起來、存檔記得、拆的時候先拆外面那一層（${JSON.stringify(b6)}）`);
+  check(Math.abs(b6.lamp - 0.77) < 0.01, `燈要可以放在桌上（高度 ${b6.lamp}）`);
   check(sq.tv.endsWith('電視') && sq.lamp.endsWith('檯燈'), `第 6 級以上的燈泡在第四世界是電視、以下是檯燈（${sq.tv}、${sq.lamp}）`);
   // 舊的小賣場存檔（60×44）：蓋的板子要堆在入口旁邊、家要重記，不能壞掉
   const old = await page.evaluate(() => {
@@ -1486,6 +1547,29 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   await page.waitForFunction(() => G.b4.ramps.size > 0, null, { timeout: 8000 }).catch(() => {});
   const b3 = await page.evaluate(uid => ({ gone: !G.pickups.some(p => p.uid === uid), ramp: G.b4.ramps.has('52,63') }), b1.uid);
   check(b3.gone && b3.ramp, `客人拿走的架上東西、放的斜坡，房主那邊也要同步（${JSON.stringify(b3)}）`);
+  // 設計師第六次紙條：房主從貨架拿長鋁梯出來架好、把板子加厚、在 4 公尺放屋頂、把燈放在桌上，客人那邊都要一樣
+  const h6 = await page.evaluate(() => {
+    const keep = { p: { ...G.p }, hand: G.hand };
+    const rack = FURN.find(f => f.type === 'rack4');
+    G.hand = null; takeLadder4(rack);
+    const lad = G.hand.f;
+    Object.assign(G.p, { x: rack.x + rack.w + 1.5, y: rack.y + 1.5, z: 0, face: Math.PI }); bld().dist = 1.0; lad.lean = 30; place4();
+    const w = G.b4.list.find(x => !x.door && !x.free && x.tier !== GLASS_TIER);
+    let ply = null;
+    if (w) { w.plies = [...(w.plies || []), 1]; w.ply = w.plies.length + 1; w.hp += 40; net4('ply', { pid: w.pid, plies: w.plies, hp: inf4(w.hp) }); ply = { pid: w.pid, ply: w.ply, hp: w.hp }; }
+    const rf = { x: 70, y: 40, h: 4, tier: 1, hp: 40, tilt: 0, tax: 'x' }; setRoof4(rf); net4('roof', { r: { ...rf } });
+    const tb = FURN.find(f => f.type === 'table4' && !f.held);
+    const o = { kind: 'lamp', type: 'desk', x: tb.x, y: tb.y, h: 0.77, room: roomGrid[tb.y][tb.x], bulb: 3, dying: 0, free: true, face: 0 }; G.lamps.push(o); net4('lamp', { o: lampSpec4(o) });
+    Object.assign(G.p, keep.p); G.hand = keep.hand;
+    return { rack: rack.id, id: lad.id, x: lad.x, y: lad.y, side: lad.side, ply, uid: o.uid };
+  });
+  await guest.waitForFunction(id => FURN_BY_ID[id] && !FURN_BY_ID[id].held, h6.id, { timeout: 8000 }).catch(() => {});
+  const g6 = await guest.evaluate(h => {
+    const f = FURN_BY_ID[h.id], w = h.ply && pieceById4(h.ply.pid), l = G.lamps.find(o => o.uid === h.uid);
+    return { lad: f && { x: f.x, y: f.y, side: f.side, lean: f.lean, held: !!f.held, climb: ladderList4().some(L => L.f === f && L.free) }, rackLad: FURN_BY_ID[h.rack].lad, ply: w && { ply: w.ply, hp: w.hp }, roof: roofsAt4(70, 40).map(roofH4), lampH: l && l.h };
+  }, h6);
+  check(g6.lad && g6.lad.x === h6.x && g6.lad.y === h6.y && g6.lad.side === h6.side && g6.lad.lean === 30 && g6.lad.climb && g6.rackLad === 0, `房主從貨架拿出來架好的長鋁梯，客人那邊也要有、也能爬（${JSON.stringify(g6)}）`);
+  check((!h6.ply || (g6.ply && g6.ply.ply === h6.ply.ply && g6.ply.hp === h6.ply.hp)) && JSON.stringify(g6.roof) === '[4]' && g6.lampH === 0.77, `加厚的板子、4 公尺的屋頂、放在桌上的燈，客人那邊也要一樣（${JSON.stringify({ h: h6.ply, g: g6 })}）`);
   // 電視開關、火爐的燃料、櫃子裡放的東西、第 3 天以後才出現的特別板材堆（岩漿、玻璃）也要同步
   const s1 = await page.evaluate(() => {
     const tv = FURN.find(f => f.type === 'tv4'), fire = FURN.find(f => f.type === 'fireplace4'), cab = FURN.find(f => (FURN4[f.type] || {}).store);

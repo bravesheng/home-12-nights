@@ -534,6 +534,10 @@ const FURN_TOP_H = {
   toybox: 0.5, crate4: 0.92, sideboard4: 0.8, cart4: 0.9, cube5: 1.0, bench5: 0.9,
   bunk4: 1.62, ladder4: 1.95, rack4: 5.2,   // 上鋪、A 字梯頂、倉儲貨架頂：跳不上去，要爬梯子（world4.js 的 ladders4）
 };
+// 一層一層的家具（設計師第六次紙條：「鐵架是一層一層的，有梯子就可爬到每層，但要蹲下」）：每一層層板的高度，
+// 腳在哪一層就站在哪一層上（game.js 的 deckAt）；層和層之間不到一個人高，要蹲著才進得去
+const FURN_DECKS = { rack4: [1.43, 2.63, 3.83, 5.2] };
+const DECK_BEAM = 0.13;   // 層板和橫樑的厚度（頭上那一層的底面比層板的頂面低這麼多）
 const FURN_SIT = {
   seats: { face: 'w' },                                                  // 普通車廂的座位都面向車頭
   seat3: {}, passenger: {}, bench3: {}, benches: {},
@@ -608,6 +612,7 @@ const PLANKS = [null,
 const PLANK_MAX = PLANKS.length - 1, GLASS_TIER = 5, LAVA_TIER = 4;
 // 貨架的高度和每一層的高度（3D 模型和 world4.js 擺真的東西的位置共用）：倉儲貨架 5.2 公尺（設計師：鐵架太矮了）
 const RACK4_H = 5.2, RACK4_LEVELS = [0.12, 1.3, 2.5, 3.7, 4.85];
+const LAD4_LEN = 5.8, LAD4_LEANS = [0, 15, 30, 45, 60];   // 長鋁梯的長度；可以直著放，也可以斜 15°～60°（world4.js 的 ladders4）
 const GOODS4_H = 2.15, GOODS4_LEVELS = [0.12, 0.6, 1.08, 1.56, 2.0];
 const LAMPSHELF4_LEVELS = [0.1, 0.7, 1.3];
 // 真的東西擺在架子上（不是只有一團光，要一個一個拿）：這幾種架子的物資會變成擺在架上的東西（world4.js 的 stockShelves4）
@@ -621,7 +626,7 @@ const FURN4 = {
   rug4: { name: '地毯', move: true, solid: false }, blanket4: { name: '毯子', move: true, solid: false, fn: 'blanket' },
   bed4: { name: '雙人床', move: true, fn: 'bed' }, bunk4: { name: '上下鋪', move: true, fn: 'bed' }, nightstand4: { name: '床頭櫃', move: true, store: true },
   wardrobe4: { name: '衣櫃', move: true, store: true }, dresser4: { name: '五斗櫃', move: true, store: true }, toybox: { name: '玩具箱', move: true, store: true },
-  desk4: { name: '書桌', move: true }, chair4: { name: '椅子', move: true }, fireplace4: { name: '火爐', move: true, fn: 'fire' }, ladder4: { name: '梯子', move: true },
+  desk4: { name: '書桌', move: true }, chair4: { name: '椅子', move: true }, fireplace4: { name: '火爐', move: true, fn: 'fire' }, ladder4: { name: '梯子', move: true }, lad4: { name: '長鋁梯', move: true },
   table4: { name: '桌子', move: true }, sideboard4: { name: '矮櫃', move: true, store: true }, cart4: { name: '購物車', move: true }, cabinet4: { name: '櫃子', move: true, store: true },
   // 搬不動的
   counter4: { name: '流理台' }, stove4: { name: '爐子' }, sink4: { name: '洗手台' }, fridge4: { name: '冰箱' }, bathtub4: { name: '浴缸' }, toilet4: { name: '馬桶' },
@@ -646,7 +651,7 @@ const W4_ROOMS_TMPL = {
 };
 // 賣場的大小和十字主走道的位置（設計師：地圖太小，一下就走到邊邊了 → 100×76，大約是原本的三倍大）
 const W4W = 100, W4H = 76, W4AX = 49, W4AY = 37;   // 主走道：x 49～50（南北向）、y 37～38（東西向）
-const W4_MAP_VER = 2;   // 賣場的格局改版就加 1：舊存檔蓋的房子沒辦法放回新的地圖（見 world4.js 的 load4）
+const W4_MAP_VER = 3;   // 賣場的格局改版就加 1：舊存檔蓋的房子沒辦法放回新的地圖（見 world4.js 的 load4）
 const W4MAP = (() => {
   const rooms = [
     { id: 'store', name: '賣場', x: 1, y: 1, w: W4W - 2, h: W4H - 2, floor: 'store4', level: 1 },
@@ -702,11 +707,12 @@ const W4MAP = (() => {
   row(['dining', 'bedroom', 'kids', 'living', 'kitchen', 'bedroom'], 2, 60, 's');
   // 第一間廚房的流理台：第 1 天一定有平底鍋（game.js 的 newGame 用 kdrawer 這個 id）
   furn.find(f => f.type === 'counter4').id = 'kdrawer';
-  // 自助倉儲區（照 3008）：一排一排 5 公尺高的鐵貨架，中間的走道 4 格寬（設計師：兩個貨櫃間隔太小了、要可以跑跳）；
-  // 貨架上堆滿紙箱，貨架旁邊靠著板子、架著梯子
+  // 自助倉儲區（照 3008）：一排一排 5 公尺高的鐵貨架，中間的走道 6 格寬、頭尾隔 4 格
+  // （設計師第二次：兩個貨櫃間隔太小了、要可以跑跳；第六次：兩個鐵架要相隔遠點，不然太擠）；
+  // 貨架上有紙箱，最下層放著一把長鋁梯（lad: 1，world4.js 的 takeLadder4：要自己拿出來架）
   Z('自助倉儲區', 1, 1, 30, 36);
   const racks = [];
-  for (const x of [3, 9, 15, 21, 27]) for (const y of [3, 14, 25]) racks.push(F('rack4', x, y, 2, 8, { side: (x / 6 | 0) % 2 ? 'w' : 'e', loot: 'tools4' }));
+  for (const x of [3, 11, 19, 27]) for (const y of [3, 14, 25]) racks.push(F('rack4', x, y, 2, 7, { side: (x / 8 | 0) % 2 ? 'w' : 'e', loot: 'tools4', lad: 1 }));
   // 板材堆：靠在貨架的頭尾（木頭最多，水泥、黃金少；岩漿、玻璃要靠神秘店員、禮物和偶爾出現的特別板材堆）
   const tiers = [1, 1, 2, 1, 1, 3, 1, 2, 1, 1, 1, 2, 1, 1, 1];
   racks.forEach((r, i) => F('plankpile', r.x + (i % 2), i % 3 === 1 ? r.y + r.h : r.y - 1, 1, 1, { tier: tiers[i], lean: i % 3 === 1 ? 'n' : 's' }));
