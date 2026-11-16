@@ -147,6 +147,23 @@ function buildMap() {
     ROOM_CLIP[r.id] = p;
   }
 }
+// 第一、二世界上鎖的寶箱：打開之後整個不見（不擋路），隔天早上又會出現（設計師第六次紙條）
+function syncTchests() {
+  if (curWorld > 2) return;
+  for (const f of FURN) {
+    if (f.type !== 'tchest') continue;
+    const gone = !!G.chests[f.id];
+    for (let y = f.y; y < f.y + f.h; y++) for (let x = f.x; x < f.x + f.w; x++) { furnGrid[y][x] = gone ? null : f; solid[y][x] = !gone; }
+  }
+  fixFlows.clear(); flow = null;
+}
+// 今天的寶箱都開完了：鑰匙沒有用了，商人就不賣（第一到第三世界）
+function chestsAllOpen() {
+  if (isW3()) return G.chests3.length > 0 && G.chests3.every(c => c.open);
+  if (curWorld > 3) return false;
+  const list = FURN.filter(f => f.type === 'tchest');
+  return list.length > 0 && list.every(f => G.chests[f.id]);
+}
 const inMap = (tx, ty) => tx >= 0 && ty >= 0 && tx < MAP_W && ty < MAP_H;
 function isWall(tx, ty) {
   if (!inMap(tx, ty)) return true;
@@ -338,7 +355,8 @@ function loadGame() {
     pl.grow = f.g === undefined ? 1 : f.g;
     return pl;
   });
-  G.coins = s.coins || 0; G.chests = s.chests || {}; G.gift = s.gift || null;
+  G.coins = s.coins || 0; G.chests = s.chests || {}; G.gift = world >= 4 ? null : s.gift || null;   // 第四世界開始沒有早晨禮物
+  syncTchests();
   G.treasure = s.treasure && walkable(s.treasure.x, s.treasure.y) ? s.treasure : null;
   G.pickups = (s.pickups || []).filter(pk => ITEMS[pk.id] && ((pk.s && FURN_BY_ID[pk.s]) || walkable(pk.x, pk.y))).map(pk => ({ ...pk, t: Math.random() * 6, keep: 1 }));
   G.ev.deliveryAt = s.delivery === undefined ? -1 : s.delivery;
@@ -2431,7 +2449,8 @@ function updatePickups(dt) {
 // ====================================================================
 function prepareDay() {
   const ev = G.ev;
-  if (G.day > 1) makeGift();
+  if (isW4()) G.gift = null;   // 第四世界開始沒有早晨禮物（設計師第六次紙條），東西都要自己找
+  else if (G.day > 1) makeGift();
   hideTreasure();
   makeStock();
   ev.deliveryAt = isW4() ? -1 : G.day === 1 || Math.random() < 0.35 ? rand(20, DAY_LEN - 50) : -1;   // 第四世界沒有送貨員（食物都要自己找）
@@ -2594,7 +2613,9 @@ function openGacha() {
 }
 function openShop() {
   openModal('🛒 神秘商人', () => {
+    const noKey = chestsAllOpen();
     const cards = G.stock.map((s, i) => {
+      if (s.id === 'key' && noKey) return '';   // 今天的寶箱都開完了，不賣鑰匙
       // 第四世界的板子：不能放進背包，買了直接拿在手上（手上要空著）
       if (s.plank) {
         const pk = PLANKS[s.plank], can = s.qty > 0 && G.coins >= s.price && !G.hand;
@@ -2608,7 +2629,7 @@ function openShop() {
     return `<p class="hint">${isW4() ? '「嘿嘿……你找到我了。板子、手電筒……要什麼？天黑之前我就會離開。」' : '「嘿嘿……要買點好東西嗎？天黑之前我就會離開。」'}${isW4() && bagFull() ? `<br>🎒 背包滿了（${BAG_SLOTS} 格），只能買背包裡已經有的東西。` : ''}</p><div class="shop">${cards}</div>`;
   }, act => {
     const s = G.stock[+act.split(':')[1]];
-    if (!s || s.qty <= 0 || G.coins < s.price) return;
+    if (!s || s.qty <= 0 || G.coins < s.price || (s.id === 'key' && chestsAllOpen())) return;
     if (s.plank) {
       if (G.hand) return;
       G.coins -= s.price; s.qty--;
@@ -2626,6 +2647,7 @@ function openChest(f) {
   if (G.chests[f.id] || !G.inv.key) return;
   removeItem('key');
   G.chests[f.id] = true;
+  syncTchests();   // 打開之後寶箱就不見了，明天早上再出現
   const b = Math.random() < 0.6 ? pick([STAR_TIER, ANGEL_TIER, SLIME_TIER, HEAL_TIER]) : Math.min(NORMAL_MAX, Math.max(8, rollTier(3, G.day) + 2));
   const items = [['bulb' + b, 1]];
   if (Math.random() < 0.35) items.push(['lamp_chand', 1]);
@@ -2777,19 +2799,19 @@ function startDay(d) {
   for (const o of [...G.sockets, ...G.lamps]) { o.dying = 0; o.eaten = 0; }
   G.stare = 0;
   G.ev.tvOn = false; G.ev.tvT = 0; G.ev.alarm = 0;
+  if (curWorld <= 2) { G.chests = {}; syncTchests(); }   // 打開過的寶箱每天早上重新出現
   if (isW2()) spreadShrooms();
   if (isW3()) startDay3(d);   // 列車停靠下一站：車站門打開、放今天的寶箱
   if (isW4()) startDay4(d);   // 賣場：板材堆補貨、神秘店員換地方、禮物放在家裡、天氣
   refillContainers();
   prepareDay();
-  if (isW4()) afterPrepare4();
   showBig(`第 ${d} 天`, d === LAST_NIGHT ? '今晚是最後一夜！' : `你撐過了第 ${d - 1} 夜，還剩 ${LAST_NIGHT - d + 1} 夜`);
   Sound.play('dawn');
   saveGame();
-  toast(`${isGuest() ? '☀️ 天亮了' : '💾 已自動存檔'}，${isW4() ? '賣場的貨架和板材堆' : isW3() ? '車站和列車上' : isW2() ? '箱子和籃子' : '櫃子'}裡的物資也刷新了。`, 'good');
+  toast(`${isGuest() ? '☀️ 天亮了' : '💾 已自動存檔'}，${isW5() ? '樹上和花上' : isW4() ? '賣場的貨架和板材堆' : isW3() ? '車站和列車上' : isW2() ? '箱子和籃子' : '櫃子'}裡的物資也刷新了。`, 'good');
   if (G.gift) toast(isW4() ? `🎁 ${G.home ? '你家' : '你旁邊'}有一份早晨禮物！` : isW3() ? `🎁 ${RN('engine')}的火爐旁邊（丟木炭的地方）有一份早晨禮物！` : `🎁 ${FURN_BY_ID.bed && FURN_BY_ID.bed.room ? FURN_BY_ID.bed.room.name : RN('bedroom')}的床邊有一份早晨禮物！`, 'good');
   if (G.treasure) toast(`⭐ 今天的寶藏星星藏在「${G.treasure.room}」，快去找！`, 'good');
-  if (isW4()) toast('🛒 神秘店員今天在賣場的某個角落……要自己去找，仔細聽鈴鐺的聲音。');
+  if (isW4()) toast(`🛒 神秘店員今天在${isW5() ? '草原' : '賣場'}的某個角落……要自己去找，仔細聽鈴鐺的聲音。`);
 }
 function triggerEvent(type) {
   const ev = G.ev;
@@ -3261,7 +3283,7 @@ function getTarget() {
     }
     else if (f.type === 'gacha') cands.push({ d, id: 'gacha', label: `轉扭蛋（${GACHA_PRICE} 🪙 一次）`, hold: 0, action: openGacha });
     else if (f.type === 'tchest') {
-      if (G.chests[f.id]) cands.push({ d, id: 'chestOpen', label: '寶箱：已經打開過了' });
+      if (G.chests[f.id]) { /* 打開過的寶箱已經不見了 */ }
       else if (G.inv.key) cands.push({ d: d - 0.3, id: 'chest:' + f.id, label: '用鑰匙打開寶箱', hold: 0.8, action: () => openChest(f) });
       else cands.push({ d, id: 'chestLocked', label: '上鎖的寶箱（需要鑰匙）' });
     } else if (f.type === 'breaker') {
@@ -3959,7 +3981,7 @@ function tierLampSVG(t) {
     `<circle cx="18" cy="18" r="3.4" fill="${col}"/><rect x="17" y="18" width="2" height="11" fill="#b8a070"/><ellipse cx="18" cy="30.5" rx="7" ry="2.5" fill="#3a3c40"/></svg>`;
 }
 function bulbSVG(t) {
-  if (isW4() && mode === 'play') return isTvTier(t) ? tierTvSVG(t) : tierLampSVG(t);   // 第四世界：燈泡就是檯燈（第 6 級以上是電視）
+  if (isW4() && mode === 'play' && t !== BAYMAX_TIER) return isTvTier(t) ? tierTvSVG(t) : tierLampSVG(t);   // 第四世界：燈泡就是檯燈（第 6 級以上是電視）
   const c = BULBS[t].color;
   const col = c === 'rainbow' ? `url(#rb${t})` : `rgb(${c.join(',')})`;
   const defs = `<defs><radialGradient id="gl${t}"><stop offset="0" stop-color="${c === 'rainbow' ? '#fff' : `rgb(${c.join(',')})`}" stop-opacity=".8"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>` +
@@ -3976,10 +3998,11 @@ function bulbSVG(t) {
   else if (t === HEAL_TIER) body = `<circle cx="18" cy="14" r="9" fill="#8cffaf" stroke="#2f9a55" stroke-width="1"/><path d="M18 9 V19 M13 14 H23" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>` +
     `<rect x="14" y="22" width="8" height="6" rx="1.5" fill="#9aa"/>`;
   else if (t === FIRE_TIER) body = `<path d="M18 4 C26 14 25 22 18 27 C11 22 10 14 18 4Z" fill="#ff6a10"/><path d="M18 12 C22 18 21 22 18 25 C15 22 14 18 18 12Z" fill="#ffe08a"/>`;
-  // 大白燈：白色的人形，一條面罩線加兩點微光
-  else if (t === BAYMAX_TIER) body = `<ellipse cx="18" cy="21" rx="8.5" ry="8" fill="#f1ece2" stroke="#c9bfae" stroke-width=".8"/><ellipse cx="18" cy="10" rx="6" ry="4.6" fill="#f3efe6" stroke="#c9bfae" stroke-width=".8"/>` +
-    `<path d="M14.5 10.2 H21.5" stroke="#2a2420" stroke-width="1.2" stroke-linecap="round"/><circle cx="14.6" cy="10.2" r="1" fill="#2a2420"/><circle cx="21.4" cy="10.2" r="1" fill="#2a2420"/>` +
-    `<path d="M10 17 L4 23 M26 17 L32 23" stroke="#e6dccb" stroke-width="3.5" stroke-linecap="round"/>`;
+  // 大白燈：照設計師畫的大白（大大的扁圓頭、兩顆黑眼睛連一條線、圓身體、短短的手腳）
+  else if (t === BAYMAX_TIER) body = `<path d="M11.5 19.5 L6.5 17 M24.5 19.5 L30 14.5" stroke="#f3efe6" stroke-width="4.2" stroke-linecap="round"/><path d="M11.5 19.5 L6.5 17 M24.5 19.5 L30 14.5" stroke="#c9bfae" stroke-width="4.2" stroke-linecap="round" opacity=".25"/>` +
+    `<ellipse cx="13.6" cy="31" rx="3.6" ry="2.1" fill="#f1ece2" stroke="#c9bfae" stroke-width=".7"/><ellipse cx="22.4" cy="31" rx="3.6" ry="2.1" fill="#f1ece2" stroke="#c9bfae" stroke-width=".7"/>` +
+    `<ellipse cx="18" cy="23" rx="8" ry="8.2" fill="#f1ece2" stroke="#c9bfae" stroke-width=".8"/><ellipse cx="18" cy="10.5" rx="10.5" ry="7.3" fill="#f6f2ea" stroke="#c9bfae" stroke-width=".8"/>` +
+    `<path d="M13.6 10.8 H22.4" stroke="#1c1917" stroke-width=".9" stroke-linecap="round"/><circle cx="13.6" cy="10.8" r="1.7" fill="#1c1917"/><circle cx="22.4" cy="10.8" r="1.7" fill="#1c1917"/>`;
   // 第二世界：花燈泡（藍色繡球花）、樹燈泡（紅色楓樹）、水燈泡（紫色的水）
   else if (t === 6 && isW2()) body = [0, 60, 120, 180, 240, 300].map(a => `<ellipse cx="18" cy="8.6" rx="4.2" ry="6" fill="#6fb0ff" stroke="#dfeeff" stroke-width=".7" transform="rotate(${a} 18 15)"/>`).join('') +
     `<circle cx="18" cy="15" r="3.6" fill="#fff6c8"/>`;

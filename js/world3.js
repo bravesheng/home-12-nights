@@ -276,7 +276,8 @@ function closeDoor3(d) {
 // 小地圖：寶箱（照等級的顏色）
 function drawMinimap3(c) {
   for (const ch of G.chests3) {
-    c.fillStyle = ch.open ? 'rgba(160,150,140,.5)' : ['', '#a0784a', '#8a8f96', '#d0d6dd', '#e8f0ff'][ch.lv];
+    if (ch.open) continue;
+    c.fillStyle = ['', '#a0784a', '#8a8f96', '#d0d6dd', '#e8f0ff'][ch.lv];
     c.fillRect(ch.x + 0.15, ch.y + 0.15, 0.7, 0.7);
   }
 }
@@ -409,7 +410,7 @@ function chestFace(x, y) {
 }
 function rebuildChestGrid() {
   dynSolid = grid(false);
-  for (const c of G.chests3) dynSolid[c.y][c.x] = true;
+  for (const c of G.chests3) if (!c.open) dynSolid[c.y][c.x] = true;   // 打開過的寶箱不見了，不擋路
   fixFlows.clear(); flow = null;
 }
 function placeChests3() {
@@ -435,9 +436,9 @@ function chestTargets(cands) {
     const a = lookAngle(cx, cy);
     if (a > 1.0 && rd > 0.7) continue;
     const d = rd - 0.3 + a * 0.9, spec = CHESTS3[c.lv];
-    if (c.open) { cands.push({ d, id: 'chest3open', label: `${spec.name}：已經打開過了` }); continue; }
-    const keys = G.inv.key || 0;
-    if (keys < spec.keys) cands.push({ d, id: 'chest3lock', label: `${spec.name}（需要 ${spec.keys} 把鑰匙，你有 ${keys} 把）` });
+    if (c.open) continue;   // 打開過的寶箱已經不見了
+    const keys = G.inv.key || 0, need = c.out ? 0 : spec.keys;   // 怪物跑出來的那一次已經用過鑰匙了
+    if (keys < need) cands.push({ d, id: 'chest3lock', label: `${spec.name}（需要 ${spec.keys} 把鑰匙，你有 ${keys} 把）` });
     else cands.push({ d, id: `chest3:${c.x},${c.y}`, label: `打開${spec.name}`, sub: c.out ? '怪物已經跑出來了，裡面還有東西' : `LV${c.lv}${spec.keys ? `・用 ${spec.keys} 把鑰匙` : ''}・有機會跑出怪物`, hold: spec.hold, action: () => openChest3(c) });
   }
 }
@@ -466,12 +467,14 @@ function chestLoot(lv) {
 }
 function openChest3(c) {
   const spec = CHESTS3[c.lv];
-  if (c.open || (G.inv.key || 0) < spec.keys) return;
-  for (let i = 0; i < spec.keys; i++) removeItem('key');
+  const need = c.out ? 0 : spec.keys;
+  if (c.open || (G.inv.key || 0) < need) return;
+  for (let i = 0; i < need; i++) removeItem('key');
   makeNoise(4);
   const mult = G.diff === 'easy' ? 0.5 : G.diff === 'hard' ? 1.3 : 1;
   if (!c.out && Math.random() < spec.monster * mult) { c.out = true; chestMonster(c); return; }
   c.open = true;
+  rebuildChestGrid();   // 打開之後寶箱就不見了（設計師第六次紙條），明天到下一站又有新的
   const items = chestLoot(c.lv), coins = [0, randi(1, 3), randi(2, 5), randi(5, 9), randi(10, 16)][c.lv];
   const got = gainAll(items);
   addCoins(coins);

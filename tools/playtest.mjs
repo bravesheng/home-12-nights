@@ -342,13 +342,28 @@ await scenario('w3', '第三世界第 1 天（照片貼圖、各式各樣死去�
     const solid = isSolid(c.x, c.y), before = G.coins;
     Math.random = () => 0.99;   // 這次一定開出物資，不跳怪物
     openChest3(c);
-    return { list, solid, opened: c.open, coins: G.coins - before, modal: mode === 'modal' };
+    // 設計師第六次紙條：打開之後寶箱就不見（不擋路、也不能再開）；今天的寶箱都開完，商人就不賣鑰匙
+    const gone = !isSolid(c.x, c.y), sell0 = !chestsAllOpen() && G.stock.some(s => s.id === 'key');
+    const n0 = G.chests3.filter(x => !x.open).length, cands = []; chestTargets(cands);   // 站在剛打開的寶箱前面，不能再有「打開」的選項
+    return { list, solid, opened: c.open, coins: G.coins - before, modal: mode === 'modal', gone, sell0, again: cands.length, left: n0 };
   });
   check(ch.list.length === 6 && ch.list.filter(l => l === 1).length === 3, `第 1 天要放 6 個寶箱（現在：${ch.list.join(',')}）`);
   check(ch.solid && ch.opened && ch.coins > 0 && ch.modal, `櫃箱要擋路、開了要有東西（開了 ${ch.opened}、硬幣 +${ch.coins}）`);
+  check(ch.gone && ch.sell0 && ch.again === 0 && ch.left === 5, `打開的寶箱要不見、不擋路；還有寶箱沒開時商人要賣鑰匙（${JSON.stringify(ch)}）`);
   await sleep(600);
   await shot('2b-chest');
   await page.evaluate(() => { closeModal(); });
+  await sleep(2200);
+  const ch2 = await page.evaluate(() => {
+    const keep = G.chests3.map(c => c.open);
+    for (const x of G.chests3) x.open = true;
+    const all = chestsAllOpen();
+    openShop(); const html = document.getElementById('modal').innerHTML; closeModal();
+    G.chests3.forEach((x, i) => { x.open = keep[i]; });
+    return { all, key: html.includes(itemName('key')), left: G.chests3.filter(c => !c.open).length };
+  });
+  check(ch2.all && !ch2.key && ch2.left === 5, `今天的寶箱都開完，商人就不賣鑰匙（${JSON.stringify(ch2)}）`);
+  await shot('2c-chest-gone');
   // 火爐：站在火爐前面丟木柴，火力要增加
   const fire = await page.evaluate(() => {
     const f = FURN_BY_ID.firebox;
@@ -997,7 +1012,7 @@ await scenario('cut2', '第二到第三世界的過場動畫（?cut=2）：月�
   await shot('3-day1');
 });
 
-await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：100×76 的大賣場、架上真的東西（拿起、放下再撿回來）、2×2 公尺的正方形板子疊高蓋牆圍成家、屋頂、早晨禮物在家的正中央、寒寂之境的蠟燭和檯燈取暖、斜放 45° 的牆、45° 斜坡接屋頂、屋頂底下跳會撞頭、自己爬貨架的梯子、電視、檯燈的光不穿牆、搬家具、背包 16 格、火爐、存檔讀檔、舊存檔', {}, async ({ page, shot, check }) => {
+await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：100×76 的大賣場、架上真的東西（拿起、放下再撿回來）、2×2 公尺的正方形板子疊高蓋牆圍成家、屋頂、沒有早晨禮物和電箱、電視的梗圖、口哨的紅色影子、寒寂之境的蠟燭和檯燈取暖、斜放 45° 的牆、45° 斜坡接屋頂、屋頂底下跳會撞頭、自己爬貨架的梯子、電視、檯燈的光不穿牆、搬家具、背包 16 格、火爐、存檔讀檔、舊存檔', {}, async ({ page, shot, check }) => {
   await page.goto(BASE + '?world=4&kit=1', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play');
   await sleep(2000);
@@ -1073,9 +1088,18 @@ await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：100×76 的大
   check(house.walls === 9 && house.roofs === 4 && house.cells === 16, `要有 9 片 2×2 公尺的板子（8 片牆、1 片第一片）、4 片屋頂蓋住 16 格（${house.walls}／${house.roofs}／${house.cells}）`);
   check(house.span, '一片板子（門）要橫跨兩個格子的邊');
   check(house.home && house.cover, `站在圍起來、有屋頂的地方要算「在家裡」、淋不到雨（在家 ${house.home}、遮著 ${house.cover}）`);
-  // 早晨禮物放在家的正中央（設計師）
-  const gift = await page.evaluate(() => { G.home = { x: 51.5, y: 69.5 }; const c = homeCenter4(); return c && [c.x, c.y]; });
-  check(gift && Math.abs(gift[0] - 53) <= 0.6 && Math.abs(gift[1] - 71) <= 0.6, `早晨禮物要放在家的正中央（${JSON.stringify(gift)}，家是 51～54、69～72）`);
+  // 設計師第六次紙條：第四世界開始沒有早晨禮物、沒有電箱（不會停電）；電視會播梗圖
+  const nogift = await page.evaluate(() => {
+    const keep = { stock: G.stock, treasure: G.treasure, stats: G.nightStats, day: G.day };
+    G.day = 3; G.nightStats = { kills: 9, caught: 0 }; prepareDay();
+    const gift = G.gift, types = [];
+    for (let i = 0; i < 20; i++) scheduleNight4(t => types.push(t), () => true, 6, 6, 1);
+    const r = { gift, breaker: !!FURN_BY_ID.breaker, blackout: types.includes('blackout'), shows: Renderer.tvShows, tex: new Set([...Array(Renderer.tvShows)].map((_, k) => Renderer.tvShow(k).uuid)).size };
+    Object.assign(G, { stock: keep.stock, treasure: keep.treasure, nightStats: keep.stats, day: keep.day });
+    return r;
+  });
+  check(nogift.gift === null && !nogift.breaker && !nogift.blackout, `第四世界沒有早晨禮物、沒有電箱、不會停電（${JSON.stringify(nogift)}）`);
+  check(nogift.shows >= 9 && nogift.tex === nogift.shows, `電視要有風景、廣告和梗圖共 9 張以上（${nogift.shows} 張、${nogift.tex} 張不一樣的）`);
   // 檯燈：選燈泡按 Q 會在前面放一盞檯燈；家裡的燈不會穿過牆照到外面（玻璃透光）
   const lamp = await page.evaluate(() => {
     Object.assign(G.p, { x: 52.5, y: 71.0, face: -Math.PI / 2 }); G.selId = 'bulb5';
@@ -1152,8 +1176,11 @@ await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：100×76 的大
     whistle4();
     return { kind: g && g.kind, ok: g && g.ok, deg: w ? Math.round(w.ang * 180 / Math.PI) : null, hit, back, dots: whistleDots4().filter(d => d.red).length };
   });
+  await sleep(700);
+  const sil = await page.evaluate(() => Renderer.whistle());
   check(free.kind === 'free' && free.ok && free.deg % 90 !== 0 && free.hit && free.back, `一次轉 45° 要放得下斜的牆、擋得住人、存檔讀回來（${JSON.stringify(free)}）`);
-  check(free.dots > 0, `吹口哨要看到怪物的紅點（${free.dots} 個）`);
+  check(free.dots > 0 && sil.red > 0, `吹口哨要把怪物畫成紅色的影子（找到 ${free.dots} 隻、畫了 ${sil.red} 隻）`);
+  await shot('3b-whistle');
   // 2×2 公尺的板子往上疊（跟人一樣高，跳不過去）、45° 的斜坡接屋頂再接斜坡、屋頂底下跳會撞到頭、貨架的梯子要自己爬、第 6 級以上的燈泡是電視
   const sq = await page.evaluate(() => {
     const put = (tier, pos, rx = 0) => { holdThing({ k: 'plank', tier }); Object.assign(G.p, pos); Object.assign(G.bld, { dist: 1.0, rx, ry: 0, rz: 0 }); const g = ghost4(); place4(); G.hand = null; return g; };
@@ -1430,9 +1457,11 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   await page.waitForFunction(() => Renderer.friends().some(r => r.visible), null, { timeout: 5000 }).catch(() => {});
   check(await page.evaluate(() => Renderer.friends().some(r => r.visible) && !Net.friends()[0].away), '客人切回來，房主那邊又要看得到他的人物');
   check(await page.evaluate(() => typeof drawMinimap === 'function'), '小地圖照常');
-  // 口哨（第四世界）：朋友是藍點
-  const dots = await page.evaluate(() => { G.whistleT = 5; const d = whistleDots4(); G.whistleT = 0; return d.filter(x => !x.red).length; });
-  check(dots >= 1, '吹口哨時朋友要是藍點');
+  // 口哨（第四世界）：朋友是藍色的人影
+  await page.evaluate(() => { G.whistleT = 5; });
+  await sleep(600);
+  const dots = await page.evaluate(() => { const d = whistleDots4(), w = Renderer.whistle(); G.whistleT = 0; return { n: d.filter(x => !x.red && x.f).length, blue: w.blue }; });
+  check(dots.n >= 1 && dots.blue >= 1, `吹口哨時朋友要是藍色的人影（${JSON.stringify(dots)}）`);
   // 第四世界一起蓋房子：客人進來時拿到房主的賣場（架上的東西一樣）；之後房主放的板子、搬的家具，客人拿走的架上東西、放的斜坡都會同步
   await guest.waitForFunction(() => G.pickups.some(p => p.uid), null, { timeout: 10000 }).catch(() => {});
   const b1 = await page.evaluate(() => {

@@ -759,7 +759,7 @@ const W4MAP = (() => {
   F('toilet4', 1, 74, 1, 1, { side: 'n' }); F('toilet4', 3, 74, 1, 1, { side: 'n' }); F('sink4', 2, 69, 1, 1, { side: 's' }); F('sink4', 4, 69, 1, 1, { side: 's' });
   F('cabinet4', 6, 74, 1, 1, { side: 'n', loot: 'med4' });
   Z('員工專用區', 93, 69, 6, 6);
-  F('breaker', 98, 69, 1, 1, { id: 'breaker', side: 'w' }); F('workbench', 94, 69, 2, 1, { id: 'workbench', side: 's' });
+  F('workbench', 94, 69, 2, 1, { id: 'workbench', side: 's' });   // 第四世界沒有電箱、不會停電（設計師第六次紙條：「四世界不會有發電機」）
   F('locker4', 93, 74, 2, 1, { side: 'n', loot: 'clothes4' }); F('vending4', 98, 74, 1, 1, { side: 'n', loot: 'food4' });
   F('table4', 95, 72, 2, 1);
   Z('主走道', W4AX, 1, 2, W4H - 2, { aisle: true }); Z('主走道', 1, W4AY, W4W - 2, 2, { aisle: true });
