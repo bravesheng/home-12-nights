@@ -3276,6 +3276,12 @@ if (NET_OK) {
   Net.on('gift', gotGift);
   Net.on('giftback', gotGiftBack);
   Net.on('revive', (d, from) => Net.wake(from));
+  // 有人倒下了：晚上的話今晚多 10 秒（房主算時間；設計師第六次紙條）
+  Net.on('died', (d, from) => {
+    const f = Net.friends().find(x => x.id === from);
+    if (d && d.night && Net.isHost && G && G.phase === 'night') G.t = Math.max(0, G.t - NET_DIE_SECS);
+    toast(`💀 ${f ? f.name : '朋友'}倒下了！${d && d.night ? `今晚多 ${NET_DIE_SECS} 秒。` : ''}看著他按住 E 可以把他扶起來。`, 'warn');
+  });
 }
 function getTarget() {
   const p = G.p, ev = G.ev;
@@ -3767,7 +3773,7 @@ function bulbPos(o) {
 // ====================================================================
 const WORLD_PREFIX = () => (isW5() ? '第五世界・' : isW4() ? '第四世界・' : isW3() ? '第三世界・' : isW2() ? '第二世界・' : '');
 function gameOver(cause = '') {
-  if (isGuest()) { Net.down(cause); return; }   // 跟朋友一起玩的客人倒下了：不卡在結束畫面，天亮時醒過來（net.js）
+  if (NET_OK && Net.shared) { Net.down(cause); return; }   // 跟朋友一起玩（房主也一樣）：倒下不用重來，天亮時醒過來、朋友也可以扶（net.js）
   mode = 'over';
   Sound.setDrone(0);
   G.p.grabbed = null;
@@ -4620,7 +4626,9 @@ function musicState() {
 function frame(ts) {
   const dt = Math.min(0.05, (ts - lastT) / 1000 || 0);
   lastT = ts;
+  if (NET_OK && typeof NetShare !== 'undefined') NetShare.tick();   // 跟朋友一起玩：第一到第三世界的門、燈泡、櫃子、地上的東西……都同步（netshare.js）
   if (mode === 'play') update(dt);
+  else if (mode === 'down' && NET_OK && Net.isHost) { G.time += dt; updateTime(dt); }   // 房主倒下了：時間照樣走，大家才不會卡住
   else if (mode === 'title') { G.time += dt; for (const e of G.enemies) e.wob += dt; buildLights(); }
   else if (mode === 'cutscene') { updateCutscene(dt); if (mode === 'cutscene') buildLights(); }
   else buildLights();

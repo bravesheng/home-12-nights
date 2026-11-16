@@ -33,7 +33,7 @@
 //     '@start' { world, day }（客人進到房主的世界；房主換世界時客人跟著換，會再發一次）、'@close' { why }（自己離開房間或斷線）
 //   type 不能用 _ 或 @ 開頭（內部用）；data 要能 JSON 化；大的訊息會自動切塊（PeerJS 一次只能送 16KB）
 
-const NET_VER = 4;                      // 連線的訊息格式版本：改了就加 1（版本不一樣的平板會被擋下來，請它更新）
+const NET_VER = 5;                      // 連線的訊息格式版本：改了就加 1（版本不一樣的平板會被擋下來，請它更新）
 const NET_PREFIX = 'home12-';           // PeerJS 的 id：home12-ABCD
 const NET_MAX = 4;                      // 一個房間最多幾個人（房主加 3 個客人）
 const NET_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // 房間代碼：大寫字母和數字，不用 0/O、1/I（看起來很像）
@@ -44,6 +44,7 @@ const NET_TIMEOUT = 15000;              // 15 秒沒收到對方的東西就當�
 const NET_AWAY = 60000;                 // 切到別的 App 超過 60 秒就當成離開了（人物早就先藏起來了）
 const NET_AWAY_QUIET = 8000;            // 切到別的 App 之後 8 秒都沒有消息（多半是把 App 關掉了）也當成離開了
 const NET_CHUNK = 6000;                 // 一塊最多幾個字（中文 3 個位元組，6000 字也在 PeerJS 的 16KB 以內）
+const NET_DIE_SECS = 10;                // 晚上有人倒下，今晚多幾秒（設計師：一個人死掉其他人不會重來，只是天黑會加 10 秒）
 const NET_DOWN_DAY = 20;                // 客人白天倒下幾秒後醒來
 const NET_TEST = /[?&]nettest(?:[=&]|$)/.test(location.search);
 
@@ -373,7 +374,7 @@ const Net = (() => {
     emit('@leave', { id, name: g.name });
   }
   // 房主在做什麼：play 玩、pause 暫停、menu 開著商店或書包的視窗（這兩個時間都停住）、cut 過場動畫、over 倒下了或破關畫面
-  const hostMode = () => (mode === 'cutscene' ? 'cut' : mode === 'over' ? 'over' : mode === 'play' ? 'play' : mode === 'modal' ? 'menu' : 'pause');
+  const hostMode = () => (mode === 'cutscene' ? 'cut' : mode === 'over' ? 'over' : mode === 'play' || mode === 'down' ? 'play' : mode === 'modal' ? 'menu' : 'pause');
   function hostState() {
     if (!inGame()) return { ig: 0 };
     return { ig: 1, m: hostMode(), w: curWorld, day: G.day, ph: G.phase, t: r2(G.t), diff: G.diff, rate: r2(S.rate), pz: S.pz };
@@ -536,6 +537,7 @@ const Net = (() => {
   }
   // 房主每一幀：開著視窗時朋友暫停了，關掉視窗就進暫停畫面；房主看過場動畫或倒下了，大家就不用停著等
   function hostTick() {
+    if (S.downed) downTick(now());   // 房主倒下了也一樣：等朋友扶、或天亮醒來
     if (!S.pz.on || !inGame()) return;
     if (mode === 'play') applyPz();
     else if (mode === 'cutscene' || mode === 'over') setPz(0, '');
@@ -581,10 +583,14 @@ const Net = (() => {
     try { S.lastPing = now(); sendAll('_ping', awayPing()); } catch (e) { /* 送不出去就算了 */ }
   });
 
-  // ---------- 客人倒下：不卡在結束畫面，天亮時（白天倒下是 20 秒後）醒過來 ----------
+  // ---------- 倒下：不卡在結束畫面，天亮時（白天倒下是 20 秒後）醒過來，朋友也可以把你扶起來 ----------
+  // 設計師第六次紙條：一個人死掉其他人不會死也不會重來，只是天黑會加 10 秒。所以房主倒下也是這樣（以前房主倒下大家都要重來）：
+  // 房主倒著的時候時間照樣走（game.js 的 frame）、牠算的怪物交給朋友（netmon.js）。晚上每倒下一次，今晚多 NET_DIE_SECS 秒
   function down(cause) {
     if (S.downed || mode !== 'play') return;
     const p = G.p;
+    try { sendAll('died', { night: G.phase === 'night' ? 1 : 0 }); } catch (e) { /* 送不出去就算了 */ }
+    if (S.role === 'host' && G.phase === 'night') G.t = Math.max(0, G.t - NET_DIE_SECS);
     S.downed = { cause, at: now(), night: G.phase === 'night' };
     mode = 'down';
     Sound.setDrone(0);
@@ -604,9 +610,11 @@ const Net = (() => {
     const d = S.downed;
     if (!d) return;
     let left;
+    if (d.night && G.phase === 'day') { revive(); return; }   // 天亮了（房主自己倒下的時候也靠這裡醒來）
     if (d.night) left = G.phase === 'night' ? Math.max(0, NIGHT_LEN - G.t) : 0;
     else left = Math.max(0, NET_DOWN_DAY - (t - d.at) / 1000);
-    el('netDownText').textContent = d.night ? `天亮時會在 ${hostName()} 旁邊醒來（還有 ${Math.ceil(left)} 秒）` : `${Math.ceil(left)} 秒後會在 ${hostName()} 旁邊醒來`;
+    const where = S.role === 'host' ? '' : `在 ${hostName()} 旁邊`;
+    el('netDownText').textContent = (d.night ? `天亮時會${where}醒來（還有 ${Math.ceil(left)} 秒）` : `${Math.ceil(left)} 秒後會${where}醒來`) + '；朋友看著你按住 E 可以把你扶起來';
     if (!d.night && left <= 0) revive();
   }
   // by：扶你起來的朋友的 id（就在原地起來，血少一點）；沒有的話是天亮了或時間到了，在房主旁邊醒來
@@ -616,11 +624,12 @@ const Net = (() => {
     hideDown();
     const p = G.p, who = by && rosterOf(by);
     Object.assign(p, { hp: who ? 40 : 60, san: Math.max(p.san, 60), hunger: Math.max(p.hunger, 50), temp: Math.max(p.temp || 0, 80), camDrop: 0, pitch: 0, pose: null, grabbed: null, stunT: 0, slowT: 0, z: 0, vz: 0, inv: 3, hurt: 0 });
-    if (!who || !walkable(p.x, p.y)) { if (!placeNearHost(false)) Object.assign(p, startPos()); }
+    if (S.role === 'host') { if (!walkable(p.x, p.y)) Object.assign(p, startPos()); }   // 房主在原地醒來
+    else if (!who || !walkable(p.x, p.y)) { if (!placeNearHost(false)) Object.assign(p, startPos()); }
     mode = 'play';
     invDirty = true;
     lockPointer();
-    showBig('你醒過來了', who ? `${who.name} 把你扶起來了` : `在 ${hostName()} 旁邊`);
+    showBig('你醒過來了', who ? `${who.name} 把你扶起來了` : S.role === 'host' ? '天亮了' : `在 ${hostName()} 旁邊`);
     sendAll('_pos', myPos());
   }
   // 朋友按住 E 把你扶起來（game.js 收到 'revive' 事件時呼叫）
@@ -878,6 +887,8 @@ const Net = (() => {
   return {
     get active() { return !!S.role && (S.role === 'host' || S.joined); },
     get isHost() { return S.role === 'host'; },
+    get shared() { return !!S.role && (S.role === 'guest' ? S.joined : friendsList().some(f => f.ingame && f.world === curWorld)); },   // 真的有朋友一起在玩（倒下不用重來）
+    get downed() { return !!S.downed; },
     get guest() { return S.role === 'guest' && S.joined; },
     get ready() { return inGame() && (S.role === 'host' || (S.role === 'guest' && S.entered)); },
     get myId() { return S.myId; },

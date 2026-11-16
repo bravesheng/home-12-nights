@@ -1478,7 +1478,7 @@ await scenario('cut3', '第三到第四世界（?cut=3）：第三世界的結�
   check(await page.evaluate(() => curWorld === 4 && bagUsed() > 0), '要進第四世界、背包要帶過去');
 });
 
-await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩個分頁，用 BroadcastChannel 互連，不用上網）：遊戲中開房間、用代碼加入、客人進到房主的世界和天數、時間對齊、看得到彼此的 3D 人物和手電筒、自訂事件（大訊息切塊）、換白天晚上、客人倒下天亮時醒來、客人的存檔不變、暫停同步（有人暫停大家都暫停、寫著是誰、誰按繼續大家一起繼續、開書包不算暫停）、切到別的 App 時藏起人物、離開房間（人物馬上消失）、在主選單等房主開始、關掉分頁馬上算離開、第四世界一起蓋房子（板子、家具、架上的東西、斜坡同步）、怪物同步（交給離牠最近的人算、打朋友算的怪物、用手電筒照，第一和第四世界）', { limit: 300000 }, async ({ page, ctx, shot, check }) => {
+await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩個分頁，用 BroadcastChannel 互連，不用上網）：遊戲中開房間、用代碼加入、客人進到房主的世界和天數、時間對齊、看得到彼此的 3D 人物和手電筒、自訂事件（大訊息切塊）、換白天晚上、客人倒下天亮時醒來、客人的存檔不變、暫停同步（有人暫停大家都暫停、寫著是誰、誰按繼續大家一起繼續、開書包不算暫停）、切到別的 App 時藏起人物、離開房間（人物馬上消失）、在主選單等房主開始、關掉分頁馬上算離開、第四世界一起蓋房子（板子、家具、架上的東西、斜坡同步）、怪物同步（交給離牠最近的人算、打朋友算的怪物、用手電筒照，第一和第四世界）、第一世界的門、燈泡、櫃子、地上的東西、停電都同步、有人倒下今晚多 10 秒、房主倒下不用重來', { limit: 300000 }, async ({ page, ctx, shot, check }) => {
   // 房主用測試版（不存檔，不會蓋掉客人的存檔；兩個分頁共用 localStorage），客人用正式版
   const guest = await ctx.newPage();
   guest.on('pageerror', e => check(false, '客人的分頁 JS 錯誤：' + e.message));
@@ -1713,9 +1713,14 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   await guest.waitForFunction(() => mode === 'play', null, { timeout: 5000 }).catch(() => {});
   const rv = await guest.evaluate(g => ({ mode, hp: G.p.hp, moved: Math.hypot(G.p.x - g.x, G.p.y - g.y), big: document.getElementById('bigText').textContent }), gpos);
   check(rv.mode === 'play' && rv.hp === 40 && rv.moved < 0.5 && rv.big.includes('扶起來'), `朋友把客人扶起來：在原地醒來、血 40（${JSON.stringify(rv)}）`);
+  // 設計師第六次紙條：晚上有人倒下，今晚多 10 秒
+  const nt0 = await page.evaluate(() => { G.t = 80; return G.phase; });
   await guest.evaluate(() => gameOver());
   await guest.waitForFunction(() => mode === 'down', null, { timeout: 5000 }).catch(() => {});
   await page.waitForFunction(() => Net.friends().some(f => f.down), null, { timeout: 5000 }).catch(() => check(false, '房主要看到客人倒下了'));
+  await page.waitForFunction(() => G.t < 79, null, { timeout: 5000 }).catch(() => {});
+  const nt1 = await page.evaluate(() => G.t);
+  check(nt0 === 'night' && nt1 < 76 && nt1 > 68, `晚上有人倒下，今晚要多 10 秒（房主的時間從 80 退到 ${nt1.toFixed(1)}）`);
   // 房主天亮 → 客人在第 3 天醒過來
   await page.evaluate(() => { G.t = NIGHT_LEN - 0.05; });
   await guest.waitForFunction(() => G.phase === 'day' && G.day === 3 && mode === 'play', null, { timeout: 20000 }).catch(() => {});
@@ -1813,6 +1818,40 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
     check(w1m.g && w1m.h === await guest.evaluate(() => Net.myId), `第一世界：房主生在客人旁邊的黑影要交給客人算（${JSON.stringify(w1m)}）`);
     await guest.evaluate(() => { G.p.inv = 0; });
   } else check(false, '第一世界找不到離房主很遠的地方');
+  // 設計師第六次紙條：第一到第三世界的東西全部同步（門、燈座的燈泡、櫃子、地上的東西、停電、寶箱）
+  await guest.waitForFunction(() => !NetShare.waiting, null, { timeout: 15000 }).catch(() => {});
+  await sleep(900);
+  const shd = await page.evaluate(() => {
+    const di = DOORS.findIndex(d => !d.front && !d.closed), s = G.sockets.find(o => !o.bulb), cid = Object.keys(G.containers)[0];
+    setDoor(DOORS[di], true); s.bulb = 5; G.containers[cid].items = ['battery', 'candle'];
+    // 放在離大家很遠的地方（放在腳邊會被自己馬上撿走）
+    let far = null, fd = 0;
+    for (let y = 1; y < MAP_H - 1; y++) for (let x = 1; x < MAP_W - 1; x++) if (walkable(x + 0.5, y + 0.5)) { const dd = Math.min(Math.hypot(x + 0.5 - G.p.x, y + 0.5 - G.p.y), ...Net.friends().map(f => Math.hypot(x + 0.5 - f.x, y + 0.5 - f.y))); if (dd > fd) { fd = dd; far = [x + 0.5, y + 0.5]; } }
+    const pk = { x: far[0], y: far[1], id: 'battery', n: 2, keep: 1, t: 0 }; G.pickups.push(pk);
+    G.power = false; G.chests.tchest1 = true; syncTchests();
+    return { di, sid: s.id, cid };
+  });
+  await guest.waitForFunction(h => DOORS[h.di].closed && G.sockets.find(o => o.id === h.sid).bulb === 5 && !G.power, shd, { timeout: 8000 }).catch(() => {});
+  const gsh = await guest.evaluate(h => {
+    const pk = G.pickups.find(p => p.id === 'battery' && p.n === 2 && p.keep);
+    const r = { door: !!DOORS[h.di].closed, bulb: G.sockets.find(o => o.id === h.sid).bulb, cont: G.containers[h.cid].items.join(), pk: !!pk, power: G.power, chest: !!G.chests.tchest1 };
+    // 客人改回去：開門、拿走燈泡、撿走地上的東西、重啟電源
+    setDoor(DOORS[h.di], false); G.sockets.find(o => o.id === h.sid).bulb = 0; if (pk) G.pickups.splice(G.pickups.indexOf(pk), 1); G.power = true; G.containers[h.cid].items = ['candle'];
+    return r;
+  }, shd);
+  check(gsh.door && gsh.bulb === 5 && gsh.cont === 'battery,candle' && gsh.pk && gsh.power === false && gsh.chest, `房主關的門、裝的燈泡、櫃子裡的東西、掉在地上的東西、停電、開過的寶箱，客人那邊都要一樣（${JSON.stringify(gsh)}）`);
+  await page.waitForFunction(h => !DOORS[h.di].closed && !G.sockets.find(o => o.id === h.sid).bulb && G.power, shd, { timeout: 8000 }).catch(() => {});
+  const hsh = await page.evaluate(h => ({ door: !!DOORS[h.di].closed, bulb: G.sockets.find(o => o.id === h.sid).bulb, cont: G.containers[h.cid].items.join(), pk: G.pickups.some(p => p.id === 'battery' && p.n === 2 && p.keep), power: G.power }), shd);
+  check(!hsh.door && !hsh.bulb && hsh.cont === 'candle' && !hsh.pk && hsh.power === true, `客人開的門、拿走的燈泡、撿走的東西、重啟的電源，房主那邊也要一樣（${JSON.stringify(hsh)}）`);
+  // 房主倒下：不是結束畫面、大家不用重來，時間照樣走；客人把房主扶起來
+  const ht0 = await page.evaluate(() => { G.p.inv = 0; gameOver(); return { mode, over: !document.getElementById('gameover').classList.contains('hidden'), t: G.t }; });
+  await guest.waitForFunction(() => Net.friends().some(f => f.down), null, { timeout: 5000 }).catch(() => {});
+  await sleep(1200);
+  const ht1 = await page.evaluate(() => ({ mode, t: G.t, text: document.getElementById('netDownText').textContent }));
+  const gh = await guest.evaluate(() => { const f = Net.friends().find(x => x.down); if (f) reviveFriend(f); return { saw: !!f, mode, t: G.t }; });
+  await page.waitForFunction(() => mode === 'play', null, { timeout: 5000 }).catch(() => {});
+  const ht2 = await page.evaluate(() => ({ mode, hp: G.p.hp }));
+  check(ht0.mode === 'down' && !ht0.over && ht1.mode === 'down' && ht1.t > ht0.t + 0.1 && gh.saw && gh.mode === 'play' && ht2.mode === 'play' && ht2.hp === 40, `房主倒下不是結束畫面、時間照樣走，客人可以把房主扶起來（${JSON.stringify({ ht0, ht1, gh, ht2 })}）`);
   // 房主關掉房間：客人回到主選單，有提示
   await page.evaluate(() => Net.leave());
   await guest.waitForFunction(() => mode === 'title' && !Net.active, null, { timeout: 15000 }).catch(() => {});

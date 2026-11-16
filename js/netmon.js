@@ -122,6 +122,9 @@ const NetMon = (() => {
         Object.assign(e, s, { nid, x, y });
         G.enemies.push(e); ids.set(nid, e);
       } else if (s && typeof s === 'object') { delete s.x; delete s.y; Object.assign(e, s); }
+      // 牠走多快（設計師第六次紙條：鬼不會隔空打人）：照前後兩次收到的位置算速度，畫的時候往前預測一點，
+      // 才不會落後一截、看起來像隔著一段距離就打到朋友
+      if (e.rm === from && e.nx !== undefined && e.na > 0.02 && Math.hypot(x - e.nx, y - e.ny) < 3) { const k = 1 / Math.max(e.na, 0.08); e.nvx = (x - e.nx) * k; e.nvy = (y - e.ny) * k; } else { e.nvx = 0; e.nvy = 0; }
       e.rm = from; e.nx = x; e.ny = y; e.na = 0; e.dead = false;
       if (Math.hypot(x - e.x, y - e.y) > 3) { e.x = x; e.y = y; }   // 瞬間移動（血淚女消失再出現、「它」抓到人）
     }
@@ -144,8 +147,8 @@ const NetMon = (() => {
     e.wob += dt; e.na = (e.na || 0) + dt;
     if (e.myHit > 0) e.myHit -= dt;
     if (e.na > NM_LOST || !Net.active) { e.dead = true; return; }
-    const k = 1 - Math.exp(-dt * 12);
-    e.x += (e.nx - e.x) * k; e.y += (e.ny - e.y) * k;
+    const k = 1 - Math.exp(-dt * 14), lead = Math.min(e.na + 0.1, 0.3);   // 往前預測：收到之後過了多久，加上網路和平滑大約慢的 0.1 秒
+    e.x += (e.nx + (e.nvx || 0) * lead - e.x) * k; e.y += (e.ny + (e.nvy || 0) * lead - e.y) * k;
     if (inMyBeam(e)) {
       let set = S.lit.get(e.rm);
       if (!set) S.lit.set(e.rm, set = new Set());
