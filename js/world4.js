@@ -1090,13 +1090,11 @@ function breakWall4(w, e) {
 function startDay4(d) {
   G.cold = !!G.forceCold || (isW5() ? COLD_DAYS_W5 : COLD_DAYS_W4).includes(d);
   G.acid = null; G.acidT = 0;
-  if (isW5()) {   // 第五世界：樹長回來、樹上和花上長東西、天氣（world5.js）；神秘店員和早晨禮物跟第四世界一樣
+  if (isW5()) {   // 第五世界：樹長回來、樹上和花上長東西、天氣（world5.js）；神秘店員跟第四世界一樣
     startDay5(d);
     const m = randomSpot4(16);
     if (m) Object.assign(MERCHANT_POS, m);
     G.merchantSeen = false; G.ev.bellT = 3;
-    const gp = homeCenter4() || { x: G.p.x + Math.cos(G.p.face) * 1.2, y: G.p.y + Math.sin(G.p.face) * 1.2 };
-    Object.assign(GIFT_POS, walkable(gp.x, gp.y) ? gp : { x: G.p.x, y: G.p.y });
     for (const e of G.enemies) puff(e.x, e.y);
     G.enemies = []; G.motes5 = [];
     net4Day();
@@ -1118,9 +1116,6 @@ function startDay4(d) {
   const m = randomSpot4(16);
   if (m) Object.assign(MERCHANT_POS, m);
   G.merchantSeen = false; G.ev.bellT = 3;
-  // 早晨禮物放在家的正中央；還沒有家就放在你旁邊
-  const gp = homeCenter4() || { x: G.p.x + Math.cos(G.p.face) * 1.2, y: G.p.y + Math.sin(G.p.face) * 1.2 };
-  Object.assign(GIFT_POS, walkable(gp.x, gp.y) ? gp : { x: G.p.x, y: G.p.y });
   for (const e of G.enemies) puff(e.x, e.y);
   G.enemies = [];
   spawnIdleStaff4();
@@ -1128,45 +1123,6 @@ function startDay4(d) {
   const wx = (G.wx4 && G.wx4.acid || []).find(a => a.day === d);
   if (wx) G.acid = { ...wx, started: false };
   if (G.cold) toast('❄️ 寒寂之境：今天整天下雪（雪從賣場的天花板飄下來），體溫歸零就會死。把火爐搬回家、丟木柴或煤炭進去燒；手上拿著蠟燭、躺在家裡的床上、待在亮著的檯燈和電視旁邊也會暖起來。', 'warn');
-}
-// 家的正中央（設計師：早晨禮物直接放置在家的中央）：記下來的家（📍）附近圍起來的那一塊，取中心最近、沒有家具的那一格；
-// 沒有圍起來就是記下來的位置，還沒有家是 null
-function homeCenter4() {
-  const h = G.home;
-  if (!h) return null;
-  const hx = Math.floor(h.x), hy = Math.floor(h.y), keep = encCache;   // 「在家裡」的快取是給玩家的位置用的，看完放回去
-  let enc = null;
-  for (let r = 0; r <= 6 && !enc; r++) for (let dy = -r; dy <= r && !enc; dy++) for (let dx = -r; dx <= r; dx++) {
-    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r || !inMap(hx + dx, hy + dy) || isSolid(hx + dx, hy + dy)) continue;
-    const e = enclosure4(hx + dx, hy + dy);
-    if (e.inside) { enc = e.tiles; break; }
-  }
-  encCache = keep;
-  if (!enc) return { x: h.x, y: h.y };
-  let sx = 0, sy = 0;
-  for (const k of enc) { const [x, y] = k.split(',').map(Number); sx += x + 0.5; sy += y + 0.5; }
-  const cx = sx / enc.size, cy = sy / enc.size;
-  let best = null, bd = Infinity;
-  for (const k of enc) {
-    const [x, y] = k.split(',').map(Number);
-    if (isSolid(x, y)) continue;
-    const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
-    if (d < bd) { bd = d; best = { x: x + 0.5, y: y + 0.5 }; }
-  }
-  return best || { x: h.x, y: h.y };
-}
-// 禮物準備好之後：第四世界的禮物另外附板子（表現越好板子越好），放在禮物旁邊的地上
-function afterPrepare4() {
-  const g = G.gift;
-  if (!g) return;
-  const score = Math.min(3, Math.floor(g.kills / 3)) + (g.caught === 0 ? 2 : g.caught <= 2 ? 1 : 0);
-  const tiers = [1];
-  if (score >= 2) tiers.push(score >= 4 ? 3 : 2);
-  if (score >= 5 && Math.random() < 0.35) tiers.push(Math.random() < 0.4 ? GLASS_TIER : LAVA_TIER);
-  for (const t of tiers) for (let i = 0; i < 2; i++) dropLoose4(GIFT_POS.x, GIFT_POS.y, { k: 'plank', tier: t });   // 每一級 2 片（2×2 公尺的大板子）
-  // 表現很好：手電筒升一級、大白燈（整局最多 2 顆）
-  if (score >= 4 && (G.p.flashLv || 1) >= 3 && (G.p.flashLv || 1) < FLASH_MAX && Math.random() < 0.3) g.items.push(['flash' + ((G.p.flashLv || 1) + 1), 1]);
-  if (score >= 5 && (G.baymaxGot || 0) < BAYMAX_MAX && Math.random() < 0.2) g.items.push(['bulb' + BAYMAX_TIER, 1]);
 }
 // 賣場裡一個空的地方（離你至少 minD 格、四周也是空地、不在樣品間和小房間裡）
 function randomSpot4(minD = 10) {
@@ -1411,9 +1367,9 @@ function bindBuildButtons() {
   tap('tcrouch', toggleCrouch4);
   tap('trun', () => { G.p.autoRun = !G.p.autoRun; Sound.play('click'); toast(G.p.autoRun ? '🏃 一直跑（會用體力）' : '🚶 用走的（輕推搖桿慢慢走、推到底跑）'); });
 }
-// 🎵 吹口哨（照 3008）：吹完 5 秒內，畫面上（不是小地圖）會在怪物的位置出現紅點、朋友（神秘店員）出現藍點，隔著牆也看得到；
+// 🎵 吹口哨（照 3008）：吹完 5 秒內，畫面上（不是小地圖）怪物整隻變成紅色的影子、朋友（神秘店員）是藍色的影子，隔著牆也看得到（render3d.js 的 renderWhistle4）；
 // 但怪物也聽得到口哨聲！跟朋友一起玩時，朋友也聽得到（設計師：吹口哨，朋友就知道你在什麼方向）：
-// 朋友的畫面上會在你的位置出現 6 秒的藍點，提示寫你在他的哪個方向、多遠
+// 朋友的畫面上你會變成 6 秒的藍色人影，提示寫你在他的哪個方向、多遠
 const WHISTLE_T = 5, WHISTLE_CD = 8, WHISTLE_R = 45, FRIEND_WHISTLE_T = 6;
 function whistle4() {
   if (!G || mode !== 'play' || !isW4()) return;
@@ -1422,30 +1378,30 @@ function whistle4() {
   Sound.play('whistle'); makeNoise(10);
   if (typeof Net !== 'undefined' && Net.active) Net.send('whistle4', { x: Math.round(G.p.x * 10) / 10, y: Math.round(G.p.y * 10) / 10 });
   const n = G.enemies.filter(e => !e.dead && Math.hypot(e.x - G.p.x, e.y - G.p.y) < WHISTLE_R).length;
-  toast(G.ev.whistleTip ? `🎵 嗶——！附近有 ${n} 個紅點。` : `🎵 你吹了一聲口哨：紅點是怪物（附近有 ${n} 個）、藍點是朋友（神秘店員）。小心，怪物也聽得到口哨聲！`, n ? 'warn' : 'good');
+  toast(G.ev.whistleTip ? `🎵 嗶——！附近有 ${n} 隻怪物（紅色的影子）。` : `🎵 你吹了一聲口哨：紅色的影子是怪物（附近有 ${n} 隻）、藍色的影子是人（朋友、神秘店員），隔著牆也看得到。小心，怪物也聽得到口哨聲！`, n ? 'warn' : 'good');
   G.ev.whistleTip = 1;
 }
-// 朋友吹了口哨（net4Bind 收到 'whistle4'）：他的位置出現藍點，提示他在你的哪個方向
+// 朋友吹了口哨（net4Bind 收到 'whistle4'）：他變成藍色的人影，提示他在你的哪個方向
 function friendWhistle4(d, from) {
   if (!isW4() || !G || mode === 'title' || !d) return;
   const f = Net.friends().find(o => o.id === from), dist = Math.hypot(d.x - G.p.x, d.y - G.p.y);
   (G.fwhistle || (G.fwhistle = {}))[from] = { x: d.x, y: d.y, t: FRIEND_WHISTLE_T };
   Sound.play('whistle', clamp(1.2 - dist / 40, 0.15, 1));
-  toast(`🎵 ${f ? f.name : '朋友'}吹了口哨：在你的${relDir4(d.x, d.y)} ${Math.round(dist)} 公尺（看藍點）`, 'good');
+  toast(`🎵 ${f ? f.name : '朋友'}吹了口哨：在你的${relDir4(d.x, d.y)} ${Math.round(dist)} 公尺（看藍色的人影）`, 'good');
 }
 // 口哨的點：[{ x, y, h, red, a }]（3D 畫面上畫，a 是透明度）
 function whistleDots4() {
   const p = G.p, out = [], own = G.whistleT > 0, fw = G.fwhistle || {}, net = typeof Net !== 'undefined' && Net.active;
   if (own) {
     const a = Math.min(1, G.whistleT);
-    for (const e of G.enemies) if (!e.dead && Math.hypot(e.x - p.x, e.y - p.y) < WHISTLE_R) out.push({ x: e.x, y: e.y, h: e.kind === 'shake' || e.kind === 'blob' ? 0.7 : 1.7, red: true, a });
-    if (merchantHere() && Math.hypot(MERCHANT_POS.x - p.x, MERCHANT_POS.y - p.y) < WHISTLE_R * 1.5) out.push({ x: MERCHANT_POS.x, y: MERCHANT_POS.y, h: 1.6, red: false, a });
+    for (const e of G.enemies) if (!e.dead && Math.hypot(e.x - p.x, e.y - p.y) < WHISTLE_R) out.push({ x: e.x, y: e.y, h: e.kind === 'shake' || e.kind === 'blob' ? 0.7 : 1.7, red: true, a, e });
+    if (merchantHere() && Math.hypot(MERCHANT_POS.x - p.x, MERCHANT_POS.y - p.y) < WHISTLE_R * 1.5) out.push({ x: MERCHANT_POS.x, y: MERCHANT_POS.y, h: 1.6, red: false, a, clerk: true });
   }
-  // 跟朋友一起玩：自己吹口哨時同一個世界的朋友也是藍點；朋友吹口哨時他的位置是藍點（js/net.js；小地圖不標）
+  // 跟朋友一起玩：自己吹口哨時同一個世界的朋友也是藍色的人影；朋友吹口哨時他也是藍色的人影（js/net.js；小地圖不標）
   if (net) for (const f of Net.friends()) {
-    if (!f.ingame || f.world !== 4) continue;
+    if (!f.ingame || f.world !== curWorld) continue;   // 第五世界也一樣
     const a = Math.max(own ? Math.min(1, G.whistleT) : 0, fw[f.id] ? Math.min(1, fw[f.id].t) : 0);
-    if (a > 0) out.push({ x: f.x, y: f.y, h: f.crouch || f.down ? 1.0 : 1.75, red: false, a });
+    if (a > 0) out.push({ x: f.x, y: f.y, h: f.crouch || f.down ? 1.0 : 1.75, red: false, a, f });
   }
   return out;
 }
@@ -1554,7 +1510,6 @@ function load4(s) {
   G.cold = (isW5() ? COLD_DAYS_W5 : COLD_DAYS_W4).includes(G.day);
   const wx = (G.wx4.acid || []).find(a => a.day === G.day);
   G.acid = wx ? { ...wx, started: false } : null;
-  Object.assign(GIFT_POS, homeCenter4() || G.p);
   spawnIdleStaff4();
 }
 // 舊的小賣場（2026/10/31 以前是 60×44）的存檔：蓋的牆和屋頂放不回新的地圖，板子全部疊在入口旁邊的地上，
@@ -1979,7 +1934,7 @@ function scheduleNight4(add, again, night, n, hz) {
   if (night >= 2 && again(0.3)) add('kronos', 30, NIGHT_LEN - 60);
   if (night >= 5 && again(0.22)) add('tyrant', 40, NIGHT_LEN - 80);
   if (night >= 7 && again(0.22)) add('warlord', 40, NIGHT_LEN - 80);
-  if (night >= 2 && Math.random() < Math.min(0.35 + n * 0.01, 0.7) * hz) add('blackout', 40, NIGHT_LEN - 40);
+  // 第四世界沒有電箱，不會停電（設計師第六次紙條）
   // 紅月：地上長出草，第二世界的怪物都會來（眼球花也會長）
   if (blood) { add('awaken4', 1, 2); for (const k of ['sunflower', 'shroom', 'grass', 'snail', 'girl']) add(k, 20, 120); add('flower', 30, 90); }
 }
