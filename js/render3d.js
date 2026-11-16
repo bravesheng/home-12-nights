@@ -5871,6 +5871,8 @@ function buildItem3D(id) {
     case 'bandage': { const c = cyl(g, 0.035, 0.035, 0.05, 0, 0.035, 0, lm('#f4f0ea'), 14); c.rotation.x = Math.PI / 2; break; }
     case 'medkit': pack(0.18, 0.1, 0.08, lm('#c8262a'), labelMat('medkit', '#c8262a', '➕', '急救箱')); box(g, -0.03, 0.03, 0.1, 0.115, -0.006, 0.006, lm('#2a2a2a')); break;
     case 'key': box(g, -0.006, 0.006, 0, 0.004, -0.04, 0.02, lm('#e8c23a')); cyl(g, 0.016, 0.016, 0.004, 0, 0, 0.035, lm('#e8c23a'), 10); break;
+    case 'blk1': case 'blk2': case 'blk3': case 'blk4': case 'blk5': box(g, -0.09, 0.09, 0, 0.18, -0.09, 0.09, voxMat5(it.tier)); break;   // 方塊（掉在地上的是小小的一塊）
+    case 'bathbomb': { const m = sph(g, 0.055, 0, 0.055, 0, ownPhong('#ffb0d8', { map: bathBallTex5(), specular: 0x222222, shininess: 8, shade: 0.5 }), 1, 1, 1, 14); m.castShadow = true; break; }   // 沐浴球：一顆粉粉的、有斑點的圓球
     case 'coin': for (let i = 0; i < 3; i++) cyl(g, 0.028, 0.028, 0.006, (i - 1) * 0.004, i * 0.006, 0, lm('#f2c14e'), 14); break;
     case 'wood': for (let i = 0; i < 3; i++) { const c = cyl(g, 0.035, 0.035, 0.32, 0, 0.035 + (i === 2 ? 0.06 : 0), (i === 2 ? 0 : i - 0.5) * 0.072, lm('#8a5a32'), 8); c.rotation.z = Math.PI / 2; } break;
     case 'charcoal': for (let i = 0; i < 4; i++) sph(g, 0.035, (i - 1.5) * 0.04, 0.03, (i % 2) * 0.03, lm('#222222'), 1.2, 0.8, 1); break;
@@ -17019,10 +17021,23 @@ function buildMeadow5() {
   // 草地（地圖外面也鋪，一直延伸到霧裡）
   const gt = makeGrass5Tex(), gm = patchLM(new THREE.MeshLambertMaterial({ map: gt }));
   gm.userData.own = true;
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_W + 240, MAP_H + 240), gm);
-  scaleUV(ground.geometry, (MAP_W + 240) / 2.5, (MAP_H + 240) / 2.5);
-  ground.userData.ownGeo = true; ground.rotation.x = -Math.PI / 2; ground.position.set(MAP_W / 2, 0, MAP_H / 2); ground.receiveShadow = true;
-  g.add(ground);
+  // 地圖裡面是一格一格的網格：水底下的角往下凹成河床（data.js 的 W5MAP.corner），岸邊自然是斜坡，河床染成泥沙色；
+  // 地圖外面四條大草地一直延伸到霧裡
+  gm.vertexColors = true;
+  {
+    const pos = [], uv = [], col = [], idx = [], W = MAP_W, H = MAP_H, far = 120, add = (x, y, z, c) => { pos.push(x, y, z); uv.push(x / 2.5, z / 2.5); col.push(c[0], c[1], c[2]); };
+    const grass = [1, 1, 1], sand = [0.92, 0.8, 0.52];
+    for (let j = 0; j <= H; j++) for (let i = 0; i <= W; i++) { const d = W5MAP.corner(i, j); add(i, d, j, d < 0 ? sand : grass); }
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { const p = j * (W + 1) + i; idx.push(p, p + W + 1, p + 1, p + 1, p + W + 1, p + W + 2); }
+    for (const [x0, z0, x1, z1] of [[-far, -far, W + far, 0], [-far, H, W + far, H + far], [-far, 0, 0, H], [W, 0, W + far, H]]) {
+      const p = pos.length / 3; add(x0, 0, z0, grass); add(x1, 0, z0, grass); add(x0, 0, z1, grass); add(x1, 0, z1, grass); idx.push(p, p + 2, p + 1, p + 1, p + 2, p + 3);
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geom.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); geom.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geom.setIndex(idx); geom.computeVertexNormals();
+    const ground = new THREE.Mesh(geom, gm); ground.userData.ownGeo = true; ground.receiveShadow = true;
+    g.add(ground);
+  }
   // 水：池塘和河（橋底下的河也畫，河的貼圖往南流）；岸邊一圈濕濕的泥土
   const wt = makeWater5Tex(), riverTex = wt.clone(); riverTex.needsUpdate = true;
   const quads = (cells, y) => {
@@ -17035,9 +17050,10 @@ function buildMeadow5() {
   const river = new Set(), pond = [];
   for (let y = 0; y < MAP_H; y++) for (let x = W5MAP.riverX(y) - 1; x <= W5MAP.riverX(y) + 1; x++) river.add(x + ',' + y);
   for (const k of W5MAP.water) if (!river.has(k)) pond.push(k.split(',').map(Number));
-  const wm = (map, op) => { const m = patchLM(new THREE.MeshPhongMaterial({ map, color: 0xffffff, specular: 0x88aabb, shininess: 70, transparent: true, opacity: op })); m.userData.own = true; return m; };
-  const pm = new THREE.Mesh(quads(pond, 0.03), wm(wt, 0.92)); pm.userData.ownGeo = true; g.add(pm);
-  const rm = new THREE.Mesh(quads([...river].map(k => k.split(',').map(Number)), 0.03), wm(riverTex, 0.92)); rm.userData.ownGeo = true; g.add(rm);
+  // 水面比草地低一點、半透明（看得到河床和水裡的東西）、不寫深度（水裡的東西才不會被切掉）
+  const wm = (map, op) => { const m = patchLM(new THREE.MeshPhongMaterial({ map, color: 0xffffff, specular: 0xaaccdd, shininess: 90, transparent: true, opacity: op, depthWrite: false })); m.userData.own = true; return m; };
+  const pm = new THREE.Mesh(quads(pond, W5MAP.surf), wm(wt, 0.5)); pm.userData.ownGeo = true; pm.renderOrder = 2; g.add(pm);
+  const rm = new THREE.Mesh(quads([...river].map(k => k.split(',').map(Number)), W5MAP.surf), wm(riverTex, 0.5)); rm.userData.ownGeo = true; rm.renderOrder = 2; g.add(rm);
   water5 = { river: riverTex };
   const shore = [];
   for (let y = 1; y < MAP_H - 1; y++) for (let x = 1; x < MAP_W - 1; x++) {
@@ -17095,7 +17111,7 @@ function buildMeadow5() {
   // 地上一叢一叢的草（不長在水裡、樹和家具上）
   const pts = [], rr = seeded(5151);
   for (let y = 1; y < MAP_H - 1; y++) for (let x = 1; x < MAP_W - 1; x++) {
-    if (tiles[y][x] !== 1 || furnGrid[y][x] || rr() > 0.42) continue;
+    if (tiles[y][x] !== 1 || furnGrid[y][x] || W5MAP.wet.has(x + ',' + y) || rr() > 0.42) continue;
     pts.push([x + 0.1 + rr() * 0.8, y + 0.1 + rr() * 0.8, 0.6 + rr() * 0.9, rr() * Math.PI]);
   }
   const bm = patchLM(new THREE.MeshLambertMaterial({ map: bladeTex, alphaTest: 0.45, side: THREE.DoubleSide, color: '#b8e08a' })); bm.userData.own = true;
@@ -17215,6 +17231,96 @@ function bake5() {
   const tex = !M5_BAKE ? [] : Object.entries(m5Texs).map(([key, t]) => ({ key, w: t.image.width, h: t.image.height, url: t.image.toDataURL('image/webp', 0.9) }));
   return { ms, tex };
 }
+// 第五世界的方塊（world5.js 的 G.b4.vox）：每一種一個 InstancedMesh，方塊有變動（G.b4.ver）才重排；
+// 選著方塊的時候，你看著的地方畫一個半透明的框（綠色放得下、紅色放不下）
+let vox5 = null, voxGhost5 = null;
+const voxTexs5 = {};
+function voxMat5(t) {
+  const base = ['', '#a8794a', '#9a9c9e', '#e0b040', '#c2481a', '#cfe8f0'][t];
+  const tex = voxTexs5[t] || (voxTexs5[t] = canvasTex(64, 64, (c, w, h) => {
+    c.fillStyle = base; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 90; i++) { c.fillStyle = `rgba(${rnd() < 0.5 ? '0,0,0' : '255,255,255'},${0.03 + rnd() * 0.09})`; c.fillRect(rnd() * w, rnd() * h, 2 + rnd() * (t === 1 ? 22 : 6), 1 + rnd() * 2); }
+    if (t === 1) { c.strokeStyle = 'rgba(60,36,14,.55)'; c.lineWidth = 2; for (const y of [16, 32, 48]) { c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke(); } }
+    if (t === 4) for (let i = 0; i < 14; i++) { c.strokeStyle = `rgba(255,${150 + rnd() * 90 | 0},40,.85)`; c.lineWidth = 1 + rnd() * 2; c.beginPath(); let x = rnd() * w, y = rnd() * h; c.moveTo(x, y); for (let k = 0; k < 4; k++) { x += (rnd() - 0.5) * 22; y += (rnd() - 0.5) * 22; c.lineTo(x, y); } c.stroke(); }
+    c.strokeStyle = 'rgba(0,0,0,.45)'; c.lineWidth = 3; c.strokeRect(1, 1, w - 2, h - 2);
+  }));
+  const m = patchLM(new THREE.MeshLambertMaterial({ map: tex, transparent: t === 5, opacity: t === 5 ? 0.45 : 1, emissive: t === 4 ? 0x7a2a08 : 0x000000 }));
+  m.userData.own = true; return m;
+}
+function syncVox5(t) {
+  const m = isW5() && G.b4 ? G.b4.vox : null, ver = m ? G.b4.ver : -1;
+  if (!vox5 || vox5.g !== G || vox5.ver !== ver) {
+    if (vox5) for (const o of vox5.meshes) { scene.remove(o); o.material.dispose(); }
+    vox5 = { g: G, ver, meshes: [] };
+    if (m && m.size) {
+      const by = {};
+      for (const [k, c] of m) { const [x, y] = k.split(',').map(Number); for (const b of c) (by[b.tier] || (by[b.tier] = [])).push([x, y, b.z]); }
+      const mat4 = new THREE.Matrix4();
+      for (const tier in by) {
+        const im = new THREE.InstancedMesh(BOX, voxMat5(+tier), by[tier].length);
+        by[tier].forEach(([x, y, z], i) => { mat4.makeTranslation(x + 0.5, z + 0.5, y + 0.5); im.setMatrixAt(i, mat4); });
+        im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false; scene.add(im); vox5.meshes.push(im);
+      }
+    }
+  }
+  // 預覽
+  const it = isW5() && mode === 'play' && G.selId && ITEMS[G.selId], aim = it && it.kind === 'block' && !G.hand ? aim5().put : null;
+  if (aim && !voxGhost5) { voxGhost5 = new THREE.Mesh(BOX, new THREE.MeshBasicMaterial({ color: 0x60ff80, transparent: true, opacity: 0.3, depthWrite: false })); voxGhost5.material.userData.own = true; scene.add(voxGhost5); }
+  if (voxGhost5) {
+    voxGhost5.visible = !!aim;
+    if (aim) { voxGhost5.position.set(aim.x + 0.5, aim.z + 0.5, aim.y + 0.5); voxGhost5.scale.setScalar(1.02); voxGhost5.material.color.setHex(aim.no ? 0xff5050 : 0x60ff80); }
+  }
+}
+// 沐浴球（設計師第六次紙條：像真的一樣，放入水中會有泡泡）：一顆球從你手上飛進水裡，浮在水面上一邊冒泡一邊變小，
+// 水面一圈白色的泡沫往外擴、水染成球的顏色，泡泡一顆一顆往上飄；泡泡散開之後染色的水慢慢淡掉
+const bath5Map = new Map();
+let bubble5Tex = null, bathBall5Tex = null;
+function bathBallTex5() {
+  return bathBall5Tex || (bathBall5Tex = canvasTex(128, 64, (c, w, h) => {
+    c.fillStyle = '#fff'; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 260; i++) { c.fillStyle = `rgba(${rnd() < 0.5 ? '255,255,255' : '120,90,110'},${0.15 + rnd() * 0.35})`; c.beginPath(); c.arc(rnd() * w, rnd() * h, 0.6 + rnd() * 2.2, 0, 7); c.fill(); }
+    for (let i = 0; i < 14; i++) { c.fillStyle = `rgba(255,255,255,${0.3 + rnd() * 0.4})`; c.beginPath(); c.ellipse(rnd() * w, rnd() * h, 3 + rnd() * 5, 2 + rnd() * 3, rnd() * 3, 0, 7); c.fill(); }
+  }));
+}
+function syncBath5(t) {
+  const list = (isW5() && G.bath5) || [], seen = new Set();
+  for (const b of list) {
+    seen.add(b);
+    let r = bath5Map.get(b);
+    const col = BATH_COLS[b.col || 0] || BATH_COLS[0], hex = (col[0] << 16) | (col[1] << 8) | col[2];
+    if (!r) {
+      if (!bubble5Tex) bubble5Tex = canvasTex(64, 64, c => { c.strokeStyle = 'rgba(255,255,255,.95)'; c.lineWidth = 3; c.beginPath(); c.arc(32, 32, 26, 0, 7); c.stroke(); c.fillStyle = 'rgba(255,255,255,.18)'; c.fill(); c.fillStyle = 'rgba(255,255,255,.9)'; c.beginPath(); c.ellipse(22, 20, 7, 4, -0.6, 0, 7); c.fill(); });
+      const g = new THREE.Group(); scene.add(g);
+      const flat = (geom, m) => { const o = new THREE.Mesh(geom, m); o.rotation.x = -Math.PI / 2; m.userData.own = true; o.userData.ownGeo = true; o.renderOrder = 3; g.add(o); return o; };
+      r = { g };
+      r.tint = flat(new THREE.CircleGeometry(1, 28), new THREE.MeshBasicMaterial({ color: hex, transparent: true, opacity: 0, depthWrite: false }));
+      r.foam = flat(new THREE.RingGeometry(0.55, 1, 28), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }));
+      r.ball = new THREE.Mesh(geo('bathBall', () => new THREE.SphereGeometry(0.11, 16, 12)), ownPhong('#ffffff', { map: bathBallTex5(), specular: 0x222222, shininess: 8, shade: 0.5 }));
+      r.ball.material.color.setHex(hex); g.add(r.ball);
+      r.bub = [];
+      for (let i = 0; i < 16; i++) { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: bubble5Tex, color: i % 3 ? 0xffffff : hex, transparent: true, depthWrite: false })); sp.material.userData.own = true; sp.userData.ph = Math.random(); sp.userData.a = Math.random() * 6.28; sp.userData.rr = 0.15 + Math.random() * 0.95; g.add(sp); r.bub.push(sp); }
+      bath5Map.set(b, r);
+    }
+    const age = b.age || 0, fly = clamp(age / 0.45, 0, 1), fizz = b.done ? 0 : clamp(b.t / 2, 0, 1), fade = b.done ? clamp(b.fade / BATH_FADE, 0, 1) : 1, y0 = W5MAP.surf;
+    r.g.position.set(b.x, 0, b.y);
+    // 球：先從手上飛過來（拋物線），再浮在水面上晃、越泡越小
+    const fx = (b.fx ?? b.x) - b.x, fz = (b.fy ?? b.y) - b.y;
+    r.ball.visible = !b.done;
+    r.ball.position.set(fx * (1 - fly), fly < 1 ? 1.15 * (1 - fly) + y0 * fly + Math.sin(fly * Math.PI) * 0.7 : y0 + 0.02 + 0.015 * Math.sin(t * 9), fz * (1 - fly));
+    r.ball.scale.setScalar(fly < 1 ? 1 : 0.25 + 0.75 * fizz); r.ball.rotation.set(t * 2.1, t * 1.3, 0);
+    const k = fly < 1 ? 0 : 1;
+    r.tint.position.y = y0 + 0.012; r.tint.scale.setScalar(0.4 + (1 - fizz) * 1.5 + (1 - fade) * 0.5); r.tint.material.opacity = k * 0.5 * fade;
+    r.foam.position.y = y0 + 0.02; r.foam.scale.setScalar(0.3 + (1 - fizz) * 1.25); r.foam.material.opacity = b.done ? 0.5 * fade * fade : k * 0.75;
+    for (const sp of r.bub) {
+      const u = sp.userData, ph = (t * 0.9 + u.ph) % 1, on = !b.done && fly >= 1;
+      sp.visible = on;
+      if (!on) continue;
+      sp.position.set(Math.cos(u.a + ph * 2) * u.rr * (0.4 + (1 - fizz)), y0 + 0.05 + ph * 0.95, Math.sin(u.a + ph * 2) * u.rr * (0.4 + (1 - fizz)));
+      sp.scale.setScalar(0.05 + 0.09 * u.ph * (0.6 + ph)); sp.material.opacity = 0.9 * (1 - ph * ph);
+    }
+  }
+  for (const [b, r] of bath5Map) if (!seen.has(b)) { disposeGroup(r.g); bath5Map.delete(b); }
+}
 function syncMeadow5(t, dark) {
   warmMonsters5(t);
   const k = clamp(dark / NIGHT_DARK, 0, 1);
@@ -17225,6 +17331,8 @@ function syncMeadow5(t, dark) {
     u.uCloud.value = (fog5() ? 0.1 : rain5() > 0 ? 0.9 : 0.55) * (1 - k * 0.7); u.uT.value = t;
   }
   if (water5) water5.river.offset.set(0, -t * 0.12);
+  syncBath5(t);
+  syncVox5(t);
   // 閃電：一條鋸齒狀的亮線從天上打到地上
   const b = G.bolt5;
   if (b && !bolt5Mesh) {

@@ -253,11 +253,16 @@ ITEMS.fish5 = { name: '魚', kind: 'food', icon: '🐟', hunger: 18, san: -4, de
 ITEMS.fishc5 = { name: '烤魚', kind: 'food', icon: '🍢', hunger: 48, san: 10, warm: 12, desc: '在工作台烤熟的魚。飽食 +48、理智 +10' };
 ITEMS.rod5 = { name: '釣竿', kind: 'tool5', icon: '🎣', desc: '帶在身上就有效：釣魚快一倍。在工作台用 2 根木柴做。' };
 ITEMS.bathbomb = { name: '沐浴球', kind: 'bath5', icon: '🫧', desc: '走到池塘或河邊，選它按 Q 丟進水裡：咕嚕咕嚕冒泡，洗出 2～4 樣東西。' };
+// 第五世界的方塊（設計師第六次紙條：蓋房子的木板改為方塊，像麥塊或迷你世界一樣）：1 公尺的方塊，一格一格放、可以往上疊；
+// 放在背包裡（一種一格），選它按 Q 放在你看著的地方，看著方塊按住 E 拿回來（world5.js 的「方塊」那一段）。五種跟板子的五級一樣
+const BLOCK_NAMES = ['', '木頭方塊', '水泥方塊', '黃金方塊', '岩漿方塊', '玻璃方塊'];
+for (let t = 1; t <= 5; t++) ITEMS['blk' + t] = { name: BLOCK_NAMES[t], kind: 'block', tier: t, icon: ['', '🟫', '⬜', '🟨', '🟧', '🧊'][t], desc: `1 公尺的${BLOCK_NAMES[t]}：選它按 Q 放在你看著的地方（地上、別的方塊旁邊或上面），看著方塊按住 E 拿回來。` };
+const VOX_MAX = 6;   // 方塊最高疊到第 6 層
 const ITEM_ORDER = [
   'pan', 'slingshot', 'watergun', 'firecracker', 'salt', 'marble', 'holywater', 'strongflash', 'megaflash', 'flash4', 'flash5', 'flash6', 'flash7', 'amulet',
   'bulb' + BAYMAX_TIER, 'bulb' + HEAL_TIER, 'bulb' + SLIME_TIER, 'bulb' + ANGEL_TIER,
   ...Array.from({ length: NORMAL_MAX }, (_, i) => 'bulb' + (NORMAL_MAX - i)),
-  'key', 'bathbomb', 'rod5', 'lamp_chand', 'lamp_floor', 'lamp_desk', 'battery', 'candle',
+  'key', 'blk1', 'blk2', 'blk3', 'blk4', 'blk5', 'bathbomb', 'rod5', 'lamp_chand', 'lamp_floor', 'lamp_desk', 'battery', 'candle',
   'charcoal', 'wood', 'cushion', 'newspaper',
   'cocoa', 'chocolate', 'milk', 'pizza', 'meatball', 'hotdog', 'cake', 'fries', 'soda', 'canned', 'noodles', 'snack', 'fishc5', 'apple5', 'grape5', 'fish5', 'medkit', 'bandage',
 ];
@@ -572,7 +577,7 @@ function furnForWorld(w) {
 const doorsForWorld = w => (w === 5 ? [] : w === 4 ? W4MAP.doors : w === 3 ? DOORS_W3 : DOORS_HOUSE).map(d => ({ ...d }));
 const socketsForWorld = w => (w >= 4 ? [] : w === 3 ? SOCKETS_W3 : SOCKETS_HOUSE).map(s => ({ ...s }));   // 第四世界沒有天花板燈座：燈泡全變檯燈
 // 賣場裡面的牆格（柱子、樣品間的牆、小房間的牆）：第四世界才有，buildMap 在房間之後、門之前放
-const wallsForWorld = w => (w === 4 ? W4MAP.walls : w === 5 ? W5MAP.walls : []);   // 第五世界：池塘和河（水裡走不進去）
+const wallsForWorld = w => (w === 4 ? W4MAP.walls : w === 5 ? W5MAP.walls : []);   // 第五世界的水可以踩進去，不是牆
 
 // 寶箱四級：每天早上在車站三間重新放；打開是賭：可能是物資，也可能跳出怪物（等級越高東西越好、怪物越強）
 const CHESTS3 = [null,
@@ -855,7 +860,16 @@ const W5MAP = (() => {
       if (r() < dens && free(x, y, 0)) F('flower5', x, y, 1, 1, { kind: Math.floor(r() * 5), big: 0.8 + r() * 0.6, grow: r() < 0.35 ? 'flower5' : null, rot: r() * 6.28 });
   zones.push({ name: '西北的森林', x: 4, y: 2, w: 30, h: 22 }, { name: '花海', x: 2, y: 42, w: 28, h: 36 }, { name: '東邊的森林', x: 64, y: 28, w: 15, h: 50 },
     { name: '河邊', x: 52, y: 1, w: 14, h: W5H - 2 }, { name: '大池塘', x: 16, y: 18, w: 16, h: 14 }, { name: '南邊的池塘', x: 34, y: 60, w: 18, h: 14 }, { name: '起點的空地', x: cx - 6, y: cy - 6, w: 13, h: 13 });
-  const walls = [...water].map(k => k.split(',').map(Number));
-  return { rooms, walls, water, furn, zones, ponds, bridges: bridges.map(y => ({ x: riverX(y), y })), riverX, start: { x: cx + 0.5, y: cy + 0.5, face: -Math.PI / 2 } };
+  // 水可以踩進去（設計師第六次紙條：可以玩水、可以踩進河裡；水要透明、看得到水裡的東西）：水不再是牆。
+  // 河床：格子的角如果四周四格都是水（wet：連橋底下的河也算）就往下 BED 公尺，岸邊那一圈自然變成斜坡；
+  // bed(x, y) 是那一點河床的高度（負的；不在水裡是 0），game.js 的 floorH 和 3D 畫面共用
+  const BED = 0.55, wet = new Set(water);
+  for (let y = 1; y < W5H - 1; y++) for (let x = riverX(y) - 1; x <= riverX(y) + 1; x++) wet.add(x + ',' + y);
+  const corner = (ix, iy) => (wet.has(ix + ',' + iy) && wet.has((ix - 1) + ',' + iy) && wet.has(ix + ',' + (iy - 1)) && wet.has((ix - 1) + ',' + (iy - 1)) ? -BED : 0);
+  const bed = (x, y) => {
+    const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+    return (corner(ix, iy) * (1 - fx) + corner(ix + 1, iy) * fx) * (1 - fy) + (corner(ix, iy + 1) * (1 - fx) + corner(ix + 1, iy + 1) * fx) * fy;
+  };
+  return { rooms, walls: [], water, wet, corner, bed, surf: -0.12, furn, zones, ponds, bridges: bridges.map(y => ({ x: riverX(y), y })), riverX, start: { x: cx + 0.5, y: cy + 0.5, face: -Math.PI / 2 } };
 })();
 const W5 = { start: W5MAP.start, starterPlanks: [[-2.5, 1.5], [-1.5, 1.5], [1.5, 1.5], [2.5, 1.5]].map(([dx, dy]) => [W5MAP.start.x + dx, W5MAP.start.y + dy]) };

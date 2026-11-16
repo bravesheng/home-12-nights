@@ -2,13 +2,13 @@
 // ===== 第五世界：世界夾層（照設計師第五次手稿 docs/sketches/IMG_7436.jpeg） =====
 // 沒有天花板的夢核草原：樹、花、池塘、河、草，四周是白白的霧。玩法跟第四世界一樣（背包 16 格、自己蓋房子、火爐、天氣，
 // 第四世界的程式 isW4() 在第五世界也是 true），這個檔案是第五世界不一樣的地方：
-// 樹要自己砍（掉板子和木柴）、工作台打開書合成（木柴做成 1 公尺的方塊）、樹上和花上長東西、池塘和河可以釣魚、
+// 樹要自己砍（掉木頭方塊和木柴）、工作台打開書合成（木柴做成 1 公尺的方塊）、用方塊蓋房子（最後面「方塊」那一段）、樹上和花上長東西、池塘和河可以釣魚、
 // 扭蛋機換成沐浴球（丟進水裡洗出東西）、12 天的天氣（下雨、雷暴雨、霧、寒寂之境、紅月、酸雨）、7 隻新怪物。
 // 這個檔案在 game.js 之前載入，函式裡用到的 G、toast、move… 都是遊戲跑起來之後才呼叫。
 const isW5 = () => curWorld === 5;
 
 // ====================================================================
-// 水：池塘和河（data.js 的 W5MAP.water，地圖上是走不進去的牆格）
+// 水：池塘和河（data.js 的 W5MAP.water）。可以踩進去（河床比草地低，game.js 的 floorH、wading），在水裡走得慢、會濺水花
 // ====================================================================
 const isWater5 = (x, y) => isW5() && W5MAP.water.has(Math.floor(x) + ',' + Math.floor(y));
 // 前面或旁邊最近的水（釣魚、丟沐浴球）：回傳水格的中心，沒有就是 null
@@ -24,9 +24,9 @@ function waterNear5(maxD = 1.8, front = true) {
 }
 
 // ====================================================================
-// 樹：看著樹按住 E 砍，砍 3 下就倒（掉 2 片木頭板子在地上、2 根木柴），樹上長的東西掉到地上；2 天後在原地長回來
+// 樹：看著樹按住 E 砍，砍 3 下就倒（掉 4 個木頭方塊、2 根木柴），樹上長的東西掉到地上；2 天後在原地長回來
 // ====================================================================
-const TREE_CHOPS = 3, TREE_REGROW = 2;
+const TREE_CHOPS = 3, TREE_REGROW = 2, TREE_BLOCKS = 4;   // 一棵樹倒了掉幾個木頭方塊
 const treesUp5 = () => FURN.filter(f => f.type === 'tree5' && !f.cut);
 function chop5(f) {
   if (!f || f.cut) return;
@@ -37,21 +37,23 @@ function chop5(f) {
   if (f.chops < TREE_CHOPS) { if (!G.ev.chopTip) { G.ev.chopTip = 1; toast(`🪓 砍了一下！再砍 ${TREE_CHOPS - f.chops} 下樹就會倒。`); } return; }
   fellTree5(f, true);
 }
-// 樹倒了（自己砍的、被閃電打到的）：掉板子和木柴，樹上的東西掉下來
+// 樹倒了（自己砍的、被閃電打到的）：掉木頭方塊和木柴，樹上的東西掉下來
 function fellTree5(f, mine) {
   f.cut = G.day; f.chops = 0;
   if (furnGrid[f.y][f.x] === f) { furnGrid[f.y][f.x] = null; solid[f.y][f.x] = tiles[f.y][f.x] === 0; }
   b4Changed();
   Sound.play('treeFall'); G.shake = Math.max(G.shake, 0.25);
   const a = Math.random() * Math.PI * 2, loose = [];
-  for (let i = 0; i < 2; i++) { dropLoose4(f.x + 0.5 + Math.cos(a) * (0.9 + i * 0.7), f.y + 0.5 + Math.sin(a) * (0.9 + i * 0.7), { k: 'plank', tier: 1 }); loose.push(G.loose4[G.loose4.length - 1]); }
+  // 樹倒了掉 4 個木頭方塊（設計師第六次紙條：第五世界的木板改為方塊）和 2 根木柴
+  const blk = { x: f.x + 0.5 + Math.cos(a) * 0.9, y: f.y + 0.5 + Math.sin(a) * 0.9, id: 'blk1', n: TREE_BLOCKS, keep: 1, t: Math.random() * 6 };
+  G.pickups.push(blk);
   const wood = { x: f.x + 0.5 - Math.cos(a) * 0.6, y: f.y + 0.5 - Math.sin(a) * 0.6, id: 'wood', n: 2, keep: 1, t: Math.random() * 6 };
   G.pickups.push(wood);
   dropFruit5(f);
   if (window.Renderer && Renderer.tree5) Renderer.tree5(f);
   // 跟朋友一起玩：掉在地上的板子和木柴照 uid 送過去（朋友撿走時兩邊一起消失）
-  net4('fell5', { id: f.id, loose: loose.map(l => ({ x: l.x, y: l.y, a: l.a, tier: 1, uid: uidOf4(l) })), wood: pkSpec4(wood) });
-  if (mine && !G.ev.fellTip) { G.ev.fellTip = 1; toast('🌳 樹倒了！地上有 2 片木頭板子（對著它按 E 拿起來蓋牆）和 2 根木柴（放進背包，在工作台做成方塊、丟進火爐）。樹 2 天後會長回來。', 'good'); }
+  net4('fell5', { id: f.id, loose: loose.map(l => ({ x: l.x, y: l.y, a: l.a, tier: 1, uid: uidOf4(l) })), wood: pkSpec4(wood), blk: pkSpec4(blk) });
+  if (mine && !G.ev.fellTip) { G.ev.fellTip = 1; toast('🌳 樹倒了！地上有 4 個木頭方塊（看著按 E 撿起來，選它按 Q 一格一格蓋房子）和 2 根木柴（放進背包，在工作台做成方塊、丟進火爐）。樹 2 天後會長回來。', 'good'); }
 }
 // 樹上長的東西掉到地上（uid 不變，朋友那邊同一個東西也掉下來）
 function dropFruit5(f) { for (const pk of G.pickups) if (pk.s === f.id) { delete pk.s; delete pk.si; pk.z = 0; } }
@@ -124,14 +126,19 @@ function splash5(x, y) {
 // 選沐浴球按 Q 丟進旁邊的水裡，咕嚕咕嚕冒泡 2 秒，洗出 2～4 樣東西浮到岸邊
 // ====================================================================
 const BATH_PRICE = 3;
+// 沐浴球的顏色（粉紅、薰衣草紫、薄荷綠、天藍、橘黃）：球本身、冒的泡泡、染色的水都用這個顏色
+const BATH_COLS = [[255, 150, 200], [190, 160, 255], [140, 235, 190], [140, 200, 255], [255, 200, 120]];
+const BATH_FADE = 7;   // 泡泡散開之後，染了色的水還要幾秒才淡掉
 function useBath5() {
   const w = waterNear5(2.2, false);
   if (!w) { toast('🫧 要走到池塘或河邊才能丟沐浴球（丟進水裡才會洗出東西）。'); Sound.play('empty'); return false; }
   G.inv.bathbomb--; if (G.inv.bathbomb <= 0) { delete G.inv.bathbomb; if (G.selId === 'bathbomb') G.selId = invList()[0] || null; }
   invDirty = true;
   G.bath5 = G.bath5 || [];
-  G.bath5.push({ x: w.x, y: w.y, t: 2 });
-  net4('bath5', { x: w.x, y: w.y });   // 跟朋友一起玩：朋友也看得到冒泡（洗出來的東西用 drop 一個一個送）
+  // col：這顆沐浴球的顏色（水會染成這個顏色）；fx、fy：從哪裡丟出去的（3D 畫面畫一顆球飛進水裡）
+  const b = { x: w.x, y: w.y, t: 2, age: 0, col: Math.floor(Math.random() * BATH_COLS.length), fx: G.p.x, fy: G.p.y };
+  G.bath5.push(b);
+  net4('bath5', { x: b.x, y: b.y, col: b.col, fx: b.fx, fy: b.fy });   // 跟朋友一起玩：朋友也看得到冒泡（洗出來的東西用 drop 一個一個送）
   Sound.play('splash'); Sound.play('fizz');
   if (!G.ev.bathTip) { G.ev.bathTip = 1; toast('🫧 沐浴球掉進水裡，咕嚕咕嚕地冒泡泡……', 'good'); }
   return true;
@@ -139,9 +146,13 @@ function useBath5() {
 function updateBath5(dt) {
   if (!G.bath5 || !G.bath5.length) return;
   for (const b of G.bath5) {
+    b.age = (b.age || 0) + dt;
+    if (b.done) { b.fade -= dt; continue; }
     b.t -= dt;
     if (Math.random() < dt * 40) G.fx.push({ type: 'spark', x: b.x + rand(-0.8, 0.8), y: b.y + rand(-0.8, 0.8), h: 0.05, vx: rand(-0.2, 0.2), vy: rand(-0.2, 0.2), vh: rand(0.4, 1.4), life: 0.7, max: 0.7, color: pick([[255, 190, 230], [190, 220, 255], [230, 255, 220], [255, 255, 255]]) });
-    if (b.t > 0 || b.remote) continue;   // 朋友丟的：只冒泡，東西由朋友那邊送過來
+    if (b.t > 0) continue;
+    b.done = true; b.fade = BATH_FADE;   // 泡泡散開了，染色的水慢慢淡掉
+    if (b.remote) continue;   // 朋友丟的：只冒泡，東西由朋友那邊送過來
     // 洗出來的東西浮到岸邊（離玩家近的那一邊）；硬幣直接給丟的人
     const n = randi(2, 4), got = [];
     for (let i = 0; i < n; i++) {
@@ -154,7 +165,7 @@ function updateBath5(dt) {
     Sound.play('pop'); Sound.play('pickup');
     toast(`🫧 泡泡散開了，洗出來：${got.join('、')}！岸邊的東西看著它按 E 撿起來。`, 'good');
   }
-  G.bath5 = G.bath5.filter(b => b.t > 0);
+  G.bath5 = G.bath5.filter(b => !b.done || b.fade > 0);
 }
 // 沐浴球機（取代扭蛋機）：投 3 枚硬幣買一顆沐浴球
 function openBath5() {
@@ -171,9 +182,8 @@ function openBath5() {
 // 方塊、家具做好了拿在手上（手上有東西就放在工作台旁邊的地上）；東西直接放進背包
 // ====================================================================
 const RECIPES5 = [
-  { id: 'cube', name: '木頭方塊 ×2', icon: '🧊', need: { wood: 2 }, desc: '1 公尺的木頭方塊（設計圖：板子變方塊）：搬得動、站得上去，排起來就是一道牆，怪物要打很久。', furn: 'cube5', n: 2 },
-  { id: 'plank', name: '木頭板子', icon: '🪵', need: { wood: 3 }, desc: '2×2 公尺的木頭板子（跟砍樹掉的一樣），可以蓋牆和屋頂。', plank: { tier: 1 } },
-  { id: 'door', name: '木門', icon: '🚪', need: { wood: 4 }, desc: '跟板子一樣大的木門（兩扇對開），放在牆上可以開關。', plank: { tier: 1, door: true } },
+  { id: 'cube', name: '木頭方塊 ×4', icon: '🟫', need: { wood: 2 }, desc: '1 公尺的木頭方塊（設計師：木板改為方塊，像麥塊一樣）：選它按 Q 一格一格放、可以往上疊，疊兩層圍一圈就是家，頭上再放一層當屋頂。', item: 'blk1', n: 4 },
+  { id: 'door', name: '木門', icon: '🚪', need: { wood: 4 }, desc: '2 公尺寬的木門（兩扇對開），拿著放在兩格寬的門口可以開關。不做門也可以：牆上留一格只放上面那塊方塊，蹲著鑽進去，怪物進不來。', plank: { tier: 1, door: true } },
   { id: 'fire', name: '火爐', icon: '🔥', need: { wood: 5 }, desc: '放在家裡取暖（寒寂之境一定要有），丟木柴進去燒。', furn: 'fireplace4' },
   { id: 'bed', name: '床', icon: '🛏️', need: { wood: 6 }, desc: '躺在家裡的床上會暖起來，白天還可以睡到傍晚。', furn: 'bed4', w: 2, h: 2 },
   { id: 'chair', name: '椅子', icon: '🪑', need: { wood: 2 }, desc: '可以坐。家裡的家具越多越溫馨。', furn: 'chair4' },
@@ -200,7 +210,7 @@ function openBook5() {
     invDirty = true;
     Sound.play('craft');
     const bench = FURN_BY_ID.bench5 || { x: G.p.x, y: G.p.y, w: 1, h: 1 };
-    if (r.item) gainItem(r.item, 1);
+    if (r.item) gainItem(r.item, r.n || 1);
     else if (r.plank) {
       if (!G.hand) holdThing({ k: 'plank', ...r.plank, hp: PLANKS[1].hp });
       else { dropLoose4(bench.x + 1, bench.y + 1.6, { k: 'plank', ...r.plank }); const l = G.loose4[G.loose4.length - 1]; net4('loose', { l: { x: l.x, y: l.y, a: l.a, tier: l.tier, door: l.door, uid: uidOf4(l) } }); }
@@ -220,7 +230,7 @@ function makeFurn5(type, w, h, near) {
   for (let i = 0; i < 80; i++) {
     const rr = 1.4 + Math.sqrt(i) * 0.6, a = i * 2.4, x = Math.floor(near.x + near.w / 2 + Math.cos(a) * rr), y = Math.floor(near.y + near.h / 2 + Math.sin(a) * rr);
     let ok = true;
-    for (let yy = y; yy < y + h && ok; yy++) for (let xx = x; xx < x + w; xx++) if (!inMap(xx, yy) || tiles[yy][xx] !== 1 || furnGrid[yy][xx] || Math.hypot(xx + 0.5 - G.p.x, yy + 0.5 - G.p.y) < 0.8) { ok = false; break; }
+    for (let yy = y; yy < y + h && ok; yy++) for (let xx = x; xx < x + w; xx++) if (!inMap(xx, yy) || tiles[yy][xx] !== 1 || furnGrid[yy][xx] || W5MAP.water.has(xx + ',' + yy) || Math.hypot(xx + 0.5 - G.p.x, yy + 0.5 - G.p.y) < 0.8) { ok = false; break; }
     if (!ok) continue;
     f.x = x; f.y = y; addFurn4(f); tell();
     return f;
@@ -235,6 +245,7 @@ function makeFurn5(type, w, h, near) {
 // ====================================================================
 function addTargets5(cands) {
   const p = G.p;
+  blockTargets5(cands);
   for (const f of FURN) {
     if (f.held || f.cut) continue;
     const rd = rectDist(p.x, p.y, f);
@@ -302,11 +313,22 @@ function strike5(bx, by) {
     damage(26, 12); p.inv = 1; p.stunT = 0.5;
     toast('⚡ 閃電打在你旁邊！雷暴雨的時候要躲到屋頂底下。', 'warn');
     if (p.hp <= 0) gameOver('bolt');
-  } else if (!G.ev.stormTip) { G.ev.stormTip = 1; toast('⛈️ 打雷了！閃電會打在草原上，躲到屋頂（躺平的板子）底下比較安全。', 'warn'); }
+  } else if (!G.ev.stormTip) { G.ev.stormTip = 1; toast('⛈️ 打雷了！閃電會打在草原上，躲到屋頂（頭上的方塊）底下比較安全。', 'warn'); }
 }
 // 每一幀（world4.js 的 update4 會呼叫）
 function update5(dt) {
   updateWeather5(dt);
+  // 玩水：在水裡走會濺起水花、嘩啦嘩啦響
+  const p = G.p;
+  if (mode === 'play' && wading(p.x, p.y) && !(p.z > 0.3)) {
+    const sp = Math.hypot(p.x - (p.wx5 ?? p.x), p.y - (p.wy5 ?? p.y)) / Math.max(dt, 0.001);
+    if (sp > 0.4) {
+      if (Math.random() < dt * 14) G.fx.push({ type: 'spark', x: p.x + rand(-0.3, 0.3), y: p.y + rand(-0.3, 0.3), h: 0.02, vx: rand(-0.5, 0.5), vy: rand(-0.5, 0.5), vh: rand(0.8, 1.8), life: 0.45, max: 0.45, color: [200, 235, 255] });
+      if ((p.wadeT = (p.wadeT || 0) - dt) <= 0) { p.wadeT = 0.55; Sound.play('splash', 0.25); }
+    }
+    if (!G.ev.wadeTip) { G.ev.wadeTip = 1; toast('💦 水不深，可以踩進去玩水！在水裡走得比較慢。水是透明的，看得到水裡的東西。', 'good'); }
+  }
+  p.wx5 = p.x; p.wy5 = p.y;
   updateBath5(dt);
   if (G.bolt5 && (G.bolt5.t -= dt) <= 0) G.bolt5 = null;
   updateMotes5(dt);
@@ -318,7 +340,7 @@ function update5(dt) {
 function dayTips5() {
   const ev = G.ev, t = G.t;
   if (t > 3 && !ev.w5tip1) { ev.w5tip1 = 1; toast('🌫️ 這裡是世界夾層：沒有天花板的草原，四周是白白的霧。白天 6 分鐘、晚上 5 分鐘。白天砍樹、找吃的、蓋房子；晚上夢裡的東西會出來。'); }
-  if (t > 15 && !ev.w5tip2) { ev.w5tip2 = 1; toast('🪓 看著樹按住 E 砍 3 下，樹會倒：掉木頭板子（蓋牆）和木柴。起點旁邊的地上也有 4 片板子。'); }
+  if (t > 15 && !ev.w5tip2) { ev.w5tip2 = 1; toast('🪓 看著樹按住 E 砍 3 下，樹會倒：掉木頭方塊和木柴。背包裡有 12 個木頭方塊：選它按 Q 放在你看著的地方，疊兩層圍一圈、頭上再放一層就是家。'); }
   if (t > 30 && !ev.w5tip3) { ev.w5tip3 = 1; toast('🍎 食物、飲料、餅乾、電池、檯燈都長在樹上和花上：看著它按 E 摘下來。每天早上會再長。'); }
   if (t > 48 && !ev.w5tip4) { ev.w5tip4 = 1; toast('📖 起點旁邊有工作台：打開書就能合成，木柴可以做成 1 公尺的方塊、火爐、床、釣竿，還能烤魚。'); }
   if (t > 66 && !ev.w5tip5) { ev.w5tip5 = 1; toast('🎣 走到池塘或河邊看著水，按住 E 就能釣魚。🫧 沐浴球機（扭蛋機不見了）買沐浴球，丟進水裡會洗出東西。'); }
@@ -364,7 +386,7 @@ function shoreSpot5() {
   const list = [...W5MAP.water];
   for (let i = 0; i < 60; i++) {
     const [x, y] = pick(list).split(',').map(Number), a = pick([[1, 0], [-1, 0], [0, 1], [0, -1]]), tx = x + a[0] * 2, ty = y + a[1] * 2;
-    if (!walkable(tx + 0.5, ty + 0.5) || Math.hypot(tx + 0.5 - G.p.x, ty + 0.5 - G.p.y) < 12 || nearHome4(tx, ty, 7)) continue;
+    if (!walkable(tx + 0.5, ty + 0.5) || W5MAP.water.has(tx + ',' + ty) || Math.hypot(tx + 0.5 - G.p.x, ty + 0.5 - G.p.y) < 12 || nearHome4(tx, ty, 7)) continue;
     return { x: tx + 0.5, y: ty + 0.5 };
   }
   return null;
@@ -555,7 +577,7 @@ function updateMotes5(dt) {
 
 // ====================================================================
 // 跟朋友一起玩（world4.js 的 net4Apply 收到第五世界的變動時呼叫，這時 net4Mute 是 true，不會再送出去）：
-// 砍樹（chop5）、樹倒了（fell5：掉的板子和木柴照 uid）、工作台做的家具（mk5）、沐浴球冒泡（bath5，洗出來的東西用 drop）、
+// 砍樹（chop5）、樹倒了（fell5：掉的方塊和木柴照 uid）、方塊（vox、unvox）、工作台做的家具（mk5）、沐浴球冒泡（bath5，洗出來的東西用 drop）、
 // 釣魚的水花（fx5）、閃電（bolt5，房主決定）、記憶的光點（motes5）。砍倒的樹每天早上和剛加入時照房主的清單（applyCut5）
 // ====================================================================
 function net5Apply(d) {
@@ -573,7 +595,7 @@ function net5Apply(d) {
       if (!f || f.type !== 'tree5' || f.cut) break;
       setCut5(f, G.day); b4Changed(); dropFruit5(f);
       for (const l of d.loose || []) if (!G.loose4.some(o => o.uid === l.uid)) G.loose4.push({ ...l, k: 'plank' });
-      if (d.wood && !G.pickups.some(p => p.uid === d.wood.uid)) G.pickups.push({ ...d.wood, t: 0, keep: 1 });
+      for (const pk of [d.wood, d.blk]) if (pk && ITEMS[pk.id] && !G.pickups.some(p => p.uid === pk.uid)) G.pickups.push({ ...pk, t: 0, keep: 1 });
       Sound.play('treeFall', near(f.x, f.y));
       break;
     }
@@ -586,7 +608,9 @@ function net5Apply(d) {
       if (!o.held && inMap(f.x, f.y)) addFurn4(f);
       break;
     }
-    case 'bath5': (G.bath5 = G.bath5 || []).push({ x: d.x, y: d.y, t: 2, remote: true }); Sound.play('fizz', near(d.x, d.y)); break;
+    case 'vox': if (PLANKS[d.tier] && inMap(d.x, d.y)) setVox5(d.x, d.y, d.z, d.tier, uninf4(d.hp)); break;   // 朋友放了方塊
+    case 'unvox': delVox5(d.x, d.y, d.z); break;
+    case 'bath5': (G.bath5 = G.bath5 || []).push({ x: d.x, y: d.y, t: 2, age: 0, col: d.col || 0, fx: d.fx ?? d.x, fy: d.fy ?? d.y, remote: true }); Sound.play('fizz', near(d.x, d.y)); break;
     case 'fx5': splash5(d.x, d.y); Sound.play('fish', near(d.x, d.y) * 0.6); break;
     case 'bolt5': if (Number.isFinite(d.x) && Number.isFinite(d.y)) strike5(d.x, d.y); break;
     case 'motes5': if (Number.isFinite(d.x)) spawnMotes5(d.x, d.y, clamp(d.n || 2, 1, 4)); break;
@@ -604,12 +628,136 @@ function endVictory5() {
 // ====================================================================
 // 存檔：砍倒的樹、自己做的家具編號（地圖每一局都一樣，只存改變的地方）
 // ====================================================================
+// 方塊（設計師第六次紙條：第五世界蓋房子的木板改為方塊，像麥塊或迷你世界一樣）
+// G.b4.vox：格子 "x,y" → 那一格的方塊 [{ z（第幾層，0 是地上）, tier, hp }]，最高 VOX_MAX 層；不會掉下來，可以懸空接在旁邊。
+// 方塊在背包裡（data.js 的 blk1～blk5），選它按 Q 放在你看著的地方（aim5：從眼睛照視線往前找），看著方塊按住 E 拿回來。
+// 玩家照高度算碰撞（站在上面、從底下走過去、頭會撞到：game.js 的 hits、groundUnder，world4.js 的 headroom4）；
+// 怪物只看最下面兩層（voxLow5）：擋路就打（bashVox5）。疊了兩層的方塊跟牆一樣（voxWall5：擋視線、擋光、圍得住家），頭上有方塊就淋不到雨
+// ====================================================================
+const voxMap5 = () => (typeof G !== 'undefined' && G && G.b4 && G.b4.vox && G.b4.vox.size ? G.b4.vox : null);
+const voxCol5 = (x, y) => { const m = voxMap5(); return m ? m.get(x + ',' + y) || null : null; };
+const voxAny5 = (x, y) => !!voxCol5(x, y);
+const voxLow5 = (x, y) => { const c = voxCol5(x, y); return !!(c && c.low); };
+const voxWall5 = (x, y) => { const c = voxCol5(x, y); return !!(c && c.wall); };
+const voxRoof5 = (x, y) => { const c = voxCol5(x, y); return !!(c && c.some(b => b.z >= 2)); };
+const voxAt5 = (x, y, z) => { const c = voxCol5(x, y); return c ? c.find(b => b.z === z) || null : null; };
+// 腳在 z、身高 h 的人進不進得去這一格
+function voxFree5(x, y, z, h) { const c = voxCol5(x, y); if (c) for (const b of c) if (b.z + 1 > z + STEP_H && b.z < z + h) return false; return true; }
+// 腳在 z 的時候，這一格站得到的方塊頂面（沒有就是 0）
+function voxTop5(x, y, z) { const c = voxCol5(x, y); let h = 0; if (c) for (const b of c) if (b.z + 1 <= z + STEP_H && b.z + 1 > h) h = b.z + 1; return h; }
+// 頭上的方塊：腳最高能到哪裡（world4.js 的 headroom4）
+function voxHead5(x, y, z) {
+  const c = voxCol5(Math.floor(x), Math.floor(y));
+  let top = Infinity;
+  if (c) for (const b of c) if (b.z >= z + 0.5) top = Math.min(top, Math.max(z, b.z - bodyH(G.p)));
+  return top;
+}
+// 怪物走過去要花多久（跟牆一樣：越耐打越「貴」，玻璃過不去）
+function voxCost5(x, y) {
+  const c = voxCol5(x, y); let hp = 0;
+  for (const b of c) if (b.z < 2) { if (b.tier === GLASS_TIER) return Infinity; hp += b.hp; }
+  return 1 + Math.ceil(hp / 8);
+}
+function voxFlags5(c) { c.low = c.some(b => b.z < 2); c.wall = c.some(b => b.z === 0) && c.some(b => b.z === 1); }
+function setVox5(x, y, z, tier, hp) {
+  const m = G.b4.vox, k = x + ',' + y;
+  let c = m.get(k);
+  if (!c) { c = []; m.set(k, c); }
+  if (c.some(b => b.z === z)) return null;
+  const b = { z, tier, hp: hp ?? PLANKS[tier].hp };
+  c.push(b); c.sort((p, q) => p.z - q.z); voxFlags5(c);
+  b4Changed();
+  return b;
+}
+function delVox5(x, y, z) {
+  const m = G.b4.vox, k = x + ',' + y, c = m.get(k);
+  if (!c) return null;
+  const i = c.findIndex(b => b.z === z);
+  if (i < 0) return null;
+  const [b] = c.splice(i, 1);
+  if (c.length) voxFlags5(c); else m.delete(k);
+  b4Changed();
+  return b;
+}
+// 怪物打擋路的方塊：先打下面那一塊，打破了上面的不會掉下來（底下兩層都清掉牠才過得去）
+function bashVox5(e, w, dt) {
+  const c = voxCol5(w.x, w.y);
+  if (!c || e.spawn > 0 || e.stunT > 0) return;
+  const b = c.find(q => q.z < 2);
+  if (!b || b.tier === GLASS_TIER || Math.hypot(clamp(e.x, w.x, w.x + 1) - e.x, clamp(e.y, w.y, w.y + 1) - e.y) > ENEMY_R + 0.3) return;
+  const k = BASH4[e.kind];
+  if (!k) return;
+  e.bashing = 0.3;
+  b.hp -= k * dt * (e.lv ? 0.85 + e.lv * 0.05 : 1); b.hitT = 0.25;
+  if (b.tier === LAVA_TIER) hurtMonster(e, 1.2 * dt, 'lava');
+  if ((b.sndT = (b.sndT || 0) - dt) <= 0) { b.sndT = 0.45; Sound.play('plank', 0.5); }
+  if (b.hp <= 0) { delVox5(w.x, w.y, b.z); net4('unvox', { x: w.x, y: w.y, z: b.z }); puff(w.x + 0.5, w.y + 0.5, [150, 110, 70], 8); Sound.play('crash', 0.7); }
+}
+// 你看著哪裡：從眼睛照視線往前找（最遠 4.5 公尺）。hit 是看到的那個方塊，put 是可以放新方塊的那一格（碰到的東西前面那一格）
+function aim5() {
+  const p = G.p, ez = (p.z || 0) + (p.crouch ? 0.95 : 1.5), cp = Math.cos(p.pitch || 0);
+  const dx = Math.cos(p.face) * cp, dy = Math.sin(p.face) * cp, dz = Math.sin(p.pitch || 0);
+  let last = null, hit = null, stop = false;
+  for (let d = 0.35; d < 4.5 && !stop; d += 0.05) {
+    const x = Math.floor(p.x + dx * d), y = Math.floor(p.y + dy * d), zf = ez + dz * d, z = Math.floor(zf);
+    if (zf < 0) break;                                                    // 地面：放在前一格（地上）
+    if (last && last.x === x && last.y === y && last.z === z) continue;
+    if (!inMap(x, y) || tiles[y][x] !== 1) { stop = true; break; }         // 地圖外面
+    if (voxAt5(x, y, z)) { hit = { x, y, z }; break; }
+    const f = furnGrid[y][x];
+    if (f && zf < (f.type === 'tree5' ? 3.2 : (furnTopH(f, x - f.x, y - f.y) ?? 1.2) + 0.05)) { stop = true; break; }   // 家具、樹
+    last = { x, y, z };
+  }
+  let put = last && !stop ? last : last;
+  if (put) {
+    const bad = put.z < 0 || put.z >= VOX_MAX || furnGrid[put.y][put.x] || doorGrid[put.y][put.x] || voxAt5(put.x, put.y, put.z);
+    const inBody = (ex, ey, ez0, r, h) => ex + r > put.x && ex - r < put.x + 1 && ey + r > put.y && ey - r < put.y + 1 && put.z + 1 > ez0 + 0.02 && put.z < ez0 + h;
+    if (bad) put = null;
+    else if (inBody(p.x, p.y, p.z || 0, PLAYER_R, bodyH(p))) put = { ...put, no: '會卡到你自己' };
+    else if (put.z < 2 && G.enemies.some(e => !e.dead && inBody(e.x, e.y, 0, ENEMY_R, 2))) put = { ...put, no: '有東西擋在那裡' };
+  }
+  return { hit, put };
+}
+function placeBlock5(tier) {
+  if (!isW5()) { toast('🧊 方塊只能在世界夾層（第五世界）用。'); return; }
+  const { put } = aim5();
+  if (!put || put.no) { toast('🧊 ' + (put ? put.no : '這裡放不了方塊（看著地上或別的方塊，離近一點）') + '。'); Sound.play('empty'); return; }
+  if (!setVox5(put.x, put.y, put.z, tier)) return;
+  removeItem('blk' + tier);
+  net4('vox', { x: put.x, y: put.y, z: put.z, tier, hp: inf4(PLANKS[tier].hp) });
+  Sound.play('plank'); makeNoise(3);
+  if (!G.home) setHome4(true);
+  if (!G.ev.voxTip) { G.ev.voxTip = 1; toast('🧊 放好第一個方塊了！看著地上、別的方塊的旁邊或上面再按 Q 可以一直放；疊兩層高、圍一圈就是家，頭上再放一層就是屋頂。看著方塊按住 E 可以拿回來。怪物會打方塊（玻璃打不破）。', 'good'); }
+}
+function takeBlock5(h) {
+  const b = voxAt5(h.x, h.y, h.z);
+  if (!b) return;
+  const id = 'blk' + b.tier;
+  if (!bagFits(id)) { toast('🎒 背包滿了，拿不了方塊。'); Sound.play('empty'); return; }
+  delVox5(h.x, h.y, h.z); net4('unvox', { x: h.x, y: h.y, z: h.z });
+  addItem(id, 1); Sound.play('pickup');
+}
+function blockTargets5(cands) {
+  if (!voxMap5() || G.hand) return;
+  const { hit } = aim5();
+  if (!hit) return;
+  const b = voxAt5(hit.x, hit.y, hit.z);
+  cands.push({ d: -0.2, id: `vox:${hit.x},${hit.y},${hit.z}`, label: `拿起${BLOCK_NAMES[b.tier]}`, sub: b.tier === GLASS_TIER ? '按住 E' : `按住 E（耐打 ${Math.ceil(b.hp)}/${PLANKS[b.tier].hp}）`, hold: 0.3, action: () => takeBlock5(hit) });
+}
+const voxList5 = () => { const out = []; for (const [k, c] of (G.b4 && G.b4.vox) || []) { const [x, y] = k.split(',').map(Number); for (const b of c) out.push([x, y, b.z, b.tier, Math.round(Math.min(b.hp, 9999))]); } return out; };
+function loadVox5(list) {
+  G.b4.vox.clear();
+  for (const [x, y, z, tier, hp] of list || []) if (PLANKS[tier] && inMap(x, y) && tiles[y][x] === 1 && z >= 0 && z < VOX_MAX) setVox5(x, y, z, tier, tier === GLASS_TIER ? Infinity : hp);
+}
+
+// ====================================================================
 function save5() {
-  return { cut: FURN.filter(f => f.type === 'tree5' && f.cut).map(f => [f.id, f.cut, f.chops || 0]), mk: G.mk5 || 0, mv: W5_MAP_VER };
+  return { cut: FURN.filter(f => f.type === 'tree5' && f.cut).map(f => [f.id, f.cut, f.chops || 0]), mk: G.mk5 || 0, mv: W5_MAP_VER, vox: voxList5() };   // vox：放好的方塊
 }
 function load5(s) {
   if (!s) return;
   G.mk5 = s.mk || 0;
+  loadVox5(s.vox);
   for (const [id, day] of s.cut || []) {
     const f = FURN_BY_ID[id];
     if (!f || f.type !== 'tree5') continue;
