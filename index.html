@@ -111,6 +111,7 @@
         <button id="btnContinue">繼續遊戲</button>
         <button id="btnNew">新遊戲</button>
         <button id="btnFriends" class="ghost">👥 朋友</button>
+        <button id="btnRank" class="ghost">🏆 排行榜</button>
         <button id="btnHelp" class="ghost">玩法說明</button>
         <button id="btnBook" class="ghost">生物圖鑑</button>
         <button id="btnBulbs" class="ghost">燈泡圖鑑</button>
@@ -306,6 +307,17 @@
     </div>
   </div>
 
+  <!-- 跟朋友一起玩的排行榜（netrank.js） -->
+  <div id="rank" class="screen hidden">
+    <div class="panel">
+      <h2>🏆 排行榜</h2>
+      <div id="rankTabs" class="tabs"></div>
+      <p id="rankNote" class="small book-note"></p>
+      <div id="rankList" class="rank-list"></div>
+      <div class="btns"><button id="btnRankBack">返回</button></div>
+    </div>
+  </div>
+
   <!-- 暫停 -->
   <div id="pause" class="screen hidden">
     <div class="panel small-panel">
@@ -315,6 +327,7 @@
       <div class="btns col">
         <button id="btnResume">繼續</button>
         <button id="btnPauseFriends" class="ghost">👥 朋友</button>
+        <button id="btnPauseRank" class="ghost">🏆 排行榜</button>
         <button id="btnMute" class="ghost">🔊 聲音：開</button>
         <button id="btnPickTips" class="ghost">📦 拿到東西的提示：顯示</button>
         <button id="btnPauseHelp" class="ghost">玩法說明</button>
@@ -334,6 +347,7 @@
     <div class="panel small-panel">
       <h2 id="goTitle">你倒下了……</h2>
       <p id="goText"></p>
+      <div id="goRank" class="rank-list hidden"></div>
       <div class="btns col">
         <button id="btnRetry">從上次存檔重來</button>
         <button id="btnNextWorld" class="hidden">🏬 走進對面的賣場（第四世界）</button>
@@ -353,6 +367,7 @@
   <script src="js/net.js?v=41"></script>
   <script src="js/netmon.js?v=41"></script>
   <script src="js/netshare.js?v=41"></script>
+  <script src="js/netrank.js?v=41"></script>
   <script src="js/game.js?v=41"></script>
   <script type="module" src="js/render3d.js?v=41"></script>
 </body>
