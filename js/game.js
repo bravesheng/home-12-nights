@@ -2435,7 +2435,7 @@ function updateWeapons(dt) {
 // ====================================================================
 // 硬幣、怪物掉寶
 // ====================================================================
-function addCoins(n) { G.coins = (G.coins || 0) + n; }
+function addCoins(n) { G.coins = (G.coins || 0) + n; if (typeof NetRank !== 'undefined') NetRank.earn(n); }   // 跟朋友一起玩的排行榜算「賺到的硬幣」（netrank.js）
 function onKill(e) {
   if (G.nightStats) G.nightStats.kills++;
   dropLoot(e.x, e.y, e.lv || 1);
@@ -3253,7 +3253,7 @@ function gotGift(d, from) {
   const back = why => Net.sendTo(from, 'giftback', { id, n, why });
   if (id !== 'coin' && (!ITEMS[id] || FLASH_UP[id])) return;
   if (!G || mode === 'title' || mode === 'cutscene') { back('busy'); return; }
-  if (id === 'coin') { addCoins(n); toast(`🎁 ${name}給你 ${n} 枚硬幣。`, 'good'); }
+  if (id === 'coin') { G.coins = (G.coins || 0) + n; toast(`🎁 ${name}給你 ${n} 枚硬幣。`, 'good'); }
   else {
     if (UNIQUE_CONV[id] && G.inv[id]) { back('has'); return; }
     if (isW4() && !G.inv[id] && bagUsed() >= BAG_SLOTS) { back('full'); toast(`🎒 ${name}想送你${itemName(id)}，可是你的背包滿了。`, 'warn'); return; }
@@ -4627,6 +4627,7 @@ function frame(ts) {
   const dt = Math.min(0.05, (ts - lastT) / 1000 || 0);
   lastT = ts;
   if (NET_OK && typeof NetShare !== 'undefined') NetShare.tick();   // 跟朋友一起玩：第一到第三世界的門、燈泡、櫃子、地上的東西……都同步（netshare.js）
+  if (typeof NetRank !== 'undefined') NetRank.tick();   // 跟朋友一起玩的排行榜（netrank.js）
   if (mode === 'play') update(dt);
   else if (mode === 'down' && NET_OK && Net.isHost) { G.time += dt; updateTime(dt); }   // 房主倒下了：時間照樣走，大家才不會卡住
   else if (mode === 'title') { G.time += dt; for (const e of G.enemies) e.wob += dt; buildLights(); }

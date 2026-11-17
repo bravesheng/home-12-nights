@@ -384,6 +384,16 @@ li { margin-bottom: 9px; line-height: 1.55; font-size: 14px; }
 .testopts input { width: 18px; height: 18px; accent-color: #7ee081; }
 .tabs { display: flex; gap: 8px; margin: -4px 0 12px; }
 .tabs button { padding: 7px 16px; font-size: 14px; background: rgba(255, 255, 255, .08); color: #ddd; font-weight: 600; }
+/* 跟朋友一起玩的排行榜 */
+.rank-list { display: flex; flex-direction: column; gap: 6px; margin: 0 0 14px; min-width: min(460px, 80vw); max-height: 52vh; overflow-y: auto; text-align: left; }
+.rank-list h3 { margin: 8px 0 2px; font-size: 15px; text-align: center; color: #ffd166; }
+.rank-row { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-radius: 10px; background: rgba(255, 255, 255, .06); font-size: 15px; }
+.rank-row.me { background: rgba(255, 209, 102, .18); outline: 1px solid rgba(255, 209, 102, .5); }
+.rank-no { width: 30px; text-align: center; font-size: 17px; }
+.rank-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank-val { text-align: right; }
+.rank-val .small { display: block; font-size: 11px; opacity: .7; }
+#rankTabs { flex-wrap: wrap; justify-content: center; }
 .tabs button.on { background: linear-gradient(180deg, #ffd166, #f4a93b); color: #2a1a00; }
 
 /* ===== 手機（短邊 520px 以下，game.js 會給 body 加上 .phone）=====

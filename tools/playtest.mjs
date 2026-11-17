@@ -1487,6 +1487,11 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   const SAVE = JSON.stringify({ v: 1, day: 3, diff: 'easy', world: 1, p: { x: 19.5, y: 23, hp: 100, san: 100, hunger: 100, bat: 100, flashLv: 1 }, inv: { bulb1: 1 }, sockets: [], lamps: [], containers: {}, stats: { searched: 0, dissolved: 0, bestTier: 1 } });
   await guest.goto(BASE + '?nettest', { waitUntil: 'load' });
   await guest.evaluate(s => { localStorage.setItem('home99_save_v1', s); localStorage.removeItem('home99_progress_v1'); }, SAVE);
+  // 排行榜：主選單的按鈕打得開、關得掉（還沒跟朋友玩過是空的）
+  await guest.click('#btnRank');
+  const rk0 = await guest.evaluate(() => ({ open: !document.getElementById('rank').classList.contains('hidden') && document.getElementById('title').classList.contains('hidden'), tabs: document.querySelectorAll('#rankTabs button').length, note: document.getElementById('rankNote').textContent }));
+  await guest.click('#btnRankBack');
+  check(rk0.open && rk0.tabs === 4 && rk0.note.length > 5 && await guest.evaluate(() => document.getElementById('rank').classList.contains('hidden') && !document.getElementById('title').classList.contains('hidden')), `主選單的「🏆 排行榜」要打得開（四個分頁）、按返回回主選單（${JSON.stringify(rk0)}）`);
   await page.goto(BASE + 'test.html?world=4&night=2&nettest', { waitUntil: 'load' });
   await page.waitForFunction(() => mode === 'play' && curWorld === 4, null, { timeout: 60000 });   // 電腦很忙的時候蓋賣場會超過 30 秒
   await page.evaluate(() => { G.t = 40; Object.assign(G.p, { ...W4.start, pitch: 0 }); });   // 第 2 天的白天
@@ -1843,6 +1848,17 @@ await scenario('net', '跟朋友一起玩（?nettest：同一個瀏覽器開兩�
   await page.waitForFunction(h => !DOORS[h.di].closed && !G.sockets.find(o => o.id === h.sid).bulb && G.power, shd, { timeout: 8000 }).catch(() => {});
   const hsh = await page.evaluate(h => ({ door: !!DOORS[h.di].closed, bulb: G.sockets.find(o => o.id === h.sid).bulb, cont: G.containers[h.cid].items.join(), pk: G.pickups.some(p => p.id === 'battery' && p.n === 2 && p.keep), power: G.power }), shd);
   check(!hsh.door && !hsh.bulb && hsh.cont === 'candle' && !hsh.pk && hsh.power === true, `客人開的門、拿走的燈泡、撿走的東西、重啟的電源，房主那邊也要一樣（${JSON.stringify(hsh)}）`);
+  // 設計師第六次紙條：一起玩的人之間的排行榜（生存最久、錢最多、撐過最多夜、總和）
+  await page.evaluate(() => addCoins(7));
+  await guest.waitForFunction(() => NetRank.board().some(r => !r.me && r.c >= 7), null, { timeout: 8000 }).catch(() => {});
+  const rk = await guest.evaluate(() => {
+    const b = NetRank.board(), me = b.find(r => r.me), fr = b.find(r => !r.me);
+    NetRank.open('title'); document.querySelector('#rankTabs button[data-t="c"]').click();
+    const rows = [...document.querySelectorAll('#rankList .rank-row')].map(e => e.textContent);
+    document.getElementById('rank').classList.add('hidden');   // 遊戲中打開的：直接關掉，不回主選單
+    return { n: b.length, frC: fr && fr.c, frRank: fr && fr.rc, meRank: me && me.rc, meA: me && me.a, rows, saved: (localStorage.getItem('home99_rank_v1') || '').length };
+  });
+  check(rk.n === 2 && rk.frC >= 7 && rk.frRank === 1 && rk.meRank === 2 && rk.meA > 1 && rk.rows.length === 2 && rk.rows[0].includes('🥇') && rk.rows[1].includes('（你）'), `排行榜：房主賺了 7 枚硬幣，客人那邊「錢最多」房主要第一、自己第二，活著的時間有在算（${JSON.stringify(rk)}）`);
   // 房主倒下：不是結束畫面、大家不用重來，時間照樣走；客人把房主扶起來
   const ht0 = await page.evaluate(() => { G.p.inv = 0; gameOver(); return { mode, over: !document.getElementById('gameover').classList.contains('hidden'), t: G.t }; });
   await guest.waitForFunction(() => Net.friends().some(f => f.down), null, { timeout: 5000 }).catch(() => {});
