@@ -38,6 +38,7 @@ function chop5(f) {
   fellTree5(f, true);
 }
 // 樹倒了（自己砍的、被閃電打到的）：掉木頭方塊和木柴，樹上的東西掉下來
+const ORE_BLOCKS = 3;
 function fellTree5(f, mine) {
   f.cut = G.day; f.chops = 0;
   if (furnGrid[f.y][f.x] === f) { furnGrid[f.y][f.x] = null; solid[f.y][f.x] = tiles[f.y][f.x] === 0; }
@@ -49,10 +50,14 @@ function fellTree5(f, mine) {
   G.pickups.push(blk);
   const wood = { x: f.x + 0.5 - Math.cos(a) * 0.6, y: f.y + 0.5 - Math.sin(a) * 0.6, id: 'wood', n: 2, keep: 1, t: Math.random() * 6 };
   G.pickups.push(wood);
+  // 設計師第七次紙條：樹幹是水泥、黃金、岩漿、玻璃方塊的樹，倒了另外掉 ORE_BLOCKS 個那種方塊
+  const ore = f.ore ? { x: f.x + 0.5 + Math.cos(a + 2) * 0.8, y: f.y + 0.5 + Math.sin(a + 2) * 0.8, id: 'blk' + f.ore, n: ORE_BLOCKS, keep: 1, t: Math.random() * 6 } : null;
+  if (ore) G.pickups.push(ore);
   dropFruit5(f);
   if (window.Renderer && Renderer.tree5) Renderer.tree5(f);
   // 跟朋友一起玩：掉在地上的板子和木柴照 uid 送過去（朋友撿走時兩邊一起消失）
-  net4('fell5', { id: f.id, loose: loose.map(l => ({ x: l.x, y: l.y, a: l.a, tier: 1, uid: uidOf4(l) })), wood: pkSpec4(wood), blk: pkSpec4(blk) });
+  net4('fell5', { id: f.id, loose: loose.map(l => ({ x: l.x, y: l.y, a: l.a, tier: 1, uid: uidOf4(l) })), wood: pkSpec4(wood), blk: pkSpec4(blk), ore: ore ? pkSpec4(ore) : undefined });
+  if (mine && ore) toast(`✨ 這棵樹的樹幹是${BLOCK_NAMES[f.ore]}！掉了 ${ORE_BLOCKS} 個${BLOCK_NAMES[f.ore]}。`, 'good');
   if (mine && !G.ev.fellTip) { G.ev.fellTip = 1; toast('🌳 樹倒了！地上有 4 個木頭方塊（看著按 E 撿起來，選它按 Q 一格一格蓋房子）和 2 根木柴（放進背包，在工作台做成方塊、丟進火爐）。樹 2 天後會長回來。', 'good'); }
 }
 // 樹上長的東西掉到地上（uid 不變，朋友那邊同一個東西也掉下來）
@@ -253,7 +258,7 @@ function addTargets5(cands) {
     const a = Math.min(lookAngle(clamp(p.x, f.x, f.x + f.w), clamp(p.y, f.y, f.y + f.h)), lookAngle(f.x + f.w / 2, f.y + f.h / 2));
     if (a > 1.0 && rd > 0.35) continue;
     const d = rd + a * 0.9;
-    if (f.type === 'tree5') cands.push({ d: d + 0.25, id: 'tree:' + f.id, label: '砍樹', sub: `按住 E 砍（再 ${TREE_CHOPS - (f.chops || 0)} 下就倒）`, hold: 0.8, action: () => chop5(f) });
+    if (f.type === 'tree5') cands.push({ d: d + 0.25, id: 'tree:' + f.id, label: f.ore ? `砍樹（樹幹是${BLOCK_NAMES[f.ore]}）` : '砍樹', sub: `按住 E 砍（再 ${TREE_CHOPS - (f.chops || 0)} 下就倒）`, hold: 0.8, action: () => chop5(f) });
     else if (f.type === 'bench5') cands.push({ d, id: 'bench5', label: '打開工作台的合成書', hold: 0, action: openBook5 });
     else if (f.type === 'bath5') cands.push({ d, id: 'bath5', label: `沐浴球機（${BATH_PRICE} 🪙 一顆）`, hold: 0, action: openBath5 });
   }
@@ -428,12 +433,33 @@ function drift5(e, tx, ty, sp, dt) {
   e.x = clamp(e.x + dx / d * s, 1.5, MAP_W - 1.5); e.y = clamp(e.y + dy / d * s, 1.5, MAP_H - 1.5);
   e.face = Math.atan2(dy, dx);
 }
+// 設計師第七次紙條：「第五關怪物也有攻擊力，不要呆呆的站著找死」。
+// 每一隻都多一招會主動打人的：從牠腳下往外擴散的震波（跟第四世界以前 Hubert 的一樣，跳起來可以躲），
+// 而且被打到（血變少）會「生氣」6 秒：動得比較快、震波來得比較勤。rage5 每一幀呼叫，回傳是不是在生氣
+function rage5(e, dt) {
+  if (e.hp0 !== undefined && e.hp < e.hp0 - 0.01) { if (!(e.rage > 0)) Sound.play('scream', nearVol(dist5(e)) * 0.4); e.rage = 6; }
+  e.hp0 = e.hp;
+  e.rage = Math.max(0, (e.rage || 0) - dt);
+  e.ringCd = Math.max(0, (e.ringCd ?? 2.5) - dt);
+  return e.rage > 0;
+}
+// 震波：every 秒一次，你在 near 公尺內才放；max 是震波跑多遠
+function ring5(e, near, max, every, msg) {
+  if (e.ringCd > 0 || e.spawn > 0 || e.rm || dist5(e) > near) return false;
+  e.ringCd = every * (e.rage > 0 ? 0.55 : 1);
+  G.waves4.push({ x: e.x, y: e.y, r: 0, max, hit: false, msg, dmg: 14 });
+  Sound.play('stompBig', nearVol(dist5(e)) * 0.8);
+  if (!G.ev.ring5Tip) { G.ev.ring5Tip = 1; toast('💥 怪物放出一圈紅色的震波！圈圈碰到你之前跳起來就躲得過。', 'warn'); }
+  return true;
+}
 // ---------- 白日夢：慢慢飄過來，停在你頭上；底下一直滴黏液：站在底下理智掉、被滴到扣血 ----------
 function updateDaydream5(e, dt) {
   const p = G.p, d = dist5(e);
   if (inBeam(e)) { flashHurt(e, dt); if (e.dead) return; }
   if (e.pose) return;
-  drift5(e, p.x + Math.cos(e.wob * 0.2) * 2, p.y + Math.sin(e.wob * 0.2) * 2, d > 12 ? 1.2 : 0.55, dt);
+  const mad = rage5(e, dt);
+  ring5(e, 7, 4.5, 5, '☁️ 白日夢砸下一大團黏液，震波把你掀倒了！');
+  drift5(e, p.x + Math.cos(e.wob * 0.2) * 2, p.y + Math.sin(e.wob * 0.2) * 2, (d > 12 ? 1.2 : 0.55) * (mad ? 2.2 : 1), dt);
   if (d < 8 && e.spawn <= 0) {
     p.san -= 1.6 * D().san * dt;
     if (d < 4.5 && !sheltered4(p.x, p.y)) {
@@ -485,9 +511,10 @@ function updateSlice5(e, dt) {
     }
     return;
   }
-  if (e.shut > 0) return;
+  const mad = rage5(e, dt);
+  if (e.shut > 0 && !mad) return;
   if (d < 3.0 && e.cd <= 0 && e.spawn <= 0) { e.bite = 0.45; Sound.play('giggle', nearVol(d)); if (!G.ev.sliceTip) { G.ev.sliceTip = 1; toast('🐚 嬰兒臉咯咯地笑了……殼要夾下來了，快退開！', 'warn'); } return; }
-  if (d < 16) walkTo4(e, p.x, p.y, 0.75 * (0.4 + Math.abs(Math.sin(e.wob * 2.2))), dt, flow);
+  if (d < 22) walkTo4(e, p.x, p.y, (mad ? 2.6 : 1.3) * (0.4 + Math.abs(Math.sin(e.wob * 2.2))), dt, flow);   // 被打到會生氣，爬得很快
 }
 // ---------- 綠溫室：站在原地哼搖籃曲，10 公尺內會把你慢慢吸過去、理智掉；被吸到旁邊就被包進豆莢裡（扣很多血）。在家裡聽不到 ----------
 function updateGreen5(e, dt) {
@@ -496,6 +523,8 @@ function updateGreen5(e, dt) {
   if (e.pose || e.spawn > 0) return;
   e.humT = (e.humT ?? 0) - dt;
   if (e.humT <= 0 && d < 30) { e.humT = rand(5, 8); Sound.play('hum', nearVol(d) * 0.9); }
+  rage5(e, dt);
+  ring5(e, e.rage > 0 ? 16 : 9, e.rage > 0 ? 9 : 6, 4.5, '🫛 豆莢甩出來的藤蔓掃過地面，把你絆倒了！');   // 站著不動，但藤蔓會掃過來
   if (d > 10.5 || atHome4()) return;
   const k = 1 - d / 10.5;
   p.san -= (1 + 2 * k) * D().san * dt;
@@ -531,7 +560,9 @@ function updateClone5(e, dt) {
   if (e.pose) return;
   e.moanT = (e.moanT ?? 2) - dt;
   if (e.moanT <= 0 && d < 30) { e.moanT = rand(6, 10); Sound.play('tall', nearVol(d) * 0.8); }
-  const dir = chaseDir(e), sp = Math.min(0.9 + n * 0.006, 1.25) * (e.spawn > 0 ? 0.3 : 1);
+  const mad = rage5(e, dt);
+  ring5(e, 8, 5, 6, '👥 複製人重重一壓，地面震了起來！');
+  const dir = chaseDir(e), sp = Math.min(0.9 + n * 0.006, 1.25) * (e.spawn > 0 ? 0.3 : 1) * (mad ? 1.8 : 1);
   move(e, dir.x * sp * dt, dir.y * sp * dt, ENEMY_R);
   if (d < 2.8 && e.spawn <= 0 && p.inv <= 0) {
     damage(30 + n * 0.2, 14); p.inv = 1.4; G.shake = Math.max(G.shake, 0.5); Sound.play('thump');
@@ -544,7 +575,9 @@ function updateLeak5(e, dt) {
   const p = G.p, d = dist5(e);
   if (inBeam(e)) { flashHurt(e, dt); if (e.dead) return; }
   if (e.pose || e.spawn > 0) return;
-  e.cd = (e.cd ?? 3) - dt;
+  const mad = rage5(e, dt);
+  ring5(e, mad ? 30 : 16, mad ? 16 : 11, 7, '🧠 那顆大頭低吼了一聲，震波把你震倒了！');   // 靠太近（或打牠）：大頭會吼
+  e.cd = (e.cd ?? 3) - dt * (mad ? 2 : 1);
   if (e.cd <= 0 && d < 45) {
     e.cd = rand(4, 6);
     const n = 2 + (G.ev.blood ? 1 : 0);
@@ -595,7 +628,7 @@ function net5Apply(d) {
       if (!f || f.type !== 'tree5' || f.cut) break;
       setCut5(f, G.day); b4Changed(); dropFruit5(f);
       for (const l of d.loose || []) if (!G.loose4.some(o => o.uid === l.uid)) G.loose4.push({ ...l, k: 'plank' });
-      for (const pk of [d.wood, d.blk]) if (pk && ITEMS[pk.id] && !G.pickups.some(p => p.uid === pk.uid)) G.pickups.push({ ...pk, t: 0, keep: 1 });
+      for (const pk of [d.wood, d.blk, d.ore]) if (pk && ITEMS[pk.id] && !G.pickups.some(p => p.uid === pk.uid)) G.pickups.push({ ...pk, t: 0, keep: 1 });
       Sound.play('treeFall', near(f.x, f.y));
       break;
     }
@@ -739,7 +772,16 @@ function takeBlock5(h) {
 }
 function blockTargets5(cands) {
   if (!voxMap5() || G.hand) return;
-  const { hit } = aim5();
+  let { hit } = aim5();
+  // 設計師第七次紙條：「方塊要能收回，不要放下就拿不起來」。以前要剛好看著那一塊才拿得到：平平地看著前面一格高的方塊，
+  // 視線從它上面過去就沒有按鈕 → 沒有直接看到的話，拿你面前 2.2 公尺內第一疊方塊裡、眼睛高度以下最上面的那一塊
+  if (!hit) {
+    const p = G.p, top = Math.min(VOX_MAX - 1, Math.floor((p.z || 0) + (p.crouch ? 0.95 : 1.5)));
+    for (let d = 0.4; d <= 2.2 && !hit; d += 0.2) {
+      const x = Math.floor(p.x + Math.cos(p.face) * d), y = Math.floor(p.y + Math.sin(p.face) * d);
+      for (let z = top; z >= 0; z--) if (voxAt5(x, y, z)) { hit = { x, y, z }; break; }
+    }
+  }
   if (!hit) return;
   const b = voxAt5(hit.x, hit.y, hit.z);
   cands.push({ d: -0.2, id: `vox:${hit.x},${hit.y},${hit.z}`, label: `拿起${BLOCK_NAMES[b.tier]}`, sub: b.tier === GLASS_TIER ? '按住 E' : `按住 E（耐打 ${Math.ceil(b.hp)}/${PLANKS[b.tier].hp}）`, hold: 0.3, action: () => takeBlock5(hit) });

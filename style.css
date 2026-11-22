@@ -520,3 +520,14 @@ body.touch.phone .bb small { font-size: 8px; }
 .bcardx .ic.q { font-size: 34px; font-weight: 800; color: #9a94a8; background: rgba(0, 0, 0, .35); border-radius: 10px; }
 .bcardx.unseen .tx b { color: #aaa; }
 .flashbeam { width: 60px; height: 22px; border-radius: 4px 30px 30px 4px; }
+
+/* 第四世界：爬得很高時畫面變暗、視野變窄（world4.js 的 ambient4） */
+#altfx { opacity: 0; --k: 0; background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) calc(58% - 46% * var(--k)), rgba(0, 0, 0, .97) calc(104% - 50% * var(--k))); }
+/* 蓋天花板選樓層 */
+#lvl4 { position: absolute; right: 0; bottom: calc(100% + 8px); display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 12px; background: rgba(16, 13, 26, .92); border: 1px solid rgba(255, 255, 255, .18); pointer-events: auto; white-space: nowrap; }
+#lvl4 span { font-size: 12px; color: #cfc8e0; }
+#lvl4 button { min-width: 38px; padding: 8px 8px; font-size: 15px; border-radius: 9px; }
+.slot .hl { position: absolute; left: 3px; top: 1px; font-size: 9px; opacity: .85; color: #bfeec2; }
+.slot.hand.rh { border-color: rgba(255, 255, 255, .28); background: rgba(255, 255, 255, .06); }
+.slot.hand.rh.lit { border-color: rgba(255, 224, 130, .9); background: rgba(255, 224, 130, .16); }
+body.phone .slot .hl { font-size: 7px; }

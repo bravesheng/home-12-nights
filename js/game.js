@@ -910,6 +910,32 @@ function puff(x, y, color = [10, 6, 16], n = 14, h = 1) {
     G.fx.push({ type: 'smoke', x, y, h: h + rand(-0.4, 0.4), vx: Math.cos(a) * s, vy: Math.sin(a) * s, vh: rand(-0.2, 0.7), life: rand(0.5, 1), max: 1, color });
   }
 }
+// 設計師第七次紙條：「所有關的怪物都是實體不會穿過去」。怪物和你、怪物和怪物的身體不會疊在一起：
+// 太近就把你往外推（你後面是牆的話，換怪物退回去）；怪物之間各退一半。距離比咬人的距離短，所以怪物照樣咬得到你。
+// 不算的：還在冒出來的、跳在半空中的、抓著你的、你站在比牠高很多的地方（屋頂上）、你坐著躺著或在爬梯子
+const BODY_GAP = 0.52;
+function solidBodies() {
+  const p = G.p, es = G.enemies.filter(e => !e.dead && !(e.spawn > 0) && !((e.z || 0) > 1) && !FLY_KINDS.has(e.kind));
+  if (!p.pose && !ride && !p.grabbed && mode === 'play') {
+    const pz = (p.z || 0) - floorH(p.x, p.y);
+    for (const e of es) {
+      const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy);
+      if (d >= BODY_GAP || pz > 1.5) continue;
+      const ux = d > 0.001 ? dx / d : -Math.cos(p.face), uy = d > 0.001 ? dy / d : -Math.sin(p.face), push = BODY_GAP - d, ox = p.x, oy = p.y;
+      move(p, ux * push, uy * push, PLAYER_R);
+      const left = push - Math.hypot(p.x - ox, p.y - oy);
+      if (left > 0.01 && !e.rm) move(e, -ux * left, -uy * left, ENEMY_R);   // 你背後是牆：換牠退
+    }
+  }
+  for (let i = 0; i < es.length; i++) for (let j = i + 1; j < es.length; j++) {
+    const a = es[i], b = es[j], dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+    if (d >= BODY_GAP || d < 0.001) continue;
+    const k = (BODY_GAP - d) / 2 / d;
+    if (!a.rm) move(a, -dx * k, -dy * k, ENEMY_R);
+    if (!b.rm) move(b, dx * k, dy * k, ENEMY_R);
+  }
+}
+const FLY_KINDS = new Set(['cradle', 'daydream', 'leak', 'ember']);   // 飄在空中的、太大的（一整片雲、22 公尺的巨頭）不擋路
 function updateEnemies(dt) {
   const p = G.p, n = diffN();
   G.stare = Math.max(0, (G.stare || 0) - dt * 1.5);
@@ -1960,7 +1986,7 @@ const BESTIARY = [
   { world: 4, in: [4], name: '葵氏奶昔', grade: 'runner', night: INTRO4.shake, kind: 'shake', draw: thumbShake, desc: '一盒插著吸管的奶昔，紙盒上有一顆大眼睛。平常闔著眼躺在美食區和冰箱旁邊，看起來就是一盒奶昔；晚上你走到 3 格內，眼睛就睜開、一跳一跳地衝過來，每 4 秒從吸管噴一道酸掉的奶，糊得你看不清楚（跳起來可以躲）。很弱：手電筒照一下或平底鍋一敲就破，破掉的奶灑在地上會讓你滑一下。' },
   { world: 4, in: [4], name: '紅涎偽人', grade: 'general', night: INTRO4.mimic, kind: 'mimic', draw: thumbMimic, desc: '乾癟灰白、眼球凸出的人形，嘴巴一直流出紅色的涎液。牠會模仿朋友的聲音叫你過去；你躲在家裡時牠會來敲門：「開門……是我啊……」千萬不要開門，開了牠就撲進來。在外面看到你就四腳著地衝過來，走過的地方留下一攤會燙傷的紅涎。手電筒照牠的臉，牠會尖叫往後退；鹽巴傷害 2 倍。' },
   { world: 4, in: [4], name: 'SCP-3008-2', grade: 'king', night: INTRO4.staff, kind: 'staff', draw: thumbStaff, desc: '穿黃底紫條紋制服、戴著名牌的細長店員，臉是一張沒有表情的白臉。白天站在走道上一動也不動，頭會慢慢轉過來看你；天黑燈一熄，就在賣場裡巡邏，看到你就衝過來打你，看不到你 6 秒就回去巡邏，還會打你家的牆。很耐打，手電筒只有一半的傷害；最好的辦法是蓋一間好房子躲起來，或蹲下慢慢走（蹲下牠們要很近才看得到你）。' },
-  { world: 4, in: [4], name: 'Hubert', grade: 'judge', night: INTRO4.hubert, kind: 'hubert', draw: thumbHubert, desc: '一隻黑色、胖胖的大蜘蛛：圓滾滾的大肚子上面一顆小圓頭、八隻粗粗的腳，一隻前腳抓著一根鐵管，底下透著紅光。牠專門拆房子：直接爬到你的家，用鐵管把板子一片一片敲爛（玻璃板子拆不了）。你在牠 6 格內被看到時，牠會把鐵管舉高 1 秒往地上一砸，紅色的震波往外擴散——跳起來就不會被震倒。手電筒對牠沒用，平底鍋只有一半；聖水槍 2 倍、鞭炮 1.5 倍。' },
+  { world: 4, in: [4], name: 'Hubert', grade: 'judge', night: INTRO4.hubert, kind: 'hubert', draw: thumbHubert, desc: '一隻黑色、胖胖的大蜘蛛：圓滾滾的大肚子上面一顆小圓頭、八隻粗粗的腳，整隻發著紅光。牠會跳到你頭上（看到牠蹲下就往旁邊跑）。牠專門拆房子：直接爬到你的家，把板子一片一片踹爛（玻璃板子拆不了）。普通的晚上牠跳 4～6 公尺，紅月的晚上跳 12～13 公尺。手電筒對牠沒用，平底鍋只有一半；聖水槍 2 倍、鞭炮 1.5 倍。' },
   { world: 4, in: [4], name: '燼皇', grade: 'yama', night: INTRO4.ember, kind: 'ember', draw: thumbEmber, desc: '第四世界的大魔王，第一隻閻羅級的鬼，最後一夜一定會來。骷髏般的長身體，頭上一圈荊棘光環，背後張開燒著火的紅披風，腳邊一圈帶刺的紅玫瑰。每 14 秒下 3 秒「燼雨」，沒有屋頂遮著就會一直扣血，木頭板子會著火；飄過的地上長出帶刺的玫瑰藤。弱點是光環：抬頭用手電筒照著光環 3 秒，牠就跪下 8 秒，所有傷害 2.5 倍。火球對牠沒用，聖水槍 2 倍。' },
   // 第五世界：世界夾層（照設計師第五次手稿：白日夢鬼將、404視線和夢境切片鬼王、綠溫室和搖籃囈語判官、複製人羅剎、記憶洩漏源酆都）
   { world: 5, in: [5], name: '白日夢', grade: 'general', night: INTRO5.daydream, kind: 'daydream', draw: thumb5('☁️', '#e8d8b0'), desc: '10 到 15 公尺高、像雲一樣的一大團奶油色的肉，左邊一張睡著的臉，底下一條融化的脖子拖到地上。慢慢飄到你頭上停著，底下一直滴黏液：站在牠底下理智會掉，被滴到會扣血（屋頂底下滴不到）。牠軟軟的敲不太到，用手電筒照牠比較有效。' },
@@ -2452,7 +2478,7 @@ function dropLoot(x, y, lv = 1) {
     else if (r < 0.77) id = pick(['snack', 'canned', 'cocoa', 'chocolate', 'milk']);
     else if (r < 0.86) { id = pick(['marble', 'firecracker', 'salt', 'holywater']); n = LOOT_QTY[id]; }
     else if (r < 0.97) id = 'bulb' + Math.min(NORMAL_MAX, rollTier(1 + lv * 0.3, G.day));
-    else id = 'key';
+    else id = isW4() ? 'battery' : 'key';   // 第四、五世界沒有寶箱
   }
   G.pickups.push({ x, y, id, n, t: Math.random() * 6 });
 }
@@ -2529,7 +2555,7 @@ function missingWeapons() {
 }
 function openTreasure() {
   const coins = randi(3, 6), r = Math.random(), miss = missingWeapons();
-  const b = r < 0.25 ? 'key' : r < 0.55 && miss.length ? pick(miss) : 'bulb' + Math.min(NORMAL_MAX, rollTier(2, G.day) + 1);
+  const b = r < 0.25 && !isW4() ? 'key' : r < 0.55 && miss.length ? pick(miss) : 'bulb' + Math.min(NORMAL_MAX, rollTier(2, G.day) + 1);
   addCoins(coins);
   const got = gainItem(b);
   Sound.play('win');
@@ -2544,7 +2570,7 @@ function makeStock() {
     ...(miss.length ? [{ id: pick(miss), price: 0, qty: 1 }] : []),
     { id: ammo, price: 2, qty: 2, n: LOOT_QTY[ammo] },
     { id: 'lamp_floor', price: 5, qty: 1 }, { id: 'lamp_desk', price: 3, qty: 1 },
-    { id: 'battery', price: 2, qty: isW3() ? 5 : 2 }, { id: 'key', price: 8, qty: 1 },   // 第三世界的商人多賣一點電池
+    { id: 'battery', price: 2, qty: isW3() ? 5 : 2 }, ...(isW4() ? [] : [{ id: 'key', price: 8, qty: 1 }]),   // 第四、五世界沒有寶箱，不賣鑰匙（設計師第七次紙條）   // 第三世界的商人多賣一點電池
     { id: 'medkit', price: 6, qty: 1 }, { id: 'cocoa', price: 2, qty: 2 }, { id: 'chocolate', price: 1, qty: 3 },
   ];
   // 第三世界第 5 天起，商人會賣大白燈（很貴）
@@ -3276,7 +3302,7 @@ if (NET_OK) {
   Net.on('gift', gotGift);
   Net.on('giftback', gotGiftBack);
   Net.on('revive', (d, from) => Net.wake(from));
-  // 有人倒下了：晚上的話今晚多 10 秒（房主算時間；設計師第六次紙條）
+  // 有人倒下了：晚上的話今晚多 NET_DIE_SECS 秒（房主算時間；設計師第六、七次紙條）
   Net.on('died', (d, from) => {
     const f = Net.friends().find(x => x.id === from);
     if (d && d.night && Net.isHost && G && G.phase === 'night') G.t = Math.max(0, G.t - NET_DIE_SECS);
@@ -3723,6 +3749,7 @@ function update(dt) {
   if (flowTimer <= 0 || !flow) { flowTimer = 0.25; computeFlow(); }
   updateSpawns(dt);
   updateEnemies(dt);
+  solidBodies();
   for (const c of G.candles) c.life -= dt;
   G.candles = G.candles.filter(c => c.life > 0);
   updateFx(dt);
@@ -4334,6 +4361,7 @@ addEventListener('keydown', e => {
   else if (isW4() && code === 'KeyT') nudgeDist(1);
   else if (isW4() && code === 'KeyB') nudgeDist(-1);
   else if (isW4() && code === 'KeyN') toggleThick4();
+  else if (isW4() && code === 'KeyL') setRoofLevel4(((bld().lvl || 0) + 1) % (ROOF_LEVELS + 1));   // 天花板放在第幾層：自動 → 1 → …… → 5
   else if (isW4() && code === 'KeyC') toggleCrouch4();
   else if (isW4() && code === 'KeyI') openBag4();
   else if (isW4() && code === 'KeyP') setHome4(false);
@@ -4349,7 +4377,7 @@ addEventListener('keyup', e => {
 addEventListener('blur', pauseGame);
 function toggleFlash() {
   if (G.p.bat <= 0) toast('🔦 手電筒沒電了，需要電池。');
-  else { G.p.flash = !G.p.flash; Sound.play('click'); makeNoise(3); }
+  else { G.p.flash = !G.p.flash; Sound.play('click'); makeNoise(3); invDirty = true; }
 }
 function releaseE() { if (keys.e && mode === 'play') interactRelease(); keys.e = false; if (G) G.holdLock = false; }
 
@@ -4635,6 +4663,7 @@ function frame(ts) {
   else buildLights();
   if (NET_OK) { Net.tick(dt); NetMon.tick(); }   // 朋友的位置平滑內插、客人跟著房主換世界和時間；怪物同步（netmon.js）
   Sound.music(musicState(), mode === 'play' ? musicIntensity() : 0, mode === 'title' ? 1 : curWorld);
+  if (typeof ambient4 === 'function') ambient4(dt);   // 第四世界：爬高的效果、酸雨的雨聲、寒寂之境的風聲（world4.js）
   Sound.setStatic(mode === 'play' && G.ev.tvOn ? nearVol(Math.hypot(G.p.x - 15, G.p.y - 16)) : 0);
   if (window.Renderer) Renderer.render(dt);
   if (mode === 'play') updateHUD();

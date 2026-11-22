@@ -64,11 +64,15 @@ const roofList4 = () => [...new Set(G.b4.roofs.values())];
 const rampList4 = () => [...new Set(G.b4.ramps.values())];
 // 屋頂可以放在 2、4、6 公尺高（設計師第六次紙條：天花板不一定只能在一片板子的高度），同一格可以好幾層（樓上的地板、再上面的屋頂）。
 // Map 的鍵：2 公尺的是 "x,y"（跟以前一樣），更高的是 "x,y,高度"；roofsAt4 拿這一格所有的屋頂（由低到高）
-const ROOF4_HS = [ROOF4_H, ROOF4_H * 2, ROOF4_H * 3];
+// 設計師第七次紙條：蓋天花板可以選樓層（1～5 層，從你站的那一層往上算），站在天花板上架梯子再蓋下一層，
+// 一路可以蓋到 566 公尺高的天花板 → 高度不再只有三種，G.b4.rhs 記著現在用到的高度（由低到高）
+const ROOF4_MAX = Math.floor((W4_TOP_H - 2) / ROOF4_H) * ROOF4_H, ROOF_LEVELS = 5;
+const roofHs4 = () => G.b4.rhs || (G.b4.rhs = [ROOF4_H]);
+const roofHOk4 = h => h >= ROOF4_H && h <= ROOF4_MAX && Math.abs(h / ROOF4_H - Math.round(h / ROOF4_H)) < 1e-6;
 const roofKey4 = (x, y, h) => (h > ROOF4_H ? x + ',' + y + ',' + h : x + ',' + y);
 const roofH4 = r => r.h || ROOF4_H;
-function roofsAt4(x, y) { const out = []; for (const h of ROOF4_HS) { const r = G.b4.roofs.get(roofKey4(x, y, h)); if (r) out.push(r); } return out; }
-function setRoof4(r) { for (const [x, y] of cells4(r.x, r.y)) G.b4.roofs.set(roofKey4(x, y, roofH4(r)), r); G.b4.ver++; }
+function roofsAt4(x, y) { const out = []; for (const h of roofHs4()) { const r = G.b4.roofs.get(roofKey4(x, y, h)); if (r) out.push(r); } return out; }
+function setRoof4(r) { const hs = roofHs4(), rh = roofH4(r); if (!hs.includes(rh)) { hs.push(rh); hs.sort((a, b) => a - b); } for (const [x, y] of cells4(r.x, r.y)) G.b4.roofs.set(roofKey4(x, y, rh), r); G.b4.ver++; }
 function delRoof4(r) { for (const [x, y] of cells4(r.x, r.y)) { const k = roofKey4(x, y, roofH4(r)); if (G.b4.roofs.get(k) === r) G.b4.roofs.delete(k); } G.b4.ver++; }
 function setRamp4(r) { for (const [x, y] of cells4(r.x, r.y)) G.b4.ramps.set(x + ',' + y, r); G.b4.ver++; }
 function delRamp4(r) { for (const [x, y] of cells4(r.x, r.y)) if (G.b4.ramps.get(x + ',' + y) === r) G.b4.ramps.delete(x + ',' + y); G.b4.ver++; }
@@ -223,6 +227,7 @@ function surf4(x, y, above) {
 function headroom4(x, y, z) {
   let top = Infinity;
   if (G.b4 && G.b4.roofs.size) for (const r of roofsAt4(Math.floor(x), Math.floor(y))) if (z < roofH4(r) - 0.3) { top = Math.max(0, roofH4(r) - 0.04 - 1.8); break; }   // 頭上最低的那一片
+  if (curWorld === 4) top = Math.min(top, W4_TOP_H - 1.8);   // 賣場真正的天花板（2024 studs）
   top = Math.min(top, voxHead5(x, y, z));   // 第五世界：頭上的方塊
   const dk = deckAt(Math.floor(x), Math.floor(y), z);   // 在貨架的某一層裡：頭上是上面那一層的層板
   if (dk && dk.next < Infinity) top = Math.min(top, Math.max(dk.h, dk.next - DECK_BEAM - bodyH(G.p)));
@@ -380,10 +385,32 @@ const tiltOf = d => { const t = ((d % 180) + 180) % 180; return Math.min(t, 180 
 const plankTilt = b => Math.max(tiltOf(b.rx), tiltOf(b.rz));
 const asRoof = (h, b) => h.k === 'plank' && !h.door && plankTilt(b) >= 60;   // 倒到 60° 以上就是屋頂
 const asRamp = (h, b) => h.k === 'plank' && !h.door && plankTilt(b) >= 30 && plankTilt(b) < 60;   // 30°～45° 是斜坡（設計師：45° 可以當梯子使用）
+// 柱子（6×6 格的大水泥柱）的格子
+let pillarSet4 = null;
+function pillarAt4(x, y) {
+  if (curWorld !== 4) return false;
+  if (!pillarSet4) { pillarSet4 = new Set(); for (const [px, py, n] of W4MAP.pillars) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) pillarSet4.add((px + i) + ',' + (py + j)); }
+  return pillarSet4.has(x + ',' + y);
+}
+// 蓋天花板的樓層（設計師第七次紙條：有按鈕，點了輸入 1～5 就放到對應的那一層）：0 是自動（照旁邊的牆多高）
+function setRoofLevel4(n) {
+  if (!G.hand || G.hand.k !== 'plank') return;
+  const b = bld(); b.lvl = clamp(n | 0, 0, ROOF_LEVELS);
+  if (b.lvl && !asRoof(G.hand, b)) { b.rx = 90; b.rz = 0; }   // 選了樓層：板子自動躺平當天花板
+  Sound.play('click'); invDirty = true;
+  const floor = Math.floor(((G.p.z || 0) + 0.2) / ROOF4_H) * ROOF4_H;
+  toast(b.lvl ? `🏠 天花板放在第 ${b.lvl} 層（離你站的地方 ${b.lvl * ROOF4_H} 公尺高${floor ? `，離地 ${floor + b.lvl * ROOF4_H} 公尺` : ''}）。` : '🏠 天花板的高度：自動（照旁邊的牆疊多高）。');
+}
+function askRoofLevel4() {
+  if (!G.hand || G.hand.k !== 'plank' || G.hand.door) { toast('🏠 拿著板子才能選天花板要放在第幾層。'); return; }
+  const el = $('lvl4');
+  if (!el) return;
+  el.classList.toggle('hidden');
+}
 function holdThing(h) {
   G.hand = h;
   if (h.k === 'plank') markPlank(h.tier);   // 燈泡圖鑑也記板子
-  const b = bld(); b.rx = b.rz = 0; b.ry = 0; b.thick = false; b.dist = h.k === 'furn' ? Math.max(1.4, Math.max(h.f.w, h.f.h) * 0.75 + 0.9) : 1.6;
+  const b = bld(); b.rx = b.rz = 0; b.ry = 0; b.thick = false; b.lvl = 0; if ($('lvl4')) $('lvl4').classList.add('hidden'); b.dist = h.k === 'furn' ? Math.max(1.4, Math.max(h.f.w, h.f.h) * 0.75 + 0.9) : 1.6;
   invDirty = true;
   if (!G.ev.buildTip && h.k !== 'item') {
     G.ev.buildTip = 1;
@@ -423,15 +450,19 @@ function ghost4() {
         if (i < PLANK4) { const s = stackAt('h', x + i, y + j); if (s) top = Math.max(top, stackH(s[0])); }
         if (j < PLANK4) { const s = stackAt('v', x + i, y + j); if (s) top = Math.max(top, stackH(s[0])); }
       }
-      if ((p.z || 0) > ROOF4_H - 0.2) top = Math.max(top, (Math.floor(((p.z || 0) + 0.2) / ROOF4_H) + 1) * ROOF4_H);
-      const rh = Math.min(top, ROOF4_HS[ROOF4_HS.length - 1]);
+      const floor = Math.floor(((p.z || 0) + 0.2) / ROOF4_H) * ROOF4_H;   // 你站的那一層的高度
+      if ((p.z || 0) > ROOF4_H - 0.2) top = Math.max(top, floor + ROOF4_H);
+      if (b.lvl > 0) top = floor + b.lvl * ROOF4_H;   // 選了樓層（1～5）：從你站的那一層往上數
+      const rh = Math.min(top, ROOF4_MAX);
       const g = { kind: 'roof', x, y, h: rh, ok: true, tilt: 90 - plankTilt(b), tax: tiltOf(b.rx) >= tiltOf(b.rz) ? 'x' : 'z' };
       for (const [cx, cy] of cells4(x, y)) {
         const r = inMap(cx, cy) ? roomGrid[cy][cx] : null;
-        if (!inMap(cx, cy) || tiles[cy][cx] !== 1) { g.ok = false; g.why = '屋頂要放在地板上方'; break; }
+        if (!inMap(cx, cy) || (tiles[cy][cx] !== 1 && !pillarAt4(cx, cy))) { g.ok = false; g.why = '屋頂要放在地板上方'; break; }
         if (r && r.ceil) { g.ok = false; g.why = '這裡本來就有天花板了'; break; }
         if (G.b4.roofs.has(roofKey4(cx, cy, rh))) { g.ok = false; g.why = `這裡 ${rh} 公尺高的地方已經有屋頂了（牆再疊高一點，屋頂就會放在更上面）`; break; }
       }
+      // 一半插進柱子裡沒關係（設計師：把板子一半插柱子固定），但不能整片都在柱子裡
+      if (g.ok && cells4(x, y).every(([cx, cy]) => tiles[cy][cx] !== 1)) { g.ok = false; g.why = '整片都在柱子裡了'; }
       return g;
     }
     if (asRamp(h, b)) return ghostRamp4(px, py, b);
@@ -471,6 +502,14 @@ function ghost4() {
   const g = { kind: 'furn', x, y, w, h: hh, side: rotSide(f.side0, q), yaw: b.ry - q * 90, ok: true };
   if (f.type !== 'lad4') { g.tx = b.rx % 360; g.tz = b.rz % 360; }   // 繞 X、Z 轉：斜著放、橫著放（設計師第六次紙條：所有物品都可以直斜橫；佔的格子不變）
   if (f.type === 'lad4') { g.side = rotSide(Math.abs(fx) > Math.abs(fy) ? (fx > 0 ? 'w' : 'e') : fy > 0 ? 'n' : 's', q); g.yaw = 0; g.lean = f.lean ?? 15; }   // 長鋁梯：正面朝你，往你看的方向靠
+  // 設計師第七次紙條：站在天花板上也可以架梯子，爬上去再蓋下一層 → 長鋁梯記著腳的高度（f.z），架在樓上的不佔地上的格子
+  const up = f.type === 'lad4' && (p.z || 0) > 1.5 ? Math.round(surf4(x + 0.5, y + 0.5, (p.z || 0) + 0.3) * 100) / 100 : 0;
+  if (f.type === 'lad4' && (p.z || 0) > 1.5) {
+    if (!inMap(x, y) || Math.abs(up - (p.z || 0)) > 0.6) { g.ok = false; g.why = '梯子的腳要放在你站的這一層上'; return g; }
+    if (FURN.some(o => o !== f && !o.held && o.type === 'lad4' && o.x === x && o.y === y && Math.abs((o.z || 0) - up) < 1)) { g.ok = false; g.why = '那裡已經有梯子了'; return g; }
+    g.z = up;
+    return g;
+  }
   const solidF = f.solid !== false;
   for (let ty = y; ty < y + hh && g.ok; ty++) for (let tx = x; tx < x + w; tx++) {
     if (!inMap(tx, ty) || tiles[ty][tx] !== 1 || (solidF && isSolid(tx, ty))) { g.ok = false; g.why = '要放在空的地板上'; break; }
@@ -598,7 +637,8 @@ function place4() {
     const f = h.f;
     Object.assign(f, { x: g.x, y: g.y, w: g.w, h: g.h, side: g.side, yaw: g.yaw || 0, tx: g.tx || 0, tz: g.tz || 0 });
     if (g.lean !== undefined) f.lean = g.lean;
-    addFurn4(f); net4('put', { id: f.id, x: f.x, y: f.y, w: f.w, h: f.h, side: f.side, yaw: f.yaw, lean: f.lean, tx: f.tx || undefined, tz: f.tz || undefined });
+    f.z = g.z || 0;
+    addFurn4(f); net4('put', { id: f.id, x: f.x, y: f.y, w: f.w, h: f.h, side: f.side, yaw: f.yaw, lean: f.lean, z: f.z || undefined, tx: f.tx || undefined, tz: f.tz || undefined });
     Sound.play('place'); makeNoise(3);
   }
   G.hand = null; invDirty = true;
@@ -615,7 +655,7 @@ function liftFurn4(f) {
 function addFurn4(f) {
   f.held = false;
   f.room = roomGrid[f.y][f.x];
-  if (f.solid !== false) for (let y = f.y; y < f.y + f.h; y++) for (let x = f.x; x < f.x + f.w; x++) { furnGrid[y][x] = f; solid[y][x] = true; }
+  if (f.solid !== false && !(f.z > 0)) for (let y = f.y; y < f.y + f.h; y++) for (let x = f.x; x < f.x + f.w; x++) { furnGrid[y][x] = f; solid[y][x] = true; }
   b4Changed();
   if (window.Renderer && Renderer.furn4) Renderer.furn4(f);
 }
@@ -690,12 +730,32 @@ function refillPiles4(first) {
     f.count = first ? max : Math.min(max, (f.count || 0) + (f.tier === 1 ? randi(3, 6) : randi(1, 2)));
   }
 }
+// 手上的東西可以放回哪裡：{ label, act }（沒有就 null）
+function backSpot4(h) {
+  const p = G.p, near = f => !f.held && rectDist(p.x, p.y, f) < 1.3 && Math.abs((p.z || 0)) < 0.5;
+  if (h.k === 'plank' && !h.door) {
+    const f = FURN.find(o => o.type === 'plankpile' && o.tier === h.tier && near(o.on ? FURN_BY_ID[o.on] || o : o));
+    if (f) return { label: `放回${PLANKS[f.tier].name}堆`, act: () => { f.count = (f.count || 0) + 1; net4('pile', { id: f.id, count: f.count }); G.hand = null; invDirty = true; Sound.play('place'); if (window.Renderer && Renderer.furn4) Renderer.furn4(f); } };
+  }
+  if (h.k === 'furn' && h.f.type === 'lad4') {
+    const rack = FURN.find(o => o.type === 'rack4' && !(o.lad > 0) && near(o));
+    if (rack) return { label: '把梯子放回貨架', act: () => {
+      const f = h.f, i = FURN.indexOf(f);
+      if (i >= 0) FURN.splice(i, 1); delete FURN_BY_ID[f.id];
+      rack.lad = 1; net4('lad4', { id: rack.id, n: 1, back: f.id });
+      G.hand = null; invDirty = true; Sound.play('place'); b4Changed();
+      if (window.Renderer && Renderer.furn4) { Renderer.furn4(f, true); Renderer.furn4(rack); }
+    } };
+  }
+  return null;
+}
 function takeFromPile4(f) {
   if (G.hand) { toast('✋ 手上已經拿著東西了，先放下來。'); return; }
   if (!(f.count > 0)) { toast(`${PLANKS[f.tier].name}堆空了，明天早上會再補。`); Sound.play('empty'); return; }
   f.count--; net4('pile', { id: f.id, count: f.count });
   holdThing({ k: 'plank', tier: f.tier });
   if (f.special && !f.count) dropSpecialPile4(f);
+  else if (f.on && window.Renderer && Renderer.furn4) Renderer.furn4(f);   // 貨架上那一疊變矮
   Sound.play('pickup');
   if (G.tutorial4 === 1) G.tutorial4 = 2;
 }
@@ -823,30 +883,30 @@ function ladders4() {
       // 長鋁梯（設計師第六次紙條：梯子要自己架、什麼時候想爬都可以）：腳在這一格的中間，往後面（v 變大的方向）斜 lean 度；
       // 爬到哪個高度，前面有可以站的地方（貨架的某一層、屋頂、家具上面）就可以跨過去
       const lean = (f.lean ?? 15) * Math.PI / 180, foot = at(0.5, 0.5), b = at(0.5, 1.5);
-      s = { base: at(0.5, -0.45), edge: foot, foot, dx: b.x - foot.x, dy: b.y - foot.y, tan: Math.tan(lean), top: LAD4_LEN * Math.cos(lean), free: true, name: '梯子' };
+      s = { base: at(0.5, -0.45), edge: foot, foot, dx: b.x - foot.x, dy: b.y - foot.y, tan: Math.tan(lean), z0: f.z || 0, top: (f.z || 0) + LAD4_LEN * Math.cos(lean), free: true, name: '梯子' };
     }
-    if (s && walkable(s.base.x, s.base.y)) out.push({ f, ...s });
+    if (s && (s.z0 > 0 || walkable(s.base.x, s.base.y))) out.push({ z0: 0, f, ...s });
   }
   return out;
 }
 let ladderCache4 = null;
 const ladderList4 = () => (ladderCache4 && ladderCache4.g === G && ladderCache4.ver === G.b4.ver ? ladderCache4.list : (ladderCache4 = { g: G, ver: G.b4.ver, list: ladders4() }).list);
 // 長鋁梯上高度 z 的地方：人抓著梯子的位置（k = -0.32）、跨過去站的位置（k = 0.75）
-const ladAt4 = (L, z, k) => ({ x: L.foot.x + L.dx * (z * L.tan + k), y: L.foot.y + L.dy * (z * L.tan + k) });
+const ladAt4 = (L, z, k) => ({ x: L.foot.x + L.dx * ((z - L.z0) * L.tan + k), y: L.foot.y + L.dy * ((z - L.z0) * L.tan + k) });
 // 在梯子上高度 z 的地方，前面可以跨過去站的地方：貨架的某一層、家具的頂面、屋頂和斜坡。
 // 要比現在的高度低一點點到低 0.9 公尺以內（太低就是往下跳了）；回傳 { x, y, h, low（要蹲著才進得去）}
 function ladStep4(L, z) {
   const o = ladAt4(L, z, 0.75), tx = Math.floor(o.x), ty = Math.floor(o.y);
   if (!inMap(tx, ty) || tiles[ty][tx] !== 1) return null;
-  const ok = h => h > 0.5 && h <= z + 0.25 && h >= z - 0.9;
-  const f = furnGrid[ty][tx];
+  const ok = h => h > L.z0 + 0.5 && h <= z + 0.25 && h >= z - 0.9;
+  const f = L.z0 > 0 ? null : furnGrid[ty][tx];
   if (f && f !== L.f) {
     const D = FURN_DECKS[f.type];
     if (D) { for (let i = D.length - 1; i >= 0; i--) if (ok(D[i])) return { ...o, h: D[i], low: (D[i + 1] ?? Infinity) - DECK_BEAM - D[i] < 1.8 }; return null; }
     const top = tileTopH(tx, ty);
     return top !== null && ok(top) ? { ...o, h: top } : null;
   }
-  if (isSolid(tx, ty)) return null;
+  if (!L.z0 && isSolid(tx, ty)) return null;
   const h = surf4(o.x, o.y, z - 0.2);
   return ok(h) ? { ...o, h } : null;
 }
@@ -860,10 +920,10 @@ function climbTargets4(cands) {
   }
   for (const L of ladderList4()) {
     const db = Math.hypot(L.base.x - p.x, L.base.y - p.y);
-    if (p.z < 0.3 && db < 1.1 && lookAngle(L.edge.x, L.edge.y) < 1.0) { cands.push({ d: db - 1.0, id: 'climb:' + L.f.id, label: L.free ? '抓住梯子' : `抓住梯子（爬上${L.name}）`, sub: '按 E 抓住，再自己往上爬', hold: 0, action: () => startClimb4(L, true) }); continue; }
+    if (Math.abs(p.z - L.z0) < 0.3 && db < 1.1 && lookAngle(L.edge.x, L.edge.y) < 1.0) { cands.push({ d: db - 1.0, id: 'climb:' + L.f.id, label: L.free ? '抓住梯子' : `抓住梯子（爬上${L.name}）`, sub: '按 E 抓住，再自己往上爬', hold: 0, action: () => startClimb4(L, true) }); continue; }
     if (L.free) {
       // 站在梯子靠著的地方（貨架的某一層、屋頂）：看著梯子按 E 抓住，再爬下去（或繼續往上爬）
-      if (p.z < 0.5 || p.z > L.top + 0.3) continue;
+      if (p.z < L.z0 + 0.5 || p.z > L.top + 0.3) continue;
       const o = ladAt4(L, Math.min(p.z, L.top), 0.75), dt = Math.hypot(o.x - p.x, o.y - p.y);
       if (dt < 1.4 && lookAngle(L.base.x, L.base.y) < 1.2) cands.push({ d: dt - 0.6, id: 'climbdown:' + L.f.id, label: '抓住梯子', sub: '按 E 抓住，再自己往上或往下爬', hold: 0, action: () => startClimb4(L, false) });
       continue;
@@ -879,7 +939,7 @@ function startClimb4(L, up) {
   const p = G.p;
   if (p.pose) standUp();
   const face = Math.atan2(L.edge.y - L.base.y, L.edge.x - L.base.x);
-  const z = up ? Math.min(p.z || 0, L.top) : L.free ? Math.min(p.z || 0, L.top) : L.top, at = ladderLine4(L, z);
+  const z = up ? clamp(p.z || 0, L.z0, L.top) : L.free ? clamp(p.z || 0, L.z0, L.top) : L.top, at = ladderLine4(L, z);
   ride = { climb: { L, face, z, step: 0 } };
   Object.assign(p, { x: at.x, y: at.y, z, vz: 0, face });
   Sound.play('step');
@@ -905,13 +965,13 @@ function updateClimb4(dt, fwd) {
   }
   if (Math.abs(fwd) > 0.15) {
     const oz = c.z;
-    c.z = clamp(c.z + Math.sign(fwd) * Math.min(1, Math.abs(fwd) * 1.4) * CLIMB_SPEED * dt, 0, L.top);
+    c.z = clamp(c.z + Math.sign(fwd) * Math.min(1, Math.abs(fwd) * 1.4) * CLIMB_SPEED * dt, L.z0, L.top);
     if (Math.floor(oz / 0.45) !== Math.floor(c.z / 0.45)) Sound.play('step', 0.5);
     if (fwd > 0 && c.z >= L.top) {   // 爬到頂了：前面有地方站就跨過去
       if (L.free) { const st = ladStep4(L, c.z); if (st) { ladStepOff4(st); return; } }
       else { c.from = { ...ladderLine4(L), z: L.top }; c.to = { x: L.onto.x, y: L.onto.y, z: L.top }; c.step = 0.001; return; }
     }
-    if (fwd < 0 && c.z <= 0) { ride = null; Object.assign(p, { x: L.base.x, y: L.base.y, z: 0, vz: 0 }); return; }   // 爬到底：下來
+    if (fwd < 0 && c.z <= L.z0) { ride = null; Object.assign(p, { x: L.base.x, y: L.base.y, z: L.z0, vz: 0 }); return; }   // 爬到底：下來
   }
   const at = ladderLine4(L, c.z);
   Object.assign(p, { x: at.x, y: at.y, z: c.z, vz: 0, face: c.face });
@@ -1047,7 +1107,11 @@ function addTargets4(cands) {
   const p = G.p;
   if (handBig()) {
     const h = G.hand, g = ghost4(), name = h.k === 'plank' ? plankName(h.tier, h.door) + (asRoof(h, bld()) ? '（屋頂）' : asRamp(h, bld()) ? '（斜坡）' : g && g.lv ? `（疊在第 ${g.lv + 1} 層）` : '') : h.f.name;
-    cands.push({ d: -9, id: 'place4', label: `放下${name}`, sub: g && g.ok ? '綠色的預覽就是放下的位置' : `❌ ${(g && g.why) || '這裡放不下'}`, hold: 0, action: place4 });
+    // 設計師第七次紙條：拿出來的東西都可以放回去 → 板子放回同一種的板材堆（貨架上）、長鋁梯放回貨架：站在旁邊按住 E
+    const back = backSpot4(h);
+    const sub = g && g.ok ? '綠色的預覽就是放下的位置' : `❌ ${(g && g.why) || '這裡放不下'}`;
+    if (back) cands.push({ d: -9, id: 'place4', label: `放下${name}`, sub: `按住 E：${back.label}・${sub}`, hold: 0.5, tap: place4, action: back.act });
+    else cands.push({ d: -9, id: 'place4', label: `放下${name}`, sub, hold: 0, action: place4 });
     return;
   }
   const look = (cx, cy, rd, max) => rd <= max && (rd < 0.5 || lookAngle(cx, cy) < 1.0);
@@ -1083,10 +1147,11 @@ function addTargets4(cands) {
     if (f.held) continue;
     const rd = rectDist(p.x, p.y, f);
     if (rd > 1.25) continue;
+    if (f.type === 'lad4' && Math.abs((f.z || 0) - (p.z || 0)) > 1.6) continue;   // 架在別的樓層的梯子拿不到
     const a = Math.min(lookAngle(clamp(p.x, f.x, f.x + f.w), clamp(p.y, f.y, f.y + f.h)), lookAngle(f.x + f.w / 2, f.y + f.h / 2));
     if (a > 1.0 && rd > 0.35) continue;
     const d = rd + a * 0.9, spec = FURN4[f.type] || {};
-    if (f.type === 'plankpile') { cands.push({ d: d - 0.2, id: 'pile:' + f.id, label: `拿一片${PLANKS[f.tier].name}`, sub: `${PLANKS[f.tier].name}堆：剩 ${f.count || 0} 片`, hold: 0, action: () => takeFromPile4(f) }); continue; }
+    if (f.type === 'plankpile') { if (f.on && (p.z || 0) > 0.5) continue; cands.push({ d: d - 0.2, id: 'pile:' + f.id, label: `拿一片${PLANKS[f.tier].name}`, sub: `${f.on ? '貨架上的' : ''}${PLANKS[f.tier].name}堆：剩 ${f.count || 0} 片`, hold: 0, action: () => takeFromPile4(f) }); continue; }
     if (f.type === 'rack4' && f.lad > 0 && !G.hand && (p.z || 0) < 0.3) cands.push({ d: d + 0.25, id: 'lad:' + f.id, label: '拿長鋁梯', sub: '貨架最下層放著一把梯子：按住 E 拿出來', hold: 0.5, action: () => takeLadder4(f) });
     if (!f.move) continue;   // 搬不動的家具（櫃台、貨架）照 game.js 原本的搜索
     const lift = () => takeFurn4(f), sub = '按住 E：拿起來搬走';
@@ -1319,6 +1384,27 @@ function update4(dt) {
   for (const w of G.b4.list) if (w.hitT > 0) w.hitT -= dt;
 }
 
+// 設計師第七次紙條（照 3008）：往上爬到 350 studs（98 公尺）畫面隨高度變暗、視野變窄、有心跳聲；1000、1900 studs 背景音樂會變；
+// 1742 studs 有一層懸浮的金屬網格；2024 studs 撞到天花板。另外：酸雨有雨聲、寒寂之境有呼嘯的風聲。
+// game.js 的 frame 每一幀呼叫（不在玩的時候把聲音關掉）
+function ambient4(dt) {
+  const on = G && curWorld === 4 && (mode === 'play' || mode === 'modal');
+  if (!on) { if (G) G.altFx = 0; Sound.setAlt(0); Sound.setWind(0); if (!G || curWorld !== 5) Sound.setRain(0); return; }
+  const p = G.p, z = p.z || 0;
+  Sound.setRain(acidOn4() ? (sheltered4(p.x, p.y) ? 0.5 : 1) : 0);
+  Sound.setWind(G.cold ? 0.85 : 0);
+  Sound.setAlt(z >= W4_MUSIC_H[1] ? 2 : z >= W4_MUSIC_H[0] ? 1 : 0);
+  const k = z > W4_DIM_H ? clamp(0.22 + (z - W4_DIM_H) / (W4_TOP_H - W4_DIM_H) * 0.72, 0, 0.94) : 0;
+  G.altFx = k;
+  if (k > 0 && mode === 'play') {
+    G.altBeat = (G.altBeat || 0) - dt;
+    if (G.altBeat <= 0) { G.altBeat = 1.15 - 0.6 * k; Sound.play('heartbeat', 0.45 + 0.55 * k); }
+    if (!G.ev.altTip) { G.ev.altTip = 1; toast(`🫀 你爬到 ${Math.round(z)} 公尺高了（350 studs）……越往上越暗、看得到的範圍越小，心跳得好大聲。`, 'warn'); }
+  }
+  if (z > W4_GRID_H - 6 && !G.ev.gridTip) { G.ev.gridTip = 1; toast('🕸️ 頭上有一層懸浮的金屬網格（1742 studs），什麼都沒有撐著它。', 'warn'); }
+  if (z > W4_TOP_H - 2.2 && !G.ev.topTip) { G.ev.topTip = 1; toast('⬆ 頭撞到天花板了（2024 studs）。賣場真的有天花板，只是在 566 公尺高的地方。', 'good'); }
+}
+
 // ====================================================================
 // 天氣：紅月（第 5、11 夜）、寒寂之境（第 3、6、9、12 天）、酸雨（每局隨機 2～3 次，開新遊戲時排好）
 // ====================================================================
@@ -1462,6 +1548,8 @@ function overlays4() {
   $('milkfx').style.opacity = clamp(G.milk || 0, 0, 1).toFixed(3);
   $('coldfx').style.opacity = (G.frost || 0).toFixed(3);
   $('timefx').style.opacity = (G.timeFlash || 0).toFixed(3);
+  const ak = G.altFx || 0, af = $('altfx');
+  if (af) { af.style.opacity = Math.min(1, ak * 1.7).toFixed(3); af.style.setProperty('--k', ak.toFixed(3)); }
 }
 function drawMinimap4(c) {
   // 自己蓋的牆（玻璃是淡藍色）、屋頂、地上的板子、板材堆、家、找到的神秘店員
@@ -1494,11 +1582,17 @@ function bindBuildButtons() {
       else if (k === 'far') nudgeDist(1);
       else if (k === 'near') nudgeDist(-1);
       else if (k === 'thick') toggleThick4();
+      else if (k === 'lvl') askRoofLevel4();
       else if (k === 'put') place4();
     });
     const up = () => b.classList.remove('down');
     b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up);
   }
+  for (const b of document.querySelectorAll('#lvl4 button')) b.addEventListener('pointerdown', e => {
+    e.preventDefault(); e.stopPropagation();
+    if (mode !== 'play' || !G) return;
+    setRoofLevel4(+b.dataset.n); $('lvl4').classList.add('hidden');
+  });
   const tap = (id, fn) => $(id).addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); Sound.init(); if (mode === 'play' && G && isW4()) fn(); });
   tap('thome', () => setHome4(false));
   tap('tbag', openBag4);
@@ -1577,7 +1671,7 @@ function save4() {
     walls: [...b.list].sort((a, c) => a.lv - c.lv).map(w => [w.free ? 'f' : w.o, w.free ? Math.round(w.cx * 100) / 100 : w.x, w.free ? Math.round(w.cy * 100) / 100 : w.y, w.tier, Math.round(Math.min(w.hp, 9999)), w.door ? 1 : 0, w.open ? 1 : 0, w.free ? Math.round(w.ang * 180 / Math.PI) : 0, w.lean || 0, w.lv, w.pid, w.plies && w.plies.length ? w.plies : undefined]),   // 最後是加厚的那幾層（每一層是哪一級的板子）
     sq: 2, ramps: rampList4().map(r => [r.x, r.y, r.dir, r.lv, r.tier, Math.round(Math.min(r.hp, 9999))]),
     roofs: roofList4().map(r => [r.x, r.y, r.tier, Math.round(Math.min(r.hp, 9999)), r.tilt || 0, r.tax || 'x', roofH4(r)]),   // 最後是高度（2、4、6 公尺；舊存檔沒有就是 2）
-    furn: FURN.filter(f => f.move || f.type === 'plankpile' || f.fuel || f.on || f.lad !== undefined).map(f => ({ id: f.id, x: f.x, y: f.y, w: f.w, h: f.h, side: f.side, yaw: f.yaw || undefined, tx: f.tx || undefined, tz: f.tz || undefined, lad: f.lad, lean: f.lean, held: f.held ? 1 : 0, fuel: f.fuel, on: f.on ? 1 : 0, count: f.count, sp: f.special ? [f.tier] : undefined, dyn: f.dyn || undefined })),   // dyn：第五世界自己在工作台做的家具
+    furn: FURN.filter(f => f.move || f.type === 'plankpile' || f.fuel || f.on || f.lad !== undefined).map(f => ({ id: f.id, x: f.x, y: f.y, w: f.w, h: f.h, side: f.side, yaw: f.yaw || undefined, tx: f.tx || undefined, tz: f.tz || undefined, lad: f.lad, lean: f.lean, z: f.z || undefined, held: f.held ? 1 : 0, fuel: f.fuel, on: f.on ? 1 : 0, count: f.count, sp: f.special ? [f.tier] : undefined, dyn: f.dyn || undefined })),   // dyn：第五世界自己在工作台做的家具
     hand: G.hand ? (G.hand.k === 'furn' ? { k: 'furn', id: G.hand.f.id } : G.hand) : null,
     home: G.home, loose: G.loose4.map(l => [Math.round(l.x * 10) / 10, Math.round(l.y * 10) / 10, l.tier, l.door ? 1 : 0]),
     wx: G.wx4, merchant: { x: MERCHANT_POS.x, y: MERCHANT_POS.y }, mv: isW5() ? W5_MAP_VER : W4_MAP_VER,
@@ -1596,7 +1690,7 @@ function loadBuild4(s) {
     else setWall({ o, x, y, ...base });
   }
   for (const [x, y, dir, lv, tier, hp] of s.ramps || []) if (PLANKS[tier] && RAMP_DIRS[dir]) setRamp4({ x, y, dir, lv, tier, hp: tier === GLASS_TIER ? Infinity : hp });
-  for (const [x, y, tier, hp, tilt, tax, rh] of s.roofs || []) if (PLANKS[tier]) setRoof4({ x, y, h: ROOF4_HS.includes(rh) ? rh : ROOF4_H, tier, hp: tier === GLASS_TIER ? Infinity : hp, tilt: tilt || 0, tax: tax || 'x' });
+  for (const [x, y, tier, hp, tilt, tax, rh] of s.roofs || []) if (PLANKS[tier]) setRoof4({ x, y, h: roofHOk4(rh) ? rh : ROOF4_H, tier, hp: tier === GLASS_TIER ? Infinity : hp, tilt: tilt || 0, tax: tax || 'x' });
   loadFurn4(s);
   return [];
 }
@@ -1628,7 +1722,7 @@ function loadFurn4(s) {
     if (!f && sf.sp) { f = { id: sf.id, type: 'plankpile', name: '板材堆', w: 1, h: 1, tier: sf.sp[0], special: true }; FURN.push(f); FURN_BY_ID[f.id] = f; }
     if (!f && sf.dyn && FURN4[sf.dyn]) { f = { id: sf.id, type: sf.dyn, name: FURN4[sf.dyn].name, x: sf.x, y: sf.y, w: sf.w || 1, h: sf.h || 1, side: 's', move: true, dyn: sf.dyn, held: true }; if (FURN4[sf.dyn].solid === false) f.solid = false; FURN.push(f); FURN_BY_ID[f.id] = f; }
     if (!f) continue;
-    if (f.move || f.special) { liftFurn4(f); Object.assign(f, { x: sf.x, y: sf.y, w: sf.w || f.w, h: sf.h || f.h, side: sf.side || f.side, yaw: sf.yaw || 0, tx: sf.tx || 0, tz: sf.tz || 0 }); if (!sf.held) addFurn4(f); }
+    if (f.move || f.special) { liftFurn4(f); Object.assign(f, { x: sf.x, y: sf.y, w: sf.w || f.w, h: sf.h || f.h, side: sf.side || f.side, yaw: sf.yaw || 0, tx: sf.tx || 0, tz: sf.tz || 0, z: sf.z > 0 ? sf.z : 0 }); if (!sf.held) addFurn4(f); }
     if (sf.fuel) f.fuel = sf.fuel.filter(q => ITEMS[q.id]);
     if (sf.on !== undefined) f.on = !!sf.on;
     if (sf.count !== undefined) f.count = sf.count;
@@ -1772,6 +1866,45 @@ function spawnIdleStaff4() {
     if (e) { e.idle = true; e.spawn = 0; e.face = Math.random() * Math.PI * 2; }
   }
 }
+// 設計師第七次紙條：SCP-3008-2 和 Hubert 都是「跳到人頭上攻擊」。普通的晚上跳 4～6 公尺，血月（紅月）跳 12～13 公尺。
+// 看到你、距離在跳得到的範圍內：先蹲 0.4 秒（看得出來要跳了），再一個拋物線跳到你「起跳那時候」站的地方（會稍微修正），
+// 落地時你還在 1.2 公尺內就被踩到；所以看到牠蹲下就往旁邊跑。隔著牆不跳。回傳 true：這一幀牠在跳（不做別的事）
+const LEAP4 = { near: [4, 6], blood: [12, 13] };
+function leap4(e, dt, dmg, name) {
+  const p = G.p, d = Math.hypot(e.x - p.x, e.y - p.y);
+  e.leapCd = Math.max(0, (e.leapCd || 0) - dt);
+  if (e.leap) {
+    const L = e.leap;
+    if (L.wind > 0) { L.wind -= dt; e.z = 0; e.face = Math.atan2(p.y - e.y, p.x - e.x); if (L.wind <= 0) { L.x0 = e.x; L.y0 = e.y; L.tx = p.x; L.ty = p.y; Sound.play('whoosh', nearVol(d)); } return true; }
+    L.t += dt;
+    const k = Math.min(1, L.t / L.dur);
+    // 飛到一半以前還會跟著你修正一點
+    if (k < 0.5) { L.tx += (p.x - L.tx) * Math.min(1, dt * 1.5); L.ty += (p.y - L.ty) * Math.min(1, dt * 1.5); }
+    const nx = L.x0 + (L.tx - L.x0) * k, ny = L.y0 + (L.ty - L.y0) * k;
+    if (!isWall(Math.floor(nx), Math.floor(ny))) { e.x = nx; e.y = ny; }
+    e.z = Math.sin(k * Math.PI) * L.h;
+    if (k >= 1) {
+      e.z = 0; e.leap = null; e.leapCd = 3.2; e.landT = 0.5;
+      const dd = Math.hypot(e.x - p.x, e.y - p.y);
+      Sound.play('stompBig', nearVol(dd)); G.shake = Math.max(G.shake, dd < 6 ? 0.35 : 0.08); puff(e.x, e.y, [120, 120, 120], 10, 0.2);
+      if (!e.rm && dd < 1.25 && p.inv <= 0 && mode === 'play') {
+        damage(dmg, 10); p.inv = 1.2; p.stunT = Math.max(p.stunT || 0, 0.4);
+        toast(`${name}跳到你頭上！`, 'warn');
+        const a = Math.atan2(p.y - e.y, p.x - e.x) || 0; move(p, Math.cos(a) * 0.9, Math.sin(a) * 0.9, PLAYER_R);
+      } else if (!e.rm && dd < 4 && !G.ev.leapDodge) { G.ev.leapDodge = 1; toast('⤴ 躲開了！看到牠蹲下來就往旁邊跑，牠會跳到你剛剛站的地方。', 'good'); }
+    }
+    return true;
+  }
+  e.landT = Math.max(0, (e.landT || 0) - dt);
+  const [lo, hi] = G.ev.blood ? LEAP4.blood : LEAP4.near;
+  if (e.spawn <= 0 && e.leapCd <= 0 && !e.pose && d > 2.2 && d <= hi && (p.z || 0) < 9 && seesPlayer4(e, hi + 1, 1.6) && !wallBetweenPts4(e.x, e.y, p.x, p.y)) {
+    e.leap = { wind: 0.4, t: 0, dur: 0.5 + d * 0.045, h: Math.max(1.6, d * 0.4) + (p.z || 0), x0: e.x, y0: e.y, tx: p.x, ty: p.y, lo };
+    Sound.play('hubertRaise', nearVol(d) * 0.8);
+    if (!G.ev.leapTip) { G.ev.leapTip = 1; toast(`${name}蹲下來了……牠要跳到你頭上！往旁邊跑！`, 'warn'); }
+    return true;
+  }
+  return false;
+}
 function updateStaff(e, dt) {
   const p = G.p, n = diffN(), d = Math.hypot(e.x - p.x, e.y - p.y);
   e.cd = Math.max(0, e.cd - dt); e.stepT += dt;
@@ -1784,6 +1917,7 @@ function updateStaff(e, dt) {
     return;
   }
   e.look = null;
+  if (leap4(e, dt, 17 + n * 0.15, '👔 店員')) return;
   if (seesPlayer4(e, 12)) {
     if (e.state !== 'chase') {
       e.state = 'chase';
@@ -1933,19 +2067,14 @@ function friendCall4() {
   toast(`👥 你聽到朋友的聲音，從「${zoneName(m.x, m.y)}」那邊傳來：「喂——我在這裡！快過來！」……可是你在這裡沒有朋友。`, 'warn');
 }
 
-// ---------- Hubert：黑色的胖蜘蛛（照設計圖），專門拆房子。爬到你的家，用鐵管一下一下敲爛板子（玻璃除外）；你在 6 格內被看到時舉起鐵管往地上砸，震波擴散 4 格（跳起來就不會被震到） ----------
+// ---------- Hubert：黑色的胖蜘蛛（照設計圖），專門拆房子。爬到你的家，一下一下踹爛板子（玻璃除外）；設計師第七次紙條：沒有鐵管，整隻發著紅光，看到你就跳到你頭上（leap4） ----------
 function updateHubert(e, dt) {
   const p = G.p, n = diffN(), d = Math.hypot(e.x - p.x, e.y - p.y);
   e.cd = Math.max(0, e.cd - dt); e.smashCd = Math.max(0, e.smashCd - dt); e.hum += dt;
   if (inBeam(e) && !G.ev.hubertFlashTip && d < 9) { G.ev.hubertFlashTip = 1; toast('🕷️ 手電筒對 Hubert 沒用（牠黑色的硬殼會把光吸掉）！聖水槍傷害 2 倍、鞭炮也有效。', 'warn'); }
   if (e.pose) return;
-  // 判決：舉起鐵管（1 秒）往地上砸
-  if (e.raise > 0) {
-    e.raise -= dt;
-    if (e.raise <= 0) { G.waves4.push({ x: e.x, y: e.y, r: 0, max: 4, hit: false }); Sound.play('stompBig', nearVol(d) * 1.2); G.shake = Math.max(G.shake, 0.5); e.cd = 4.5; }
-    return;
-  }
-  if (d < 6 && e.cd <= 0 && e.spawn <= 0 && seesPlayer4(e, 6, 1.6)) { e.raise = 1.0; Sound.play('hubertRaise', nearVol(d)); if (!G.ev.hubertWaveTip) { G.ev.hubertWaveTip = 1; toast('🕷️ Hubert 把鐵管舉高了……震波要來了，跳起來！', 'warn'); } return; }
+  // 設計師第七次紙條：Hubert 沒有鐵管了（就是一隻發著紅光的蜘蛛），改成跳到你頭上（leap4）；不再有震波
+  if (leap4(e, dt, 20 + n * 0.15, '🕷️ Hubert')) return;
   // 拆房子：去你家，找最近的一片打得破的外牆
   const home = G.home && G.b4.n ? homeTarget4(e) : null;
   e.home = !!home;
@@ -1958,12 +2087,12 @@ function updateHubert(e, dt) {
         e.smashCd = 1.6; e.swing = 0.35;
         damageWall4(home, 40, e);
         Sound.play('clang', nearVol(d)); G.shake = Math.max(G.shake, d < 6 ? 0.2 : 0.05);
-        if (!G.ev.hubertHomeTip) { G.ev.hubertHomeTip = 1; toast('🕷️ Hubert 在用鐵管拆你的家！一下就敲掉 40 點。玻璃板子牠拆不了。', 'warn'); }
+        if (!G.ev.hubertHomeTip) { G.ev.hubertHomeTip = 1; toast('🕷️ Hubert 在拆你的家！一腳就踹掉 40 點。玻璃板子牠拆不了。', 'warn'); }
       }
     }
   } else walkTo4(e, p.x, p.y, Math.min(1.4 + n * 0.005, 1.8) * (e.spawn > 0 ? 0.3 : 1), dt, flow);
   e.swing = Math.max(0, (e.swing || 0) - dt);
-  if (d < 1.0 && e.spawn <= 0 && p.inv <= 0 && !wallBetweenPts4(e.x, e.y, p.x, p.y)) { damage(20 + n * 0.15, 8); p.inv = 1.2; Sound.play('clang'); toast('🕷️ Hubert 用鐵管把你打飛了！', 'warn'); const a = Math.atan2(p.y - e.y, p.x - e.x); move(p, Math.cos(a) * 1.2, Math.sin(a) * 1.2, PLAYER_R); }
+  if (d < 1.0 && e.spawn <= 0 && p.inv <= 0 && !wallBetweenPts4(e.x, e.y, p.x, p.y)) { damage(20 + n * 0.15, 8); p.inv = 1.2; Sound.play('punch'); toast('🕷️ Hubert 把你撞飛了！', 'warn'); const a = Math.atan2(p.y - e.y, p.x - e.x); move(p, Math.cos(a) * 1.2, Math.sin(a) * 1.2, PLAYER_R); }
 }
 // Hubert 要拆的牆：家附近、打得破、離牠最近的外牆
 function homeTarget4(e) {
@@ -1975,7 +2104,7 @@ function homeTarget4(e) {
   }
   return best;
 }
-// 震波：從 Hubert 腳下往外擴散的紅色圓圈，經過你的時候你在地上就會被震倒
+// 震波：從怪物腳下往外擴散的紅色圓圈，經過你的時候你在地上就會被震倒（第五世界的怪物用：world5.js 的 ring5；Hubert 改成跳到頭上了）
 function updateWaves4(dt) {
   const p = G.p;
   for (const w of G.waves4) {
@@ -1983,8 +2112,8 @@ function updateWaves4(dt) {
     const d = Math.hypot(p.x - w.x, p.y - w.y);
     if (!w.hit && Math.abs(d - w.r) < 0.45 && d < w.max) {
       w.hit = true;
-      if (p.z < 0.25 && p.inv <= 0) { damage(20 + diffN() * 0.1, 8); p.stunT = 0.7; p.inv = 1; toast('🕷️ 紅色的震波把你震倒了！看到 Hubert 舉起鐵管就跳起來。', 'warn'); }
-      else if (p.z >= 0.25 && !G.ev.waveDodge) { G.ev.waveDodge = 1; toast('⤒ 跳起來躲過了震波！', 'good'); }
+      if (p.z - floorH(p.x, p.y) < 0.25 && p.inv <= 0) { damage((w.dmg || 20) + diffN() * 0.1, 8); p.stunT = 0.7; p.inv = 1; toast(w.msg || '💥 紅色的震波把你震倒了！看到圈圈過來就跳起來。', 'warn'); }
+      else if (p.z - floorH(p.x, p.y) >= 0.25 && !G.ev.waveDodge) { G.ev.waveDodge = 1; toast('⤒ 跳起來躲過了震波！', 'good'); }
     }
   }
   G.waves4 = G.waves4.filter(w => w.r < w.max + 0.5);
@@ -2052,7 +2181,7 @@ function spawnW4Monster(kind) {
   if (kind === 'shake') { e.spawn = 0; return; }   // 奶昔安安靜靜地躺在地上，不會有提示
   const tips = {
     mimic: ['🩸 你聽到有人在叫你的名字……那是朋友的聲音嗎？紅涎偽人會模仿朋友的聲音。躲在家裡的時候有人敲門，千萬不要開！', '🩸 那個「朋友」的聲音又出現了……'],
-    hubert: ['🕷️ 一隻黑色的大蜘蛛爬進了賣場，底下透著紅光……Hubert 專門拆房子，玻璃板子牠拆不了。看到牠舉起鐵管就跳起來。', '🕷️ Hubert 又來拆房子了……'],
+    hubert: ['🕷️ 一隻黑色的大蜘蛛爬進了賣場，底下透著紅光……Hubert 專門拆房子，玻璃板子牠拆不了。牠會跳到你頭上：看到牠蹲下就往旁邊跑。', '🕷️ Hubert 又來拆房子了……'],
     ember: ['👑 天花板開始落下火燼……燼皇降臨了。弱點是牠頭上的光環：抬頭用手電筒照著光環，牠就會跪下。燼雨來時躲到屋頂底下！', '👑 燼皇又來了……'],
   }[kind];
   if (tips) { toast(ev['tip_' + kind] ? tips[1] : tips[0], 'warn'); ev['tip_' + kind] = 1; }
@@ -2328,7 +2457,9 @@ function handSlot4() {
   const h = G.hand;
   const ic = h.k === 'plank' ? plankIcon(h.tier, h.door) : h.k === 'furn' ? '<div class="ic"><span>🛋️</span></div>' : itemIcon(h.id);
   const name = h.k === 'plank' ? plankName(h.tier, h.door) : h.k === 'furn' ? h.f.name : itemName(h.id);
-  return `<div class="slot hand" data-id="" title="手上：${name}"><span class="key">✋</span>${ic}<span class="cnt">${h.k === 'item' && h.n > 1 ? h.n : ''}</span></div>`;
+  // 設計師第七次紙條：手上可以拿兩個東西，右手只能拿手電筒、左手拿其他的 → 拿著東西時物品列最後面是「右手 🔦」「左手 ✋」兩格
+  const right = `<div class="slot hand rh${G.p.flash ? ' lit' : ''}" data-id="" title="右手：手電筒（${G.p.flash ? '開著' : '關著'}）"><span class="hl">右手</span><div class="ic"><span>🔦</span></div></div>`;
+  return right + `<div class="slot hand" data-id="" title="左手：${name}"><span class="hl">左手</span>${ic}<span class="cnt">${h.k === 'item' && h.n > 1 ? h.n : ''}</span></div>`;
 }
 
 // ====================================================================
@@ -2533,12 +2664,12 @@ function net4Apply(d) {
         const f = FURN_BY_ID[d.id];
         if (!f || (G.hand && G.hand.f === f)) break;
         if (!f.held) liftFurn4(f);
-        Object.assign(f, { x: d.x, y: d.y, w: d.w, h: d.h, side: d.side, yaw: d.yaw || 0, tx: d.tx || 0, tz: d.tz || 0 });
+        Object.assign(f, { x: d.x, y: d.y, w: d.w, h: d.h, side: d.side, yaw: d.yaw || 0, tx: d.tx || 0, tz: d.tz || 0, z: d.z > 0 ? +d.z : 0 });
         if (d.lean !== undefined) f.lean = d.lean;
         addFurn4(f);
         break;
       }
-      case 'pile': { const f = FURN_BY_ID[d.id]; if (f) { f.count = d.count; if (f.special && !f.count) dropSpecialPile4(f); } break; }
+      case 'pile': { const f = FURN_BY_ID[d.id]; if (f) { f.count = d.count; if (f.special && !f.count) dropSpecialPile4(f); else if (f.on && window.Renderer && Renderer.furn4) Renderer.furn4(f); } break; }
       case 'tv': { const f = FURN_BY_ID[d.id]; if (f) f.on = !!d.on; break; }
       case 'fuel': { const f = FURN_BY_ID[d.id]; if (f && Array.isArray(d.fuel)) { f.fuel = d.fuel.filter(q => q && ITEMS[q.id] && q.left > 0); Sound.play('fuelIn', nearVol(Math.hypot(f.x - G.p.x, f.y - G.p.y)) * 0.6); } break; }
       case 'store': {
@@ -2554,7 +2685,7 @@ function net4Apply(d) {
       case 'lampset': { const l = G.lamps.find(o => o.uid === d.uid); if (l) Object.assign(l, { bulb: d.bulb, type: d.type, dying: 0 }); break; }
       case 'unlamp': { const i = G.lamps.findIndex(l => l.uid === d.uid); if (i >= 0) G.lamps.splice(i, 1); break; }
       case 'loose': if (d.l && PLANKS[d.l.tier] && !G.loose4.some(l => l.uid === d.l.uid)) G.loose4.push({ ...d.l, k: 'plank' }); break;   // 朋友那邊掉在地上的板子（第五世界砍樹、工作台）
-      case 'lad4': { const f = FURN_BY_ID[d.id]; if (f) { f.lad = d.n; if (window.Renderer && Renderer.furn4) Renderer.furn4(f); } break; }   // 朋友從貨架拿走了長鋁梯
+      case 'lad4': { const bk = d.back && FURN_BY_ID[d.back]; if (bk && bk.type === 'lad4') { if (!bk.held) liftFurn4(bk); FURN.splice(FURN.indexOf(bk), 1); delete FURN_BY_ID[bk.id]; if (window.Renderer && Renderer.furn4) Renderer.furn4(bk, true); } const f = FURN_BY_ID[d.id]; if (f) { f.lad = d.n; if (window.Renderer && Renderer.furn4) Renderer.furn4(f); } break; }   // 朋友從貨架拿走了長鋁梯
       default: net5Apply(d);   // 第五世界：砍樹、合成的家具、沐浴球、閃電、記憶的光點（world5.js）
     }
   } finally { net4Mute = false; }
