@@ -6,7 +6,7 @@ const TILE = 32;
 let MAP_W = 44, MAP_H = 33;
 const MAP_SIZE = { 1: [44, 33], 2: [44, 33], 3: [59, 25], 4: [100, 76], 5: [80, 80] };   // 第四世界的大小在下面的 W4W、W4H
 // 白天和晚上多長（秒）：第四世界照設計師的要求，早上 5 分鐘、晚上 6 分鐘
-const DAY_SECS = { 1: 150, 2: 150, 3: 150, 4: 300, 5: 360 }, NIGHT_SECS = { 1: 150, 2: 150, 3: 150, 4: 360, 5: 300 };   // 第五世界：早上 6 分鐘、晚上 5 分鐘（設計圖）
+const DAY_SECS = { 1: 150, 2: 150, 3: 150, 4: 300, 5: 360 }, NIGHT_SECS = { 1: 150, 2: 150, 3: 150, 4: 240, 5: 300 };   // 第四世界：白天 5 分鐘、晚上 4 分鐘（設計師第七次紙條）   // 第五世界：早上 6 分鐘、晚上 5 分鐘（設計圖）
 
 // 房間（格子座標，含邊界）。level 越高，找到的燈泡越好
 // ROOMS_HOUSE 是第一、二世界的房子；ROOMS 是現在這個世界用的清單，換世界時由 roomsForWorld 重新填
@@ -656,7 +656,12 @@ const W4_ROOMS_TMPL = {
 };
 // 賣場的大小和十字主走道的位置（設計師：地圖太小，一下就走到邊邊了 → 100×76，大約是原本的三倍大）
 const W4W = 100, W4H = 76, W4AX = 49, W4AY = 37;   // 主走道：x 49～50（南北向）、y 37～38（東西向）
-const W4_MAP_VER = 3;   // 賣場的格局改版就加 1：舊存檔蓋的房子沒辦法放回新的地圖（見 world4.js 的 load4）
+const W4_MAP_VER = 4;   // 賣場的格局改版就加 1：舊存檔蓋的房子沒辦法放回新的地圖（見 world4.js 的 load4）
+// 設計師第七次紙條（照 3008）：賣場的天花板在 2040 studs（1 stud = 0.28 公尺 → 571.2 公尺）。往上爬：
+// 350 studs（98 公尺）起畫面變暗變窄、有心跳聲；1000、1900 studs（280、532 公尺）背景音樂會變；
+// 1742 studs（487.8 公尺）有一層懸浮的金屬網格；2024 studs（566.7 公尺）頭撞到天花板
+const W4_STUD = 0.28, W4_SKY = 2040 * W4_STUD, W4_DIM_H = 350 * W4_STUD, W4_MUSIC_H = [1000 * W4_STUD, 1900 * W4_STUD], W4_GRID_H = 1742 * W4_STUD, W4_TOP_H = 2024 * W4_STUD;
+const W4_PILLAR = 6;   // 柱子有幾格寬（6 公尺）
 const W4MAP = (() => {
   const rooms = [
     { id: 'store', name: '賣場', x: 1, y: 1, w: W4W - 2, h: W4H - 2, floor: 'store4', level: 1 },
@@ -720,7 +725,8 @@ const W4MAP = (() => {
   for (const x of [3, 11, 19, 27]) for (const y of [3, 14, 25]) racks.push(F('rack4', x, y, 2, 7, { side: (x / 8 | 0) % 2 ? 'w' : 'e', loot: 'tools4', lad: 1 }));
   // 板材堆：靠在貨架的頭尾（木頭最多，水泥、黃金少；岩漿、玻璃要靠神秘店員、禮物和偶爾出現的特別板材堆）
   const tiers = [1, 1, 2, 1, 1, 3, 1, 2, 1, 1, 1, 2, 1, 1, 1];
-  racks.forEach((r, i) => F('plankpile', r.x + (i % 2), i % 3 === 1 ? r.y + r.h : r.y - 1, 1, 1, { tier: tiers[i], lean: i % 3 === 1 ? 'n' : 's' }));
+  // 設計師第七次紙條：木板全放到鐵架上 → 板材堆不佔地板，疊在貨架頭尾那一格的第一層層板上（on：哪一座貨架；不擋路）
+  racks.forEach((r, i) => F('plankpile', r.x + (i % 2), i % 3 === 1 ? r.y + r.h - 1 : r.y, 1, 1, { tier: tiers[i], on: r.id, solid: false }));
   for (const [x, y] of [[1, 1], [30, 1], [1, 35], [7, 12], [19, 23], [30, 34], [13, 34]]) F('crate4', x, y, 1, 1, { loot: 'tools4' });
   // 西北的雜貨區：一排一排雙面的貨架（上面是真的商品，可以一個一個拿）
   Z('雜貨區', 31, 7, 18, 30);
@@ -777,13 +783,19 @@ const W4MAP = (() => {
   floors.push({ x: W4AX, y: 1, w: 2, h: W4H - 2, floor: 'aisle4' }, { x: 1, y: W4AY, w: W4AX - 1, h: 2, floor: 'aisle4' }, { x: W4AX + 2, y: W4AY, w: W4W - W4AX - 3, h: 2, floor: 'aisle4' });
   // 柱子（3008 那種方形的灰色水泥柱）：放在空地上，旁邊不能是牆或家具，也不能在主走道上
   const freeAt = (x, y) => !wallSet.has(x + ',' + y) && !used.has(x + ',' + y) && x > 0 && y > 0 && x < W4W - 1 && y < W4H - 1 && x !== W4AX && x !== W4AX + 1 && y !== W4AY && y !== W4AY + 1 && !doors.some(d => d.x === x && d.y === y);
-  for (let x = 6; x < W4W - 2; x += 8) for (let y = 6; y < W4H - 2; y += 8) {
-    let ok = true;
-    for (let dy = -1; dy <= 1 && ok; dy++) for (let dx = -1; dx <= 1; dx++) if (!freeAt(x + dx, y + dy)) { ok = false; break; }
-    if (ok && !(x >= W4AX - 6 && x <= W4AX + 7 && y >= W4H - 9)) W(x, y);   // 入口前面留空
+  // 設計師第七次紙條：柱子粗點（5.6～8.4 公尺）→ 6×6 格的大柱子，一直通到 571 公尺高的天花板；數量少很多（彼此至少隔 22 格），
+  // 四周留一格空地。板子可以一半插進柱子裡固定（world4.js 的 ghost4）
+  const pillars = [];
+  const blockFree = (x, y) => { for (let dy = -1; dy <= W4_PILLAR; dy++) for (let dx = -1; dx <= W4_PILLAR; dx++) if (!freeAt(x + dx, y + dy)) return false; return true; };
+  for (let y = 2; y < W4H - W4_PILLAR - 2; y++) for (let x = 2; x < W4W - W4_PILLAR - 2; x++) {
+    if (pillars.some(p => Math.abs(p[0] - x) < 22 && Math.abs(p[1] - y) < 22)) continue;
+    if (x + W4_PILLAR >= W4AX - 8 && x <= W4AX + 9 && y + W4_PILLAR >= W4H - 12) continue;   // 入口前面留空
+    if (!blockFree(x, y)) continue;
+    pillars.push([x, y, W4_PILLAR]);
+    for (let dy = 0; dy < W4_PILLAR; dy++) for (let dx = 0; dx < W4_PILLAR; dx++) W(x + dx, y + dy);
   }
   const walls = [...wallSet].map(k => k.split(',').map(Number));
-  return { rooms, walls, doors, furn, zones, floors, cubes };
+  return { rooms, walls, doors, furn, zones, floors, cubes, pillars };
 })();
 // 第四世界的固定位置：起點（入口，面向北邊）、晚上店員從員工專用區走出來的地方、墮落戰神在主走道巡邏的四個端點
 const W4 = {
@@ -808,6 +820,12 @@ const W5_MAP_VER = 1;
 const W5_WEATHER = { 1: [], 2: ['rain', 'fog'], 3: ['cold'], 4: ['rain', 'red'], 5: ['acid'], 6: ['rain'], 7: ['storm'], 8: ['cold', 'fog'], 9: ['rain', 'red'], 10: ['acid'], 11: ['rain'], 12: ['cold', 'rain'] };
 const wx5 = (d, k) => (W5_WEATHER[d] || []).includes(k);
 const RED_MOON_W5 = [4, 9], COLD_DAYS_W5 = [3, 8, 12];
+// 設計師第七次紙條：第五世界有些樹的樹幹是水泥、黃金、岩漿、玻璃方塊（方塊狀的樹幹），砍倒就掉那種方塊。
+// 照位置算（不動用排地圖的亂數，舊存檔的樹位置不變）：大約七棵有一棵，水泥最多、玻璃最少。回傳 0（普通的樹）或 2～5
+function oreAt5(x, y) {
+  const h = (Math.imul(x, 73856093) ^ Math.imul(y, 19349663)) >>> 0, k = h % 1000;
+  return k < 60 ? 2 : k < 100 ? 3 : k < 125 ? 4 : k < 145 ? 5 : 0;
+}
 const W5MAP = (() => {
   let sd = 5150505;
   const r = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
@@ -852,7 +870,7 @@ const W5MAP = (() => {
   const forests = [[6, 4, 26, 18, 0.16], [66, 30, 12, 20, 0.12], [64, 60, 14, 16, 0.12], [2, 2, W5W - 4, W5H - 4, 0.022]];
   for (const [x0, y0, w, h, dens] of forests)
     for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++)
-      if (r() < dens && free(x, y, 1)) F('tree5', x, y, 1, 1, { kind: Math.floor(r() * 4), big: 0.8 + r() * 0.5, grow: r() < 0.42 ? 'tree5' : null, rot: r() * 6.28 });
+      if (r() < dens && free(x, y, 1)) F('tree5', x, y, 1, 1, { kind: Math.floor(r() * 4), big: 0.8 + r() * 0.5, grow: r() < 0.42 ? 'tree5' : null, rot: r() * 6.28, ore: oreAt5(x, y) });
   // 花：西南邊的花海密一點；有些花上面長著東西
   const fields = [[4, 44, 24, 30, 0.13], [2, 2, W5W - 4, W5H - 4, 0.018]];
   for (const [x0, y0, w, h, dens] of fields)

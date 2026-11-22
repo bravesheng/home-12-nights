@@ -88,6 +88,7 @@ const Sound = (() => {
     hurt() { noise(0.35, 0.5, 400, 0, 0.7); tone(150, 0.3, 'sawtooth', 0.15, 60); },
     ring() { for (let i = 0; i < 6; i++) tone(i % 2 ? 480 : 440, 0.08, 'square', 0.06, null, i * 0.09); },
     whisper() { for (let i = 0; i < 5; i++) noise(0.4, 0.12, 2500 + Math.random() * 2000, i * 0.25, 4); },
+    whoosh() { noise(0.45, 0.25, 900, 0, 0.8); tone(260, 0.4, 'sine', 0.05, 90); },
     heartbeat() { tone(55, 0.15, 'sine', 0.5, 40); tone(50, 0.15, 'sine', 0.4, 38, 0.22); },
     dissolve() { noise(0.5, 0.25, 1200, 0, 0.8); tone(300, 0.5, 'sine', 0.05, 80); },
     tall() { tone(45, 2.5, 'sawtooth', 0.12, 35); tone(47, 2.5, 'sawtooth', 0.1, 33); noise(1.5, 0.15, 150, 0, 1); },
@@ -389,8 +390,60 @@ const Sound = (() => {
     if (Math.random() < 0.5) noise(0.02, vol * 0.7, 5000, t0 - ac.currentTime + rnd(0.1, 0.4), 3, musicIn);
   }
 
+  // ---------- 第四世界的背景音（設計師第七次紙條） ----------
+  // 白天：廣播系統放的環境背景音樂，曲風平緩、沒有歌詞，營造「閾限空間」的心理恐怖 → 像從天花板的小喇叭傳出來的
+  //   電鋼琴慢慢彈大七和弦的分散和弦（帶通濾波，聽起來又薄又遠），偶爾走音一下
+  // 晚上：低沉、延伸的環境底噪，加上不和諧的長音（小二度疊在一起慢慢拍動），像空曠的大賣場裡的回音
+  // 寒寂之境：冰冷、孤寂的高長音（另外有呼嘯的風聲 setWind）
+  // 爬得很高（1000、1900 studs）：altZone 1 整個降五度、更慢；altZone 2 只剩又高又細的不和諧長音
+  let altZone = 0, coldOn = false;
+  const PA_CHORDS = [[60, 64, 67, 71], [57, 60, 64, 67], [53, 57, 60, 64], [55, 59, 62, 64]];   // Cmaj7、Am7、Fmaj7、G6
+  function paNote(freq, t0, vol, dur) {
+    const o = ac.createOscillator(), o2 = ac.createOscillator(), g = ac.createGain(), f = ac.createBiquadFilter();
+    o.type = 'triangle'; o.frequency.value = freq; o2.type = 'sine'; o2.frequency.value = freq * 2.01;
+    f.type = 'bandpass'; f.frequency.value = 1100; f.Q.value = 0.9;   // 小喇叭：只剩中間的頻率
+    g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(vol, t0 + 0.04); g.gain.exponentialRampToValueAtTime(0.0005, t0 + dur);
+    const g2 = ac.createGain(); g2.gain.value = 0.25;
+    o.connect(f); o2.connect(g2); g2.connect(f); f.connect(g); g.connect(musicIn);
+    o.start(t0); o2.start(t0); o.stop(t0 + dur + 0.05); o2.stop(t0 + dur + 0.05);
+  }
+  function longTone(freq, t0, dur, vol, type = 'sine') {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t0); o.frequency.linearRampToValueAtTime(freq * rnd(0.985, 1.015), t0 + dur);
+    g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(vol, t0 + dur * 0.4); g.gain.linearRampToValueAtTime(0, t0 + dur);
+    o.connect(g); g.connect(musicIn);
+    o.start(t0); o.stop(t0 + dur + 0.05);
+  }
+  function scheduleStore4(night, inten) {
+    const drop = altZone === 1 ? Math.pow(2, -7 / 12) : 1;
+    if (altZone === 2) {   // 快到天花板了：又高又細的不和諧長音
+      const f = rnd(1400, 2600), dur = rnd(5, 9);
+      longTone(f, nextNote, dur, 0.012); longTone(f * Math.pow(2, 1 / 12), nextNote + rnd(0.3, 1.5), dur, 0.009);
+      nextNote += rnd(2.5, 5);
+      return;
+    }
+    if (coldOn && Math.random() < 0.35) { const f = mtof([81, 84, 88, 93][Math.floor(Math.random() * 4)]); longTone(f, nextNote + rnd(0, 2), rnd(7, 11), 0.011); }   // 冰冷、孤寂的長音
+    if (night) {
+      const base = mtof([33, 36, 38, 31][seq % 4]) * drop, dur = rnd(9, 14);
+      longTone(base, nextNote, dur, 0.07, 'sine');
+      longTone(base * Math.pow(2, 1 / 12) * 2, nextNote + rnd(1, 3), dur * 0.8, 0.018 + inten * 0.02, 'triangle');   // 小二度：不和諧
+      if (Math.random() < 0.5 + inten * 0.3) longTone(base * Math.pow(2, 6 / 12) * 4, nextNote + rnd(2, 5), dur * 0.6, 0.008 + inten * 0.012);   // 三全音
+      seq++;
+      nextNote += dur * rnd(0.45, 0.7);
+      return;
+    }
+    const ch = PA_CHORDS[Math.floor(seq / 8) % PA_CHORDS.length], i = seq % 8, beat = altZone === 1 ? 1.2 : 0.72;
+    seq++;
+    if (i !== 7 && !(i === 3 && Math.random() < 0.5)) {
+      const cents = Math.random() < 0.06 ? rnd(-45, -20) : 0;   // 偶爾走音一下
+      paNote(mtof(ch[[0, 1, 2, 3, 2, 1, 2, 3][i]]) * drop * Math.pow(2, cents / 1200), nextNote, 0.05, 2.6);
+      if (i === 0) paNote(mtof(ch[0] - 12) * drop, nextNote, 0.045, 4.5);
+    }
+    nextNote += beat;
+  }
   function scheduleNote(state, inten, world) {
     const night = state === 'night', title = state === 'title';
+    if (world === 4 && !title) { scheduleStore4(night, inten); return; }
     const tune = title || world === 1 ? LULLABY : world === 3 ? (night ? GONGXI : MORNING) : RISE;
     const [semi, beats] = tune[seq % tune.length];
     seq++;
@@ -445,7 +498,7 @@ const Sound = (() => {
       musicOut.gain.setTargetAtTime(on * MUSIC_VOL, now, on ? 1.2 : 0.4);
     }
     if (!on) { curState = ''; return; }
-    const key = state + ':' + world;
+    const key = state + ':' + world + ':' + (world === 4 ? altZone : 0);
     if (key !== curState) {
       curState = key; seq = 0;
       nextNote = now + 1; nextPad = now + 0.5; nextFx = now + rnd(3, 6);
@@ -456,7 +509,12 @@ const Sound = (() => {
     while (nextNote < now + 0.25) scheduleNote(state, inten, world);
 
     if (nextPad < now + 0.25) {
-      if (state === 'night') {
+      if (world === 4 && state !== 'title') {
+        // 第四世界：白天一層很淡的墊底和弦；晚上是低沉的環境底噪（濾得很悶的和弦）
+        const dur = rnd(12, 16);
+        if (altZone < 2) pad(state === 'night' ? [33, 40, 45] : [48, 55, 59], nextPad, dur, state === 'night' ? 0.045 + inten * 0.03 : 0.012, state === 'night' ? 220 + inten * 300 : 600);
+        nextPad += dur * rnd(0.6, 0.8);
+      } else if (state === 'night') {
         const dur = rnd(10, 13);
         pad(NIGHT_CHORDS[Math.floor(Math.random() * NIGHT_CHORDS.length)], nextPad, dur, 0.035 + inten * 0.05, 350 + inten * 1100);
         nextPad += dur * rnd(0.55, 0.75);
@@ -467,7 +525,8 @@ const Sound = (() => {
       }
     }
     if (state === 'night' && nextFx < now + 0.25) {
-      if (Math.random() < 0.45 + inten * 0.3) wail(nextFx, 0.018 + inten * 0.025);
+      if (world === 4) { if (Math.random() < 0.5) boom(nextFx, 0.2 + inten * 0.2); }   // 賣場：遠處「碰」的一聲回音，沒有哭聲
+      else if (Math.random() < 0.45 + inten * 0.3) wail(nextFx, 0.018 + inten * 0.025);
       else boom(nextFx, 0.25 + inten * 0.2);
       nextFx += rnd(5, 10) * (1 - inten * 0.5);
     }
@@ -522,8 +581,31 @@ const Sound = (() => {
     rainG.gain.setTargetAtTime(level * 0.32, ac.currentTime, 0.6);
   }
 
+  // 呼嘯的風聲（第四世界的寒寂之境：持續播放；帶通濾波的雜訊，頻率慢慢上上下下）
+  let windG = null;
+  function setWind(level) {
+    if (!ac) return;
+    coldOn = level > 0;
+    if (!windG) {
+      if (level <= 0) return;
+      const len = ac.sampleRate * 4, buf = ac.createBuffer(1, len, ac.sampleRate), d = buf.getChannelData(0);
+      let lp = 0;
+      for (let i = 0; i < len; i++) { lp += ((Math.random() * 2 - 1) - lp) * 0.08; d[i] = lp * 2.2; }
+      const src = ac.createBufferSource(); src.buffer = buf; src.loop = true;
+      const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 520; f.Q.value = 2.2;
+      const lfo = ac.createOscillator(), lg = ac.createGain(); lfo.frequency.value = 0.13; lg.gain.value = 260; lfo.connect(lg); lg.connect(f.frequency); lfo.start();
+      const lfo2 = ac.createOscillator(), lg2 = ac.createGain(); lfo2.frequency.value = 0.31; lg2.gain.value = 110; lfo2.connect(lg2); lg2.connect(f.frequency); lfo2.start();
+      windG = ac.createGain(); windG.gain.value = 0;
+      src.connect(f); f.connect(windG); windG.connect(master);
+      src.start();
+    }
+    windG.gain.setTargetAtTime(level * 0.5, ac.currentTime, 0.8);
+  }
+
   return {
     init,
+    setWind,
+    setAlt(z) { altZone = z | 0; },
     setStatic,
     setFire,
     setRain,

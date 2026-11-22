@@ -33,7 +33,7 @@
 //     '@start' { world, day }（客人進到房主的世界；房主換世界時客人跟著換，會再發一次）、'@close' { why }（自己離開房間或斷線）
 //   type 不能用 _ 或 @ 開頭（內部用）；data 要能 JSON 化；大的訊息會自動切塊（PeerJS 一次只能送 16KB）
 
-const NET_VER = 5;                      // 連線的訊息格式版本：改了就加 1（版本不一樣的平板會被擋下來，請它更新）
+const NET_VER = 6;                      // 連線的訊息格式版本：改了就加 1（版本不一樣的平板會被擋下來，請它更新）
 const NET_PREFIX = 'home12-';           // PeerJS 的 id：home12-ABCD
 const NET_MAX = 4;                      // 一個房間最多幾個人（房主加 3 個客人）
 const NET_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // 房間代碼：大寫字母和數字，不用 0/O、1/I（看起來很像）
@@ -44,7 +44,7 @@ const NET_TIMEOUT = 15000;              // 15 秒沒收到對方的東西就當�
 const NET_AWAY = 60000;                 // 切到別的 App 超過 60 秒就當成離開了（人物早就先藏起來了）
 const NET_AWAY_QUIET = 8000;            // 切到別的 App 之後 8 秒都沒有消息（多半是把 App 關掉了）也當成離開了
 const NET_CHUNK = 6000;                 // 一塊最多幾個字（中文 3 個位元組，6000 字也在 PeerJS 的 16KB 以內）
-const NET_DIE_SECS = 10;                // 晚上有人倒下，今晚多幾秒（設計師：一個人死掉其他人不會重來，只是天黑會加 10 秒）
+const NET_DIE_SECS = 5;   // 有人倒下：今晚多 5 秒，再有人倒下再加 5 秒（設計師第七次紙條：不用重回早上，只會每晚加 5 秒，以此類推）
 const NET_DOWN_DAY = 20;                // 客人白天倒下幾秒後醒來
 const NET_TEST = /[?&]nettest(?:[=&]|$)/.test(location.search);
 

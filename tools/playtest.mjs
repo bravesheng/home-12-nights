@@ -1063,7 +1063,7 @@ await scenario('w4', '第四世界第 1 天（?world=4&kit=1）：100×76 的大
   check(s.hud && s.day === 1 && s.phase === 'day', `要在第四世界第 1 天早上（現在：${s.label}）`);
   const info = await page.evaluate(() => ({ world: curWorld, w: MAP_W, h: MAP_H, loose: G.loose4.length, day: DAY_LEN, night: NIGHT_LEN, bag: bagUsed(), piles: FURN.filter(f => f.type === 'plankpile' && f.count > 0).length, staff: G.enemies.filter(e => e.kind === 'staff' && e.idle).length }));
   check(info.world === 4 && info.w === 100 && info.h === 76, `第四世界的地圖要是 100×76（世界 ${info.world}、${info.w}×${info.h}）`);
-  check(info.day === 300 && info.night === 360, `白天 5 分鐘、晚上 6 分鐘（${info.day}／${info.night} 秒）`);
+  check(info.day === 300 && info.night === 240, `白天 5 分鐘、晚上 4 分鐘（${info.day}／${info.night} 秒）`);
   check(info.loose >= 4 && info.piles >= 10, `入口旁邊的地上要有板子、倉儲區要有板材堆（地上 ${info.loose} 片、板材堆 ${info.piles} 堆）`);
   check(info.bag <= 16, `kit 帶的東西不能超過背包 16 格（${info.bag} 格）`);
   check(info.staff >= 2, `白天賣場裡要站著不動的店員（${info.staff} 隻）`);
@@ -1397,6 +1397,152 @@ await scenario('w4night', '第四世界的晚上（?world=4&night=2&kit=1）：�
   await page.evaluate(() => { G.phase = 'day'; G.t = 100; G.enemies = []; Object.assign(MERCHANT_POS, { x: 49.9, y: 47.6 }); Object.assign(G.p, { x: 49.9, y: 50.3, face: -Math.PI / 2, pitch: 0.05, flash: false }); });
   await sleep(1800);
   await shot('3-clerk');
+});
+
+await scenario('n7', '設計師第七次紙條：板子放在貨架上、拿出來的東西放得回去、天花板選樓層、梯子架在天花板上、粗柱子、571 公尺的天花板和爬高的效果、SCP-3008-2 和 Hubert 跳到頭上、怪物是實體、第五世界樹幹裡的特別方塊、怪物的震波、平平看著也拿得起方塊', {}, async ({ page, shot, check }) => {
+  await page.goto(BASE + '?world=4&kit=1', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play' && curWorld === 4, null, { timeout: 60000 });
+  const base = await page.evaluate(() => {
+    const piles = FURN.filter(f => f.type === 'plankpile' && !f.special);
+    return { pillars: W4MAP.pillars.length, pw: W4MAP.pillars[0][2], pwall: W4MAP.pillars.every(([x, y]) => tiles[y][x] === 0 && pillarAt4(x + 2, y + 2)),
+      piles: piles.length, onRack: piles.every(f => f.on && FURN_BY_ID[f.on] && furnGrid[f.y][f.x] === FURN_BY_ID[f.on]), night: NIGHT_SECS[4], key: (G.stock || []).some(s => s.id === 'key'), sky: W4_SKY };
+  });
+  check(base.pillars >= 3 && base.pw === 6 && base.pwall, `柱子要是 6×6 格的大柱子（${JSON.stringify(base)}）`);
+  check(base.piles >= 10 && base.onRack, `板材堆要全部放在貨架上，不佔地板（${JSON.stringify(base)}）`);
+  check(base.night === 240 && !base.key && Math.abs(base.sky - 571.2) < 0.01, `晚上 4 分鐘、神秘店員不賣鑰匙、天花板 571.2 公尺（${JSON.stringify(base)}）`);
+  // 從貨架拿板子、放回去；拿梯子、放回去
+  const back = await page.evaluate(() => {
+    G.enemies = []; G.hand = null;
+    const f = FURN.find(o => o.type === 'plankpile' && o.on), rack = FURN_BY_ID[f.on], n0 = f.count;
+    Object.assign(G.p, { x: rack.x - 0.6, y: f.y + 0.5, z: 0, face: 0, pitch: 0 });
+    const c = []; addTargets4(c);
+    const hasPile = c.some(t => t.id === 'pile:' + f.id);
+    takeFromPile4(f);
+    const got = G.hand && G.hand.k === 'plank', n1 = f.count, b = backSpot4(G.hand);
+    if (b) b.act();
+    const r1 = { hasPile, got, n0, n1, n2: f.count, hand: !!G.hand, label: b && b.label };
+    takeLadder4(rack);
+    const lad = G.hand && G.hand.f && G.hand.f.type === 'lad4', id = lad && G.hand.f.id, b2 = backSpot4(G.hand);
+    if (b2) b2.act();
+    return { ...r1, lad, back2: !!b2, ladN: rack.lad, gone: !FURN_BY_ID[id], hand2: !!G.hand };
+  });
+  check(back.hasPile && back.got && back.n1 === back.n0 - 1 && back.n2 === back.n0 && !back.hand, `貨架上的板子：拿一片、站在旁邊按住 E 放回去（${JSON.stringify(back)}）`);
+  check(back.lad && back.back2 && back.ladN === 1 && back.gone && !back.hand2, `長鋁梯拿出來可以再放回貨架（${JSON.stringify(back)}）`);
+  // 天花板選樓層；站在天花板上再往上蓋；梯子架在天花板上
+  const lv = await page.evaluate(() => {
+    const x0 = W4AX - 12, y0 = W4H - 14;
+    for (const f of [...FURN]) if (!f.held && f.move && Math.abs(f.x - x0) < 6 && Math.abs(f.y - y0) < 6) liftFurn4(f);
+    Object.assign(G.p, { x: x0 + 0.5, y: y0 + 0.5, z: 0, face: 0, pitch: 0 });
+    holdThing({ k: 'plank', tier: 1 }); setRoofLevel4(3);
+    const g1 = ghost4(); place4();
+    const h1 = roofsAt4(Math.round(G.p.x + bld().dist), Math.round(G.p.y)).map(roofH4);
+    // 站到那片 6 公尺的天花板上
+    const r = roofList4().find(o => roofH4(o) === 6);
+    Object.assign(G.p, { x: r.x + 0.5, y: r.y + 1, z: 6.04, vz: 0 });
+    holdThing({ k: 'plank', tier: 1 }); setRoofLevel4(5);
+    const g2 = ghost4(); place4();
+    const hs = roofList4().map(roofH4).sort((a, b) => a - b);
+    // 梯子：站在 6 公尺的天花板上架
+    const rack = FURN.find(o => o.type === 'rack4' && o.lad > 0);
+    takeLadder4(rack);
+    Object.assign(G.p, { x: r.x + 0.5, y: r.y + 1, z: 6.04, face: 0 }); bld().dist = 1.2;
+    const g3 = ghost4(); place4();
+    const lad = FURN.find(o => o.type === 'lad4' && !o.held), L = ladderList4().find(o => o.f === lad);
+    let top = 0;
+    if (L) { startClimb4(L, true); for (let i = 0; i < 40; i++) updateClimb4(0.05, 1); top = G.p.z; letGoLadder4(); }
+    const sv = save4();
+    return { g1: g1 && [g1.kind, g1.h, g1.ok], h1, g2: g2 && [g2.kind, g2.h, g2.ok], hs, g3: g3 && [g3.ok, g3.z, g3.why], ladZ: lad && lad.z, grid: lad && furnGrid[lad.y][lad.x] === lad, z0: L && L.z0, top,
+      saved: sv.roofs.map(q => q[6]).sort((a, b) => a - b), ladSaved: (sv.furn.find(q => q.id === (lad || {}).id) || {}).z };
+  });
+  check(lv.g1 && lv.g1[0] === 'roof' && lv.g1[1] === 6 && lv.g1[2] && lv.h1.includes(6), `天花板選第 3 層：放在 6 公尺（${JSON.stringify(lv)}）`);
+  check(lv.g2 && lv.g2[1] === 16 && lv.g2[2] && lv.hs.join() === '6,16' && lv.saved.join() === '6,16', `站在 6 公尺的天花板上選第 5 層：放在 16 公尺，存檔記得高度（${JSON.stringify(lv)}）`);
+  check(lv.g3 && lv.g3[0] && lv.ladZ > 5.5 && !lv.grid && lv.z0 > 5.5 && lv.top > 8 && lv.ladSaved > 5.5, `梯子可以架在天花板上往上爬（不佔地上的格子，存檔記得高度）（${JSON.stringify(lv)}）`);
+  await page.evaluate(() => { const r = roofList4().find(o => roofH4(o) === 6); Object.assign(G.p, { x: r.x + 1, y: r.y + 1.6, z: 6.04, vz: 0, face: -0.6, pitch: 0.25 }); G.hand = null; });
+  await sleep(1200);
+  await shot('1-ladder-on-roof');
+  // 爬得很高：畫面變暗、心跳；頭頂是 2024 studs
+  const alt = await page.evaluate(() => {
+    const p = G.p, keep = { x: p.x, y: p.y, z: p.z };
+    p.z = 60; ambient4(0.1); const a0 = G.altFx;
+    p.z = 200; ambient4(0.1); overlays4(); const a1 = G.altFx, op = +document.getElementById('altfx').style.opacity;
+    const head = headroom4(W4AX + 0.5, W4H - 6, 560);
+    Object.assign(p, keep); ambient4(0.1); overlays4();
+    return { a0, a1, op, head, top: W4_TOP_H };
+  });
+  check(alt.a0 === 0 && alt.a1 > 0.3 && alt.op > 0.4 && Math.abs(alt.head - (alt.top - 1.8)) < 0.01, `爬到 98 公尺以上畫面變暗，頭最高到 2024 studs（${JSON.stringify(alt)}）`);
+  // SCP-3008-2 和 Hubert 跳到頭上（普通晚上 4～6 公尺、紅月 12～13 公尺）
+  const leap = await page.evaluate(() => {
+    G.phase = 'night'; G.t = 30; G.enemies = []; G.hand = null; G.ev.blood = false;
+    const out = {};
+    for (const [kind, upd, dist, blood] of [['hubert', updateHubert, 5, false], ['staff', updateStaff, 5, false], ['staff', updateStaff, 12.5, true], ['hubert', updateHubert, 9, false]]) {
+      G.enemies = []; G.ev.blood = blood;
+      Object.assign(G.p, { x: W4AX + 0.5, y: W4H - 20, z: 0, hp: 100, inv: 0, stunT: 0 });
+      const e = spawnEnemy(kind, { x: G.p.x, y: G.p.y - dist }); e.spawn = 0; e.idle = false; e.state = 'chase'; e.face = Math.PI / 2; e.leapCd = 0;
+      let air = 0, started = false;
+      for (let i = 0; i < 60; i++) { upd(e, 0.05); if (e.leap) started = true; air = Math.max(air, e.z || 0); if (started && !e.leap) break; }
+      out[kind + dist] = { started, air: Math.round(air * 10) / 10, d: Math.round(Math.hypot(e.x - G.p.x, e.y - G.p.y) * 10) / 10, hp: Math.round(G.p.hp) };
+    }
+    G.ev.blood = false; G.enemies = []; G.p.hp = 100; G.p.inv = 0;
+    return out;
+  });
+  check(leap.hubert5.started && leap.hubert5.air > 1 && leap.hubert5.hp < 100 && leap.staff5.started && leap.staff5.hp < 100, `Hubert 和 SCP-3008-2 在 5 公尺外要跳到你頭上、扣血（${JSON.stringify(leap)}）`);
+  check(leap['staff12.5'].started && leap['staff12.5'].hp < 100 && !leap.hubert9.started, `紅月跳 12～13 公尺；普通的晚上 9 公尺外不跳（${JSON.stringify(leap)}）`);
+  // 怪物是實體：疊在你身上會被推開
+  const body = await page.evaluate(() => {
+    G.enemies = []; Object.assign(G.p, { x: W4AX + 0.5, y: W4H - 20, z: 0 });
+    const a = spawnEnemy('shadow', { x: G.p.x + 0.15, y: G.p.y }), b = spawnEnemy('shadow', { x: G.p.x + 3, y: G.p.y }), c = spawnEnemy('shadow', { x: G.p.x + 3.1, y: G.p.y });
+    for (const e of [a, b, c]) e.spawn = 0;
+    for (let i = 0; i < 4; i++) solidBodies();
+    const r = { me: Math.hypot(a.x - G.p.x, a.y - G.p.y), each: Math.hypot(b.x - c.x, b.y - c.y) };
+    G.enemies = [];
+    return r;
+  });
+  check(body.me >= 0.5 && body.each >= 0.5, `怪物是實體：不會跟你、跟別的怪物疊在一起（${JSON.stringify(body)}）`);
+  // 口哨：畫面不能變成一片黑（只多了紅色的影子）
+  await page.evaluate(() => { G.phase = 'day'; G.t = 60; G.hand = null; Object.assign(G.p, { x: W4AX + 0.5, y: W4H - 8, z: 0, face: -Math.PI / 2, pitch: 0 }); const e = spawnEnemy('staff', { x: G.p.x, y: G.p.y - 6 }); e.spawn = 0; e.idle = true; G.whistleCd = 0; });
+  await sleep(600);
+  await page.evaluate(() => whistle4());
+  await sleep(900);
+  await shot('2-whistle-not-black');
+  const wb = await page.evaluate(() => { const st = Renderer.whistle ? Renderer.whistle() : null; const cv = document.querySelector('canvas'); const c = document.createElement('canvas'); c.width = 64; c.height = 36; const x = c.getContext('2d'); Renderer.render(); x.drawImage(cv, 0, 0, 64, 36); const d = x.getImageData(0, 0, 64, 36).data; let s = 0; for (let i = 0; i < d.length; i += 4) s += d[i] + d[i + 1] + d[i + 2]; return { red: st && st.red, avg: s / (d.length / 4) / 3 }; });
+  check(wb.avg > 60, `吹口哨時畫面不能變黑（平均亮度 ${wb.avg.toFixed(0)}，紅色的影子 ${wb.red}）`);
+  // 第五世界：樹幹是特別方塊的樹、怪物的震波、平平看著也拿得起方塊
+  await page.goto(BASE + '?world=5&kit=1', { waitUntil: 'load' });
+  await page.waitForFunction(() => mode === 'play' && curWorld === 5, null, { timeout: 60000 });
+  const w5 = await page.evaluate(() => {
+    G.enemies = [];
+    const ores = FURN.filter(f => f.type === 'tree5' && f.ore), all = FURN.filter(f => f.type === 'tree5').length, f = ores[0];
+    fellTree5(f, true);
+    const drop = G.pickups.find(p => p.id === 'blk' + f.ore);
+    // 震波和生氣
+    const sp = W5.start || G.p;
+    Object.assign(G.p, { x: sp.x, y: sp.y, z: 0, hp: 100, inv: 0 });
+    const e = spawnEnemy('green', { x: G.p.x + 5, y: G.p.y }); e.spawn = 0; e.ringCd = 0;
+    G.waves4 = [];
+    updateGreen5(e, 0.05);
+    const ring = G.waves4.length;
+    e.hp -= 3; updateGreen5(e, 0.05);
+    const rage = e.rage > 0;
+    for (let i = 0; i < 40 && G.p.hp === 100; i++) updateWaves4(0.05);
+    const hp = G.p.hp;
+    G.enemies = []; G.waves4 = [];
+    // 方塊：放在面前的地上，平平地看著也有「拿起」
+    G.hand = null; G.p.hp = 100; G.p.inv = 0;
+    let spot = null;
+    for (let y = 5; y < MAP_H - 5 && !spot; y++) for (let x = 5; x < MAP_W - 5; x++) if ([0, 1, 2].every(i => tiles[y][x + i] === 1 && !furnGrid[y][x + i] && !W5MAP.wet.has((x + i) + ',' + y))) { spot = { x, y }; break; }
+    Object.assign(G.p, { x: spot.x + 0.5, y: spot.y + 0.5, z: 0, face: 0, pitch: 0 });
+    setVox5(spot.x + 1, spot.y, 0, 1);
+    const c = []; blockTargets5(c);
+    const n0 = G.inv.blk1 || 0;
+    if (c[0]) c[0].action();
+    return { ores: ores.length, all, ore: f.ore, drop: drop && drop.n, ring, rage, hp, take: c.length, got: (G.inv.blk1 || 0) - n0, left: !!voxAt5(spot.x + 1, spot.y, 0) };
+  });
+  check(w5.ores >= 8 && w5.ores < w5.all / 3 && w5.drop === 3, `有些樹的樹幹是特別方塊，砍倒掉 3 個那種方塊（${JSON.stringify(w5)}）`);
+  check(w5.ring === 1 && w5.rage && w5.hp < 100, `第五世界的怪物會放震波、被打會生氣（${JSON.stringify(w5)}）`);
+  check(w5.take === 1 && w5.got === 1 && !w5.left, `平平地看著前面的方塊也拿得起來（${JSON.stringify(w5)}）`);
+  await page.evaluate(() => { const f = FURN.find(o => o.type === 'tree5' && o.ore && !o.cut); Object.assign(G.p, { x: f.x + 0.5, y: f.y + 3.2, z: 0, face: -Math.PI / 2, pitch: 0.15 }); });
+  await sleep(1200);
+  await shot('3-ore-tree');
 });
 
 await scenario('w4wx', '第四世界的天氣（寒寂之境下雪、酸雨、紅月長草）、燈泡圖鑑（燈泡、手電筒 1～7 級、板子五級）、生物圖鑑的第四世界', {}, async ({ page, shot, check }) => {
